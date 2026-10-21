@@ -40,8 +40,8 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     await seedBuiltin();
-    const experts = await sql<{ slug: string; name: string; description: string; version: string; status: string; missing_dependencies: string[]; created_at: Date }[]>`
-      SELECT slug, name, description, version, status, missing_dependencies, created_at FROM member_experts
+    const experts = await sql<{ slug: string; name: string; description: string; version: string; status: string; missing_dependencies: string[]; execution_mode: string; created_at: Date }[]>`
+      SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${EXPERT_SLUG} THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
       WHERE status = 'available' OR owner_id = ${user.id} OR ${user.role === "admin"}
       ORDER BY (slug = ${EXPERT_SLUG}) DESC, created_at DESC`;
     return { experts };
@@ -64,8 +64,8 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const slug = expertSlug(user.id, fileName);
     const status = skill.missingDependencies.length ? "blocked" : "available";
     await sql`INSERT INTO member_experts(slug, owner_id, name, description, version, skill_md, manifest, status, missing_dependencies)
-      VALUES (${slug}, ${user.id}, ${skill.name}, ${skill.description}, ${skill.version}, ${skill.skillMd}, ${sql.json({ tools: [], skills: [] })}, ${status}, ${sql.array(skill.missingDependencies)}::text[])`;
-    return reply.code(201).send({ expert: { slug, name: skill.name, description: skill.description, version: skill.version, status, missingDependencies: skill.missingDependencies } });
+      VALUES (${slug}, ${user.id}, ${skill.name}, ${skill.description}, ${skill.version}, ${skill.skillMd}, ${sql.json(skill.manifest)}, ${status}, ${sql.array(skill.missingDependencies)}::text[])`;
+    return reply.code(201).send({ expert: { slug, name: skill.name, description: skill.description, version: skill.version, status, executionMode: "text_only", missingDependencies: skill.missingDependencies } });
   });
 
   app.get("/api/v1/membership/expert-tasks", async (req, reply) => {
@@ -73,7 +73,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const tasks = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
-        t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
+        t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact"
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
       WHERE t.user_id=${user.id} AND t.expires_at > now() ORDER BY t.created_at DESC LIMIT 50`;
@@ -97,11 +97,27 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     if (slug !== EXPERT_SLUG && notes.length < 2) return reply.code(400).send({ error: "task_text_required" });
     const id = taskId();
     const input = { ...(slug === EXPERT_SLUG ? { companyName } : {}), notes };
-    await sql.begin(async tx => {
-      await tx`INSERT INTO member_expert_tasks(id,user_id,expert_slug,state,input) VALUES (${id},${user.id},${slug as string},'queued',${tx.json(input)})`;
+    const rawKey = req.headers["idempotency-key"];
+    const idempotencyKey = typeof rawKey === "string" && /^[a-zA-Z0-9._:-]{8,128}$/.test(rawKey) ? rawKey : null;
+    const accepted = await sql.begin(async tx => {
+      await tx`SELECT id FROM member_users WHERE id=${user.id} FOR UPDATE`;
+      if (idempotencyKey) {
+        const existing = await tx<{ id: string; state: string }[]>`SELECT id,state FROM member_expert_tasks WHERE user_id=${user.id} AND idempotency_key=${idempotencyKey}`;
+        if (existing[0]) return existing[0];
+      }
+      const active = await tx<{ count: number }[]>`SELECT count(*)::int AS count FROM member_expert_tasks WHERE user_id=${user.id} AND state IN ('queued','running','waiting_input') AND expires_at > now()`;
+      if ((active[0]?.count ?? 0) >= 2) return null;
+      const recent = await tx<{ count: number }[]>`SELECT count(*)::int AS count FROM member_expert_tasks WHERE user_id=${user.id} AND created_at > now() - interval '1 hour'`;
+      if ((recent[0]?.count ?? 0) >= 10) return null;
+      await tx`INSERT INTO member_expert_tasks(id,user_id,expert_slug,state,input,idempotency_key) VALUES (${id},${user.id},${slug as string},'queued',${tx.json(input)},${idempotencyKey})`;
       await enqueueOn(EXPERT_QUEUE, { taskId: id }, { singletonKey: id }, tx);
+      return { id, state: "queued" };
     });
-    return reply.code(202).send({ id, state: "queued" });
+    if (!accepted) {
+      console.warn(JSON.stringify({ event: "expert_task_admission_limited", userId: user.id, activeLimit: 2, hourlyLimit: 10 }));
+      return reply.code(429).send({ error: "expert_task_rate_limited", message: "任务并发或每小时提交上限已达到，请稍后重试。" });
+    }
+    return reply.code(202).send(accepted);
   });
 
   app.post("/api/v1/membership/expert-tasks/:id/entity", async (req, reply) => {
@@ -117,7 +133,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
       const candidates = rows[0]?.result?.candidates ?? [];
       const entity = candidates.find(candidate => candidate.id === companyId);
       if (!rows[0] || !entity) return false;
-      await tx`UPDATE member_expert_tasks SET selected_entity=${tx.json(entity as never)}, state='queued', stage='queued', result=NULL, updated_at=now() WHERE id=${id}`;
+      await tx`UPDATE member_expert_tasks SET selected_entity=${tx.json(entity as never)}, state='queued', stage='queued', result=NULL, updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${id}`;
       await enqueueOn(EXPERT_QUEUE, { taskId: id }, { singletonKey: id }, tx);
       return true;
     });
@@ -132,8 +148,11 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     if (!user) return reply.code(401).send({ error: "login_required" });
     const id = (req.params as { id: string }).id;
     const changed = await sql.begin(async tx => {
+      await tx`SELECT id FROM member_users WHERE id=${user.id} FOR UPDATE`;
+      const currentAttempts = await tx<{ count: number }[]>`SELECT COALESCE(sum(execution_attempts),0)::int AS count FROM member_expert_tasks WHERE user_id=${user.id} AND last_attempt_at > now() - interval '1 hour'`;
+      if ((currentAttempts[0]?.count ?? 0) >= 6) return false;
       const rows = await tx`UPDATE member_expert_tasks SET state='queued', stage='queued', error_code=NULL, error_message=NULL, updated_at=now(), finished_at=NULL
-        WHERE id=${id} AND user_id=${user.id} AND state='failed' AND expires_at > now() RETURNING id`;
+        WHERE id=${id} AND user_id=${user.id} AND state='failed' AND execution_attempts < 3 AND expires_at > now() RETURNING id`;
       if (!rows.length) return false;
       await enqueueOn(EXPERT_QUEUE, { taskId: id }, { singletonKey: `${id}-${Date.now()}` }, tx);
       return true;
@@ -148,7 +167,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const id = (req.params as { id: string }).id;
-    const changed = await sql`UPDATE member_expert_tasks SET state='cancelled',stage='cancelled',updated_at=now(),finished_at=now()
+    const changed = await sql`UPDATE member_expert_tasks SET state='cancelled',stage='cancelled',updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL
       WHERE id=${id} AND user_id=${user.id} AND state IN ('queued','waiting_input','running') RETURNING id`;
     if (!changed.length) return reply.code(404).send({ error: "task_not_cancellable" });
     return { id, state: "cancelled" };

@@ -1,15 +1,52 @@
 import { createHash } from "node:crypto";
 import { unzipSync } from "fflate";
+import { XINHUA_ALLOWED_TOOLS } from "./catalog.ts";
 
 const MAX_ARCHIVE_BYTES = 1_000_000;
 const MAX_UNPACKED_BYTES = 2_000_000;
 const MAX_SKILL_BYTES = 500_000;
 const MAX_ENTRIES = 24;
 
-export type ImportedSkill = { name: string; description: string; version: string; skillMd: string; missingDependencies: string[] };
+export type ImportedSkill = { name: string; description: string; version: string; skillMd: string; manifest: { tools: string[]; skills: string[] }; missingDependencies: string[] };
 
 function safeString(value: unknown, max: number) {
   return typeof value === "string" && value.trim().length > 0 && value.trim().length <= max ? value.trim() : null;
+}
+
+function parseDeclaredDependencies(header: string) {
+  const result: { tools: string[]; skills: string[] } = { tools: [], skills: [] };
+  let inDependencies = false;
+  let kind: "tools" | "skills" | null = null;
+  for (const line of header.split(/\r?\n/)) {
+    const root = /^([a-z][a-z0-9_-]{0,40})\s*:\s*(.*?)\s*$/i.exec(line);
+    if (root) {
+      const key = root[1]!.toLowerCase();
+      if (key === "dependencies") { if (root[2]) throw new Error("skill_dependencies_invalid"); inDependencies = true; kind = null; }
+      else {
+        inDependencies = false;
+        kind = null;
+        if (["requires", "mcp", "mcp_servers", "mcp_tools"].includes(key)) throw new Error("skill_dependencies_invalid");
+        if (["tools", "skills", "required_tools", "required_skills"].includes(key)) {
+          if (root[2]) throw new Error("skill_dependencies_invalid");
+          kind = key.endsWith("tools") ? "tools" : "skills";
+        }
+      }
+      continue;
+    }
+    const nested = /^\s+([a-z][a-z0-9_-]{0,40})\s*:\s*(.*?)\s*$/i.exec(line);
+    if (inDependencies && nested && ["tools", "skills"].includes(nested[1]!.toLowerCase())) {
+      if (nested[2]) throw new Error("skill_dependencies_invalid");
+      kind = nested[1]!.toLowerCase() as "tools" | "skills";
+      continue;
+    }
+    const item = /^\s+-\s+(.*?)\s*$/.exec(line);
+    if (item && kind) {
+      const dependency = safeString(item[1]!.replace(/^("|')(.*)\1$/, "$2"), 120);
+      if (!dependency) throw new Error("skill_dependencies_invalid");
+      result[kind].push(dependency);
+    } else if (line.trim() && (inDependencies || kind)) throw new Error("skill_dependencies_invalid");
+  }
+  return result;
 }
 
 function parseFrontmatter(text: string) {
@@ -26,7 +63,7 @@ function parseFrontmatter(text: string) {
   const name = safeString(values.get("name"), 120);
   const description = safeString(values.get("description"), 500) ?? lines.slice(close + 1).find(line => line.trim())?.replace(/^#+\s*/, "").slice(0, 300);
   if (!name || !description) throw new Error("skill_name_or_description_missing");
-  return { name, description, version: safeString(values.get("version"), 40) ?? "1.0.0" };
+  return { name, description, version: safeString(values.get("version"), 40) ?? "1.0.0", manifest: parseDeclaredDependencies(header) };
 }
 
 function zipDirectory(bytes: Uint8Array): string[] {
@@ -70,9 +107,20 @@ function dependencies(text: string, manifest: Record<string, unknown>) {
     if (!Array.isArray(value) || value.length > 100 || value.some(item => typeof item !== "string" || item.trim().length < 1 || item.length > 120)) throw new Error("manifest_dependencies_invalid");
     return value as string[];
   };
-  const explicitTools = list(manifest.tools);
-  const explicitSkills = list(manifest.skills);
-  const required = new Set([...explicitTools, ...explicitSkills]);
+  if (manifest.dependencies !== undefined && (!manifest.dependencies || typeof manifest.dependencies !== "object" || Array.isArray(manifest.dependencies))) throw new Error("manifest_dependencies_invalid");
+  const nested = manifest.dependencies ? manifest.dependencies as Record<string, unknown> : {};
+  for (const key of Object.keys(manifest)) if (/tool|skill|mcp|depend|requir/i.test(key) && !["tools", "skills", "dependencies"].includes(key)) throw new Error("manifest_dependencies_invalid");
+  for (const key of Object.keys(nested)) if (!["tools", "skills"].includes(key)) throw new Error("manifest_dependencies_invalid");
+  const explicitTools = list(manifest.tools ?? nested.tools);
+  const explicitSkills = list(manifest.skills ?? nested.skills);
+  const dependencyPattern = /^[a-z0-9][a-z0-9._:/-]{0,119}(?:@(?:\^|~|>=|<=|=)?\d+\.\d+\.\d+)?$/i;
+  if ([...explicitTools, ...explicitSkills].some(dependency => !dependencyPattern.test(dependency))) throw new Error("manifest_dependencies_invalid");
+  const metadata = parseFrontmatter(text);
+  const platformTools = new Set<string>(XINHUA_ALLOWED_TOOLS);
+  const required = new Set([
+    ...explicitTools.map(name => platformTools.has(name) ? `工具依赖（纯文本模式不可用）：${name}` : `未知工具依赖：${name}`),
+    ...explicitSkills.map(name => name.split("@")[0]!.toLowerCase() === metadata.name.toLowerCase() ? `循环技能依赖：${name}` : `未发布的技能依赖：${name}`),
+  ]);
   if (/悟道|wudao_mcp_gateway/i.test(text)) required.add("悟道 MCP (wudao_mcp_gateway)");
   if (/skills?\/(?:10|11|12)\b|10\/11\/12 专项 skill/i.test(text)) required.add("reference/SKILL.md 所引用的 10/11/12 专项 skill");
   if (/企查查|qichacha/i.test(text)) required.add("企查查 MCP（尚未接入）");
@@ -84,8 +132,7 @@ export function parseSkillMarkdown(text: string): ImportedSkill {
   if (Buffer.byteLength(text, "utf8") > MAX_SKILL_BYTES || text.includes("\0")) throw new Error("skill_size_or_encoding_invalid");
   const metadata = parseFrontmatter(text);
   if (/<\s*(?:script|iframe|object|embed)\b/i.test(text) || /(?:^|\n)\s*(?:#!|<\?php)/.test(text)) throw new Error("skill_active_content_rejected");
-  const manifest: Record<string, unknown> = {};
-  return { ...metadata, skillMd: text, missingDependencies: dependencies(text, manifest) };
+  return { ...metadata, skillMd: text, manifest: metadata.manifest, missingDependencies: dependencies(text, metadata.manifest) };
 }
 
 export function parseSkillUpload(fileName: string, base64: string): ImportedSkill {
@@ -112,7 +159,16 @@ export function parseSkillUpload(fileName: string, base64: string): ImportedSkil
   const name = safeString(manifest.name, 120) ?? metadata.name;
   const description = safeString(manifest.description, 500) ?? metadata.description;
   const version = safeString(manifest.version, 40) ?? metadata.version;
-  return { name, description, version, skillMd, missingDependencies: dependencies(skillMd, manifest) };
+  if (manifest.dependencies !== undefined && (!manifest.dependencies || typeof manifest.dependencies !== "object" || Array.isArray(manifest.dependencies))) throw new Error("manifest_dependencies_invalid");
+  const nested = manifest.dependencies ? manifest.dependencies as Record<string, unknown> : {};
+  const normalizedManifest = { tools: dependenciesList(manifest.tools ?? nested.tools), skills: dependenciesList(manifest.skills ?? nested.skills) };
+  return { name, description, version, skillMd, manifest: normalizedManifest, missingDependencies: dependencies(skillMd, normalizedManifest) };
+}
+
+function dependenciesList(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 100 || value.some(item => typeof item !== "string" || !item.trim() || item.trim().length > 120)) throw new Error("manifest_dependencies_invalid");
+  return [...new Set(value.map(item => (item as string).trim()))];
 }
 
 export function expertSlug(userId: string, fileName: string, now = Date.now()) {

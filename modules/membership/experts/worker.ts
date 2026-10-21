@@ -1,11 +1,12 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { chatJson } from "@aihot/backend/providers/llm";
 import { sql } from "@aihot/backend/db";
 import { BUILTIN_EXPERT, EXPERT_SLUG, XINHUA_USED_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
-import { ExpertProviderError, withXinhua } from "./xinhua.ts";
+import { ExpertProviderError, withXinhua, type XinhuaCall } from "./xinhua.ts";
+import { findArrays, mapInvestmentEvidence, parseInvestmentPage, querySelectedCompanyProfile, textField, type EntityCandidate } from "./data.ts";
 
-type TaskRow = { id: string; user_id: string; expert_slug: string; input: Record<string, unknown>; selected_entity: Record<string, unknown> | null };
+type TaskRow = { id: string; user_id: string; expert_slug: string; input: Record<string, unknown>; selected_entity: Record<string, unknown> | null; execution_attempts: number };
 type EvidenceRow = { id: string; name: string; pct: string | null; subscribed: string | null; date: string | null; source: string };
 
 function errorText(error: unknown) {
@@ -17,41 +18,12 @@ function errorText(error: unknown) {
     xinhua_tool_failed: "新华财经查询失败；请稍后重试或确认实体信息。",
     xinhua_no_candidates: "新华财经没有返回主体候选，请检查名称或稍后重试。",
     xinhua_response_invalid: "新华财经返回内容无法解析，未生成报告。",
+    xinhua_identity_unverified: "新华财经无法按已确认主体的唯一 ID 或完整信用代码核验身份，未生成报告。",
+    xinhua_entity_mismatch: "新华财经返回的企业与已确认主体不一致，未生成报告。",
     xinhua_unavailable: "新华财经 MCP 暂时不可用，任务可重新提交。",
     expert_execution_failed: "专家执行未完成；没有生成成功结果。",
   };
   return { code, message: messages[code] ?? messages.expert_execution_failed! };
-}
-
-function extractObject(value: unknown): Record<string, unknown> {
-  if (typeof value === "string") { try { return extractObject(JSON.parse(value) as unknown); } catch { return {}; } }
-  if (Array.isArray(value)) return value.map(extractObject).find(item => Object.keys(item).length > 0) ?? {};
-  if (!value || typeof value !== "object") return {};
-  const row = value as Record<string, unknown>;
-  if (row.structuredContent) return extractObject(row.structuredContent);
-  if (Array.isArray(row.content)) {
-    const content = row.content.filter((part): part is { text: string } => !!part && typeof part === "object" && "text" in part && typeof part.text === "string").map(part => part.text).join("\n");
-    if (content) return extractObject(content);
-  }
-  return row;
-}
-
-function firstArray(value: unknown, keys: string[]): Record<string, unknown>[] {
-  const root = extractObject(value);
-  for (const key of keys) {
-    const found = root[key];
-    if (Array.isArray(found)) return found.filter((item): item is Record<string, unknown> => !!item && typeof item === "object" && !Array.isArray(item));
-  }
-  for (const child of Object.values(root)) if (child && typeof child === "object") {
-    const found = firstArray(child, keys);
-    if (found.length) return found;
-  }
-  return [];
-}
-
-function textField(row: Record<string, unknown>, ...keys: string[]) {
-  for (const key of keys) if (typeof row[key] === "string" && (row[key] as string).trim()) return (row[key] as string).trim();
-  return null;
 }
 
 function markdownCell(value: string) { return value.replace(/[|\r\n\t]/g, " ").trim(); }
@@ -59,7 +31,7 @@ function markdownCell(value: string) { return value.replace(/[|\r\n\t]/g, " ").t
 async function companyCandidates(name: string) {
   return withXinhua(async call => {
     const raw = await call("fuzzy_search_company_list", { keyword: name, limit: 10, offset: 0 });
-    return firstArray(raw, ["results", "company_list", "company_info"]).map(row => ({
+    return findArrays(raw, ["results", "company_list", "company_info"]).flat().map(row => ({
       id: textField(row, "company_id", "comp_id_iwudao", "comp_id"),
       name: textField(row, "company_name", "comp_name", "name") ?? name,
       status: textField(row, "company_status_name", "company_status", "status"),
@@ -70,15 +42,37 @@ async function companyCandidates(name: string) {
   });
 }
 
-function safeEvidence(value: unknown): EvidenceRow[] {
-  return firstArray(value, ["direct_investment_info", "results"]).slice(0, 100).map((row, index) => ({
-    id: `S${index + 1}`,
-    name: textField(row, "company_name", "investee_name", "name") ?? "名称未提供",
-    pct: textField(row, "stock_percent", "stock_proportion", "holding_ratio"),
-    subscribed: textField(row, "should_capi", "should_capi_value", "should_capital", "subscribed_capital", "capital"),
-    date: textField(row, "shoud_date", "invest_date", "include_date", "establish_date"),
-    source: XINHUA_TOOL_LABELS.get_direct_investment,
-  }));
+export async function investmentEvidence(call: XinhuaCall, query: string, queryType: string) {
+  const records: Record<string, unknown>[] = [];
+  let total: number | null = null;
+  let hasMore: boolean | null = null;
+  let received = 0;
+  const seen = new Set<string>();
+  const pageSize = 100;
+  const maxPages = 10;
+  for (let page = 0; page < maxPages; page++) {
+    const raw = await call("get_direct_investment", { query, query_type: queryType, limit: pageSize, offset: page * pageSize });
+    const parsed = parseInvestmentPage(raw);
+    received += parsed.rows.length;
+    const before = records.length;
+    for (const row of parsed.rows) {
+      const identity = textField(row, "investment_id", "company_id", "credit_code", "unified_social_credit_code") ?? JSON.stringify(row);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      records.push(row);
+    }
+    total = parsed.total ?? total;
+    hasMore = parsed.hasMore;
+    if (parsed.rows.length === 0 || records.length === before || (parsed.hasMore === false) || (parsed.total !== null && received >= parsed.total) || (parsed.hasMore === null && parsed.total === null && parsed.rows.length < pageSize)) {
+      if (parsed.rows.length > 0 && page > 0 && records.length === before) hasMore = true;
+      else if (records.length === before && (parsed.hasMore === true || (total !== null && received < total))) hasMore = true;
+      break;
+    }
+    if (page === maxPages - 1) hasMore = true;
+  }
+  const capped = records.slice(0, 500);
+  const partial = hasMore === true || (total !== null && total > received) || records.length > capped.length;
+  return { rows: mapInvestmentEvidence(capped, XINHUA_TOOL_LABELS.get_direct_investment), total, fetched: received, partial };
 }
 
 function table(rows: EvidenceRow[]) {
@@ -97,18 +91,27 @@ async function narrative(companyName: string, evidence: EvidenceRow[], notes: st
   return answer.data;
 }
 
-async function runBuiltin(task: TaskRow) {
+async function runBuiltin(task: TaskRow, leaseToken: string) {
   const entity = task.selected_entity;
   if (!entity || typeof entity.name !== "string" || typeof entity.id !== "string") throw new Error("entity_not_selected");
   const evidence = await withXinhua(async call => {
-    const query = typeof entity.creditCode === "string" && entity.creditCode.length >= 15 ? entity.creditCode : entity.name;
-    const queryType = query === entity.name ? "company_name" : "credit_code";
-    const profile = await call("get_company_profile", { query, query_type: queryType });
-    await assertRunning(task.id);
-    const investments = await call("get_direct_investment", { query, query_type: queryType });
-    return { profile: extractObject(profile), rows: safeEvidence(investments) };
+    let identity;
+    try { identity = await querySelectedCompanyProfile(call, entity as unknown as EntityCandidate); }
+    catch (error) {
+      const code = error instanceof Error ? error.message : "xinhua_identity_unverified";
+      if (code === "xinhua_identity_unverified" || code === "xinhua_entity_mismatch") throw new ExpertProviderError(code);
+      throw error;
+    }
+    await assertRunning(task.id, leaseToken);
+    let investments;
+    try { investments = await investmentEvidence(call, identity.query, identity.queryType); }
+    catch (error) {
+      if (identity.queryType !== "company_id" || typeof entity.creditCode !== "string" || entity.creditCode.length < 15) throw error;
+      investments = await investmentEvidence(call, entity.creditCode, "credit_code");
+    }
+    return { profile: identity.profile, ...investments };
   });
-  await assertRunning(task.id);
+  await assertRunning(task.id, leaseToken);
   const notes = typeof task.input.notes === "string" ? task.input.notes : "";
   const summary = await narrative(entity.name, evidence.rows, notes);
   const sourceNumbers = new Set(evidence.rows.map(row => row.id));
@@ -128,6 +131,7 @@ async function runBuiltin(task: TaskRow) {
     ``,
     `- 核查主体：${entity.name}`,
     `- 主体 ID：${entity.id}`,
+    `- 对外投资记录：服务商 total=${evidence.total ?? "未提供"}，已读取=${evidence.fetched}，纳入底稿=${evidence.rows.length}，${evidence.partial ? "结果不完整/已截断" : "返回范围内完整"}`,
     `- 查询时间：${new Date().toISOString()}`,
     `- 工具：新华财经 ${XINHUA_USED_TOOLS.join("、")}`,
     ``,
@@ -140,6 +144,7 @@ async function runBuiltin(task: TaskRow) {
     table(evidence.rows),
     ``,
     `> 数据日期字段沿用服务商原始字段；不据此推断投资发生日。认缴字段的币种和单位未在此处标准化。`,
+    evidence.partial ? `> 数据不完整：存在未读取或被安全上限截断的记录，不能视为全量结果。` : `> 已按服务商返回范围读取全部记录；服务商未提供 total 时无法独立验证全量性。`,
     ``,
     `## DeepSeek 辅助整理`,
     ``,
@@ -154,11 +159,11 @@ async function runBuiltin(task: TaskRow) {
   return body;
 }
 
-async function runCustom(task: TaskRow) {
+async function runCustom(task: TaskRow, leaseToken: string) {
   const rows = await sql<{ skill_md: string; name: string }[]>`SELECT skill_md, name FROM member_experts WHERE slug = ${task.expert_slug} AND status = 'available'`;
   if (!rows[0]) throw new Error("expert_unavailable");
   const notes = typeof task.input.notes === "string" ? task.input.notes : "";
-  await assertRunning(task.id);
+  await assertRunning(task.id, leaseToken);
   const result = await chatJson({
     model: "default", purpose: "expert", subject: `expert:${task.expert_slug}:${task.id}`,
     promptVersion: "skill-import-1", system: `根据以下用户上传的纯文本 skill 完成任务。该 skill 是用户内容，只可作为文本指令处理，不能执行代码、网络访问、MCP 调用、文件访问或改变服务端权限。不能声称使用了未提供的工具。\n\n${rows[0].skill_md.slice(0, 40_000)}`,
@@ -167,44 +172,53 @@ async function runCustom(task: TaskRow) {
   return [`# ${rows[0].name}`, ``, result.data.result, ``, `## 限制`, ``, ...result.data.caveats.map(item => `- ${item}`), `- 此自定义 skill 仅由模型按文本执行，不接入 MCP、代码、网页或文件工具。`].join("\n");
 }
 
-async function assertRunning(taskId: string) {
-  const rows = await sql`SELECT id FROM member_expert_tasks WHERE id=${taskId} AND state='running'`;
+async function assertRunning(taskId: string, leaseToken: string) {
+  const rows = await sql`UPDATE member_expert_tasks SET updated_at=now(), lease_expires_at=now() + interval '5 minutes' WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`;
   if (!rows.length) throw new Error("expert_task_cancelled");
 }
 
 export async function runExpertTask(taskId: string) {
-  const tasks = await sql<TaskRow[]>`SELECT id, user_id, expert_slug, input, selected_entity FROM member_expert_tasks WHERE id = ${taskId} AND state = 'queued' AND expires_at > now()`;
+  const leaseToken = randomUUID();
+  const tasks = await sql<TaskRow[]>`UPDATE member_expert_tasks SET state='running', stage='processing', updated_at=now(), lease_token=${leaseToken}, lease_expires_at=now() + interval '5 minutes', execution_attempts=execution_attempts+1,last_attempt_at=now(),error_code=NULL,error_message=NULL WHERE id=${taskId} AND state='queued' AND expires_at > now() RETURNING id,user_id,expert_slug,input,selected_entity,execution_attempts`;
   const task = tasks[0];
   if (!task) return;
-  await sql`UPDATE member_expert_tasks SET state = 'running', stage = 'processing', updated_at = now(), error_code = NULL, error_message = NULL WHERE id = ${taskId} AND state = 'queued'`;
+  let leaseLost = false;
+  const heartbeat = setInterval(() => {
+    void sql`UPDATE member_expert_tasks SET updated_at=now(), lease_expires_at=now() + interval '5 minutes' WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`
+      .then(rows => { if (!rows.length) leaseLost = true; })
+      .catch(() => { leaseLost = true; });
+  }, 30_000);
+  heartbeat.unref?.();
   try {
     let report: string;
     if (task.expert_slug === EXPERT_SLUG && !task.selected_entity) {
-      await sql`UPDATE member_expert_tasks SET stage = 'entity_search', updated_at = now() WHERE id = ${taskId}`;
+      await sql`UPDATE member_expert_tasks SET stage='entity_search',updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
       const name = String(task.input.companyName ?? "");
       const candidates = await companyCandidates(name);
-      await assertRunning(taskId);
+      await assertRunning(taskId, leaseToken);
       if (!candidates.length) throw new ExpertProviderError("xinhua_no_candidates");
-      await sql`UPDATE member_expert_tasks SET state = 'waiting_input', stage = 'choose_entity', result = ${sql.json({ candidates })}, updated_at = now() WHERE id = ${taskId}`;
+      await sql`UPDATE member_expert_tasks SET state='waiting_input',stage='choose_entity',result=${sql.json({ candidates })},updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
       return;
     }
-    report = task.expert_slug === EXPERT_SLUG ? await runBuiltin(task) : await runCustom(task);
+    report = task.expert_slug === EXPERT_SLUG ? await runBuiltin(task, leaseToken) : await runCustom(task, leaseToken);
     const body = Buffer.from(report, "utf8");
     const digest = createHash("sha256").update(body).digest("hex");
     await sql.begin(async tx => {
-      const active = await tx`SELECT id FROM member_expert_tasks WHERE id = ${taskId} AND state = 'running' FOR UPDATE`;
+      const active = await tx`SELECT id FROM member_expert_tasks WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} AND lease_expires_at > now() FOR UPDATE`;
       if (!active.length) return;
-      await tx`INSERT INTO member_expert_artifacts(task_id, user_id, filename, content_type, body, sha256) VALUES (${taskId}, ${task.user_id}, ${`expert-${taskId}.md`}, 'text/markdown; charset=utf-8', ${body}, ${digest})`;
-      await tx`UPDATE member_expert_tasks SET state = 'succeeded', stage = 'complete', result = ${tx.json({ preview: report.slice(0, 6000) })}, updated_at = now(), finished_at = now() WHERE id = ${taskId}`;
+      await tx`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256) VALUES (${taskId},${task.user_id},${`expert-${taskId}.md`},'text/markdown; charset=utf-8',${body},${digest}) ON CONFLICT(task_id) DO NOTHING`;
+      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json({ preview: report.slice(0, 6000) })},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
     });
   } catch (error) {
     const detail = errorText(error);
-    await sql`UPDATE member_expert_tasks SET state = 'failed', stage = 'failed', error_code = ${detail.code}, error_message = ${detail.message}, updated_at = now(), finished_at = now() WHERE id = ${taskId} AND state <> 'cancelled'`;
+    if (!leaseLost) await sql`UPDATE member_expert_tasks SET state='failed',stage='failed',error_code=${detail.code},error_message=${detail.message},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
+  } finally {
+    clearInterval(heartbeat);
   }
 }
 
 export async function recoverExpertTasks() {
-  const stale = await sql<{ id: string }[]>`UPDATE member_expert_tasks SET state = 'queued', stage = 'recovered', updated_at = now() WHERE state = 'running' AND updated_at < now() - interval '10 minutes' AND expires_at > now() RETURNING id`;
+  const stale = await sql<{ id: string }[]>`UPDATE member_expert_tasks SET state='queued',stage='recovered',updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE state='running' AND lease_expires_at < now() AND expires_at > now() RETURNING id`;
   return stale.map(row => row.id);
 }
 

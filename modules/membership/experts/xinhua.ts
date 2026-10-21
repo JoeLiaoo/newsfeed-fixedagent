@@ -7,6 +7,8 @@ export class ExpertProviderError extends Error {
   constructor(code: string) { super(code); this.code = code; }
 }
 
+export type XinhuaCall = (tool: typeof XINHUA_ALLOWED_TOOLS[number], args: Record<string, unknown>) => Promise<unknown>;
+
 function endpoint() {
   const raw = process.env.XINHUA_MCP_COMPANY_URL || "https://mcp.cnfic.com.cn/bdc-mcp-service/mcp/zjs_company/http/";
   let url: URL;
@@ -15,7 +17,7 @@ function endpoint() {
   return url;
 }
 
-export async function withXinhua<T>(run: (call: (tool: typeof XINHUA_ALLOWED_TOOLS[number], args: Record<string, unknown>) => Promise<unknown>) => Promise<T>): Promise<T> {
+export async function withXinhua<T>(run: (call: XinhuaCall) => Promise<T>): Promise<T> {
   const token = credential("collectors", "XINHUA_MCP_API_KEY");
   if (!token) throw new ExpertProviderError("xinhua_not_configured");
   const transport = new StreamableHTTPClientTransport(endpoint(), {
