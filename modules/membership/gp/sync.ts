@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { sql } from "@aihot/backend/db";
 import { chatJson } from "@aihot/backend/providers/llm";
@@ -7,7 +7,7 @@ import { parseInvestmentPage, querySelectedCompanyProfile } from "../experts/dat
 import { GP_TAGS, uniqueInvestments } from "./core.ts";
 
 type GP = { id:string;canonical_name:string;entity_id:string;credit_code:string|null };
-type Capture = { records: ReturnType<typeof uniqueInvestments>["records"]; total:number|null; fetched:number; missing:number; complete:boolean };
+type Capture = { records: ReturnType<typeof uniqueInvestments>["records"]; total:number|null; fetched:number; missing:number; complete:boolean; rawRows:Record<string,unknown>[] };
 
 async function capture(gp:GP):Promise<Capture> {
   return withXinhua(async call=>{
@@ -26,7 +26,7 @@ async function capture(gp:GP):Promise<Capture> {
       if(parsed.rows.length===0){break;}
     }
     const normalized=uniqueInvestments(all);
-    return {...normalized,total,fetched,complete:complete && normalized.missing===0 && (total===null||fetched>=total)};
+    return {...normalized,total,fetched,rawRows:all,complete:complete && normalized.missing===0 && (total===null||fetched>=total)};
   });
 }
 
@@ -55,8 +55,11 @@ export async function syncGp(id:string) {
   catch { await sql`UPDATE member_gp_watchlist SET last_error='provider_failed' WHERE id=${id}`; return {state:"provider_failed"}; }
   if(!snapshot.complete){
     await sql.begin(async tx=>{
+      const snapshotId=randomUUID();
       await tx`INSERT INTO member_gp_snapshots(id,gp_id,complete,source_total,fetched_count,row_count,error_code)
-        VALUES (${randomUUID()},${id},false,${snapshot.total},${snapshot.fetched},${snapshot.records.length},'incomplete_inventory')`;
+        VALUES (${snapshotId},${id},false,${snapshot.total},${snapshot.fetched},${snapshot.records.length},'incomplete_inventory')`;
+      await tx`INSERT INTO member_gp_snapshot_evidence(snapshot_id,raw_rows,sha256)
+        VALUES(${snapshotId},${tx.json(snapshot.rawRows as never)},${createHash("sha256").update(JSON.stringify(snapshot.rawRows)).digest("hex")})`;
       await tx`UPDATE member_gp_watchlist SET last_error='incomplete_inventory' WHERE id=${id}`;
     });
     return {state:"incomplete_inventory"};
@@ -67,18 +70,21 @@ export async function syncGp(id:string) {
     if(!current || current.status!=='active') return {state:"paused"};
     const [previous]=await tx<{count:number}[]>`SELECT count(*)::int AS count FROM member_gp_snapshots WHERE gp_id=${id} AND complete=true`;
     const baseline=previous.count===0;
+    const snapshotId=randomUUID();
+    await tx`INSERT INTO member_gp_snapshots(id,gp_id,complete,source_total,fetched_count,row_count)
+      VALUES(${snapshotId},${id},true,${snapshot.total},${snapshot.fetched},${snapshot.records.length})`;
+    await tx`INSERT INTO member_gp_snapshot_evidence(snapshot_id,raw_rows,sha256)
+      VALUES(${snapshotId},${tx.json(snapshot.rawRows as never)},${createHash("sha256").update(JSON.stringify(snapshot.rawRows)).digest("hex")})`;
     for(const row of snapshot.records){
       const observationId=randomUUID();
       const inserted=await tx`INSERT INTO member_gp_investments
-        (id,gp_id,investee_key,investee_name,investee_id,data_date,provider_updated_at,investment_date,raw_evidence,status)
-        VALUES(${observationId},${id},${row.key},${row.name},${row.investeeId},${row.dataDate},${row.updatedAt},${row.investmentDate},${tx.json(row.raw as never)},${baseline?"baseline":"observed"})
+        (id,gp_id,investee_key,investee_name,investee_id,data_date,provider_updated_at,investment_date,raw_evidence,status,source_snapshot_id)
+        VALUES(${observationId},${id},${row.key},${row.name},${row.investeeId},${row.dataDate},${row.updatedAt},${row.investmentDate},${tx.json(row.raw as never)},${baseline?"baseline":"observed"},${snapshotId})
         ON CONFLICT(gp_id,investee_key) DO NOTHING RETURNING id`;
       if(inserted.length && !baseline) discovered.push({id:observationId,name:row.name,raw:row.raw});
-      if(!inserted.length) await tx`UPDATE member_gp_investments SET last_seen_at=now(),data_date=${row.dataDate},provider_updated_at=${row.updatedAt},raw_evidence=${tx.json(row.raw as never)}
+      if(!inserted.length) await tx`UPDATE member_gp_investments SET last_seen_at=now(),data_date=${row.dataDate},provider_updated_at=${row.updatedAt},raw_evidence=${tx.json(row.raw as never)},source_snapshot_id=${snapshotId}
         WHERE gp_id=${id} AND investee_key=${row.key}`;
     }
-    await tx`INSERT INTO member_gp_snapshots(id,gp_id,complete,source_total,fetched_count,row_count)
-      VALUES(${randomUUID()},${id},true,${snapshot.total},${snapshot.fetched},${snapshot.records.length})`;
     await tx`UPDATE member_gp_watchlist SET last_synced_at=now(),last_error=NULL WHERE id=${id}`;
     return {state:baseline?"baseline":"synced",count:snapshot.records.length,newlyObserved:discovered.length};
   });

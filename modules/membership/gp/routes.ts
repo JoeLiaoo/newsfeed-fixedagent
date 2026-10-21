@@ -51,8 +51,13 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       return reply.code(400).send({error:"gp_identity_verification_required"});
     const id=(req.params as {id:string}).id;
     const changed=await sql`UPDATE member_gp_watchlist SET status=${status as string},entity_role=${role as string},entity_id=${entityId||null},credit_code=${creditCode||null},aliases=${aliases},
-      source_ref=${source},reviewed_by=${user.id},reviewed_at=now() WHERE id=${id} RETURNING id`;
-    return changed.length?{ok:true}:reply.code(404).send({error:"not_found"});
+      source_ref=${source},reviewed_by=${user.id},reviewed_at=now() WHERE id=${id}
+      AND (NOT EXISTS(SELECT 1 FROM member_gp_snapshots WHERE gp_id=${id} AND complete=true)
+           OR (entity_id IS NOT DISTINCT FROM ${entityId||null} AND entity_role=${role as string}))
+      RETURNING id`;
+    if(changed.length) return {ok:true};
+    const [existing]=await sql`SELECT id FROM member_gp_watchlist WHERE id=${id}`;
+    return reply.code(existing?409:404).send({error:existing?"gp_identity_locked_after_baseline":"not_found"});
   });
   app.post("/api/v1/membership/admin/gps/:id/sync",async(req,reply)=>{
     if(!await admin(req,reply)) return;
@@ -83,14 +88,36 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     if(status==="verified"&&(!tags.length||!/^20\d\d-\d\d-\d\d$/.test(date)||!/^https:\/\//.test(source)))
        return reply.code(400).send({error:"event_evidence_required"});
     const id=(req.params as {id:string}).id;
-    const changed=await sql.begin(async tx=>{
-      const changed=await tx`UPDATE member_gp_investments SET status=${status as string},sector_tags=${tags},sector_reason=${reason},
-        classification_state='reviewed',approved_event_date=${status==="verified"?date:null}::date,
-        approved_source_url=${status==="verified"?source:null},approved_by=${user.id},approved_at=now(),revision=revision+1
-        WHERE id=${id} RETURNING id`;
-      if(changed.length) await tx`INSERT INTO member_gp_review_audit(investment_id,actor_id,tags,reason) VALUES(${id},${user.id},${tags},${reason})`;
-      return changed.length;
+    const outcome=await sql.begin(async tx=>{
+      const [old]=await tx<{
+        status:string; sector_tags:string[]; sector_reason:string|null;
+        approved_event_date:string|null; approved_source_url:string|null; approved_by:string|null;
+        approved_at:Date|null; revision:number; source_snapshot_id:string|null;
+      }[]>`SELECT status,sector_tags,sector_reason,approved_event_date::text,approved_source_url,approved_by,
+        approved_at,revision,source_snapshot_id FROM member_gp_investments WHERE id=${id} FOR UPDATE`;
+      if(!old) return "not_found";
+      const allowed:Record<string,string[]> = {
+        baseline:["baseline","retracted"], observed:["observed","verified","retracted"],
+        verified:["verified","retracted"], retracted:["retracted"],
+      };
+      if(!allowed[old.status]?.includes(String(status))) return "invalid_transition";
+      const firstApproval=old.status==="observed" && status==="verified";
+      const approvedAt=firstApproval ? new Date() : old.approved_at;
+      const approvedBy=firstApproval ? user.id : old.approved_by;
+      const eventDate=status==="verified" ? date : null;
+      const evidenceUrl=status==="verified" ? source : null;
+      const [updated]=await tx`UPDATE member_gp_investments SET status=${status as string},
+        sector_tags=${tags},sector_reason=${reason},classification_state='reviewed',
+        approved_event_date=${eventDate}::date,approved_source_url=${evidenceUrl},
+        approved_by=${approvedBy},approved_at=${approvedAt},revision=revision+1
+        WHERE id=${id} RETURNING id,revision`;
+      const before={...old};
+      const after={...old,status,sector_tags:tags,sector_reason:reason,approved_event_date:eventDate,
+        approved_source_url:evidenceUrl,approved_by:approvedBy,approved_at:approvedAt,revision:updated.revision};
+      await tx`INSERT INTO member_gp_review_audit(investment_id,actor_id,tags,reason,before_state,after_state)
+        VALUES(${id},${user.id},${tags},${reason},${tx.json(before as never)},${tx.json(after as never)})`;
+      return "ok";
     });
-    return changed?{ok:true}:reply.code(404).send({error:"not_found"});
+    return outcome==="ok"?{ok:true}:reply.code(outcome==="not_found"?404:409).send({error:outcome});
   });
 }
