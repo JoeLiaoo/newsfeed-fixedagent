@@ -4,7 +4,8 @@ import { Button } from "@aihot/web/components/member-ui/button";
 import { Card,CardContent,CardHeader,CardTitle } from "@aihot/web/components/member-ui/card";
 import { Input } from "@aihot/web/components/member-ui/input";
 import { Label } from "@aihot/web/components/member-ui/label";
-import { GP_TAGS } from "../gp/core.ts";
+import { DIRECTIONS } from "../catalog.ts";
+const GP_TAGS = DIRECTIONS.filter(d => d.name !== "战略配售").flatMap(d => [...d.tags]);
 
 type GP={id:string;canonical_name:string;entity_id:string|null;credit_code:string|null;entity_role:string;status:string;source_ref:string;last_synced_at:string|null;last_error:string|null};
 type Observation={id:string;gp_name:string;investee_name:string;status:string;sector_tags:string[];sector_reason:string|null;data_date:string|null;first_seen_at:string;approved_source_url:string|null;approved_event_date:string|null};
