@@ -7,7 +7,7 @@
 - [实施状态](IMPLEMENTATION.md)：P0–P4 唯一任务勾选来源，按对应验收条件完成后才标记 `[x]`。
 - [贡献与仓库治理](../CONTRIBUTING.md) / [Agent 开发约定](../AGENTS.md)：分支、PR、设计系统、日志、保密与验证规则。
 - [全仓架构与实现审查（2026-10-22）](REPO-REVIEW-2026-10-22.md)：基于 `13a89a5` 的风险、复现证据及建议演进顺序。
-- [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 的实现对应、验证结果及剩余边界。
+- [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 的实现对应、验证结果及剩余边界；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6)。
 - [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 的实现对应、验证结果及剩余边界。
 
 ## 阶段文档

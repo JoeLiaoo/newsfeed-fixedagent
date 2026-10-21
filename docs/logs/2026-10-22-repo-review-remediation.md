@@ -2,7 +2,7 @@
 
 - 任务：按 [2026-10-22 全仓审查](../REPO-REVIEW-2026-10-22.md) 修复 R01–R14，并开 PR。
 - 基线：`origin/main` / `13a89a5ae6008a95773e148114aec2b6dffd162e`；分支 `codex/fix-repo-review-2026-10-22`。
-- 交付：本分支包含修复和回归覆盖；PR 链接在创建后补入本记录与索引。
+- 交付：[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6)，Open，尚未合并。
 
 ## 修复对应
 
