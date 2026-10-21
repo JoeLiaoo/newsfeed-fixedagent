@@ -1,11 +1,93 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Alert } from "@aihot/web/components/member-ui/alert";
+import { Badge } from "@aihot/web/components/member-ui/badge";
+import { Button } from "@aihot/web/components/member-ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@aihot/web/components/member-ui/card";
+import { Input } from "@aihot/web/components/member-ui/input";
+import { Label } from "@aihot/web/components/member-ui/label";
 
 type Source = { id: string; name: string; kind: string; enabled: boolean; health: string; last_ok_at: string | null; discovery_scope: string | null; discovery_method: string | null; preview_count: number | null; items_7d: number };
 type Coverage = { tag: string; count: number };
+
+function scopeLabel(scope: string | null) {
+  return scope === "sitemap" ? "sitemap" : scope === "rss" ? "RSS/Atom" : "单个列表页";
+}
+
+function discoveryLabel(method: string | null) {
+  return method === "robots_txt" ? "robots.txt" : method === "homepage_link" ? "首页链接" : method === "well_known" ? "常见地址探测" : method === "homepage_alternate" ? "RSS 自动发现" : "手动地址";
+}
+
 export default function SourcesPage() {
-  const [sources, setSources] = useState<Source[]>([]); const [coverage, setCoverage] = useState<Coverage[]>([]); const [message, setMessage] = useState("");
-  async function load() { const response = await fetch("/api/v1/membership/sources"); if (!response.ok) { setMessage("请先登录后查看信源。"); return; } const data = await response.json(); setSources(data.sources); setCoverage(data.coverage); }
-  useEffect(() => { void load(); }, []);
-  async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setMessage("正在检查公开内容和重复项…"); const form = new FormData(event.currentTarget); const response = await fetch("/api/v1/membership/sources", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: form.get("name"), sourceUrl: form.get("sourceUrl"), kind: form.get("kind") }) }); const data = await response.json(); if (!response.ok) { setMessage(data.error === "duplicate_source" ? "这个信源已经添加。" : data.error === "source_preview_rate_limited" ? "来源检查次数或并发已达上限，请稍后再试。" : "未能通过内容和可达性检查；请确认地址公开可访问且能解析到文章。"); return; } event.currentTarget.reset(); const scopeName = data.source.scope === "sitemap" ? "sitemap 索引" : data.source.scope === "rss" ? "RSS/Atom 条目" : "提交的单个列表页"; setMessage(`信源已加入共享采集池，预览发现 ${data.source.previewCount} 篇文章；实际采集范围：${scopeName}。`); await load(); }
-  return <main className="mx-auto max-w-4xl px-5 py-8"><h1 className="text-2xl font-semibold">资讯信源</h1><p className="mt-2 text-ink-muted">RSS/Atom、sitemap 或文章列表页先经过公开地址、内容和重复检查。提交网站首页时会探测页面 RSS、robots.txt 和常见 sitemap 地址；若未发现，则只采集你提交的列表页。每位员工每小时最多检查 3 次，全站同时最多 4 次检查。系统只采集公开内容；下表持续显示实际采用的范围、首次预览数量和近 7 天收录量，不能据此保证覆盖全站。</p><form onSubmit={submit} className="mt-6 grid gap-3 rounded-lg border p-4 sm:grid-cols-[1fr_2fr_1fr_auto]"><input name="name" required minLength={2} maxLength={120} placeholder="信源名称" className="rounded border p-2" /><input name="sourceUrl" type="url" required placeholder="订阅地址、网站首页、文章列表页或 sitemap.xml" className="rounded border p-2" /><select name="kind" className="rounded border p-2"><option value="rss">RSS / Atom</option><option value="web_list">网站首页或文章列表</option><option value="sitemap">网站 sitemap</option></select><button className="rounded bg-red-700 px-4 py-2 text-white">检查并添加</button>{message && <p className="sm:col-span-4" role="status">{message}</p>}</form><h2 className="mt-8 text-lg font-semibold">赛道覆盖（近 7 天精选）</h2>{coverage.length ? <p className="mt-2 text-sm">{coverage.map(item => `${item.tag} ${item.count}`).join(" · ")}</p> : <p className="mt-2 text-sm text-ink-muted">近 7 天暂无已发布的赛道内容。</p>}<h2 className="mt-8 text-lg font-semibold">共享信源健康情况</h2><div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="py-2">信源</th><th>实际采集范围</th><th>发现方式</th><th>初次预览</th><th>近 7 天收录</th><th>状态</th><th>最近成功</th></tr></thead><tbody>{sources.map(source => <tr key={source.id} className="border-b"><td className="py-3">{source.name}</td><td>{source.discovery_scope === "sitemap" ? "sitemap" : source.discovery_scope === "rss" ? "RSS/Atom" : "单个列表页"}</td><td>{source.discovery_method === "robots_txt" ? "robots.txt" : source.discovery_method === "homepage_link" ? "首页链接" : source.discovery_method === "well_known" ? "常见地址探测" : source.discovery_method === "homepage_alternate" ? "RSS 自动发现" : "手动地址"}</td><td>{source.preview_count ?? "—"}</td><td>{source.items_7d}</td><td>{source.enabled ? source.health : "已停用"}</td><td>{source.last_ok_at ? new Date(source.last_ok_at).toLocaleString("zh-CN") : "暂无成功记录"}</td></tr>)}</tbody></table></div></main>;
+  const [sources, setSources] = useState<Source[]>([]);
+  const [coverage, setCoverage] = useState<Coverage[]>([]);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    const response = await fetch("/api/v1/membership/sources");
+    if (!response.ok) { setMessage("请先登录后查看信源。"); return; }
+    const data = await response.json() as { sources: Source[]; coverage: Coverage[] };
+    setSources(data.sources); setCoverage(data.coverage);
+  }
+
+  useEffect(() => { void load().catch(() => setMessage("加载信源失败，请刷新重试。")); }, []);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setMessage("正在检查公开内容和重复项…");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    try {
+      const response = await fetch("/api/v1/membership/sources", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: form.get("name"), sourceUrl: form.get("sourceUrl"), kind: form.get("kind") }) });
+      const data = await response.json() as { error?: string; source?: { scope: string; previewCount: number } };
+      if (!response.ok) {
+        const text = data.error === "duplicate_source" ? "这个信源已经添加。" : data.error === "source_preview_rate_limited" ? "来源检查次数或并发已达上限，请稍后再试。" : "未能通过内容和可达性检查；请确认地址公开可访问且能解析到文章。";
+        setMessage(text); return;
+      }
+      formElement.reset();
+      const scope = data.source?.scope === "sitemap" ? "sitemap 索引" : data.source?.scope === "rss" ? "RSS/Atom 条目" : "提交的单个列表页";
+      setMessage(`信源已加入共享采集池，预览发现 ${data.source?.previewCount ?? 0} 篇文章；实际采集范围：${scope}。`);
+      await load();
+    } catch { setMessage("信源检查请求失败，请检查网络后重试。"); }
+    finally { setBusy(false); }
+  }
+
+  return <main className="mx-auto w-full max-w-6xl px-5 py-8">
+    <header className="mb-6"><h1 className="text-2xl font-semibold tracking-tight">资讯信源</h1><p className="mt-2 max-w-5xl text-sm leading-relaxed text-ink-3">RSS/Atom、sitemap 或文章列表页先经过公开地址、内容和重复检查。提交网站首页时会探测页面 RSS、robots.txt 和常见 sitemap 地址；若未发现，则只采集你提交的列表页。每位员工每小时最多检查 3 次，全站同时最多 4 次检查。系统只采集公开内容；下表持续显示实际采用的范围、首次预览数量和近 7 天收录量，不能据此保证覆盖全站。</p></header>
+    {message && <Alert className="mb-5" role="status">{message}</Alert>}
+    <Card className="mb-6">
+      <CardHeader><CardTitle>添加公开信源</CardTitle><CardDescription>新信源经检查后加入全员共享采集池。</CardDescription></CardHeader>
+      <CardContent><form onSubmit={submit} className="grid gap-4 md:grid-cols-[1fr_2fr_1fr_auto] md:items-end">
+        <div className="grid gap-2"><Label htmlFor="source-name">信源名称</Label><Input id="source-name" name="name" required minLength={2} maxLength={120} placeholder="例如：企业新闻" /></div>
+        <div className="grid gap-2"><Label htmlFor="source-url">公开地址</Label><Input id="source-url" name="sourceUrl" type="url" required placeholder="RSS、网站首页、文章列表页或 sitemap.xml" /></div>
+        <div className="grid gap-2"><Label htmlFor="source-kind">来源类型</Label><select id="source-kind" name="kind" className="flex h-10 w-full min-w-0 rounded-control border border-line-strong bg-surface px-3 py-2 text-sm text-ink shadow-sm outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/25"><option value="rss">RSS / Atom</option><option value="web_list">网站首页或文章列表</option><option value="sitemap">网站 sitemap</option></select></div>
+        <Button type="submit" disabled={busy}>{busy ? "检查中…" : "检查并添加"}</Button>
+      </form></CardContent>
+    </Card>
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_2fr]">
+      <Card>
+        <CardHeader><CardTitle>赛道覆盖</CardTitle><CardDescription>近 7 天已发布的精选内容</CardDescription></CardHeader>
+        <CardContent>{coverage.length ? <ul className="flex flex-wrap gap-2">{coverage.map(item => <li key={item.tag}><Badge variant="outline">{item.tag} · {item.count}</Badge></li>)}</ul> : <p className="text-sm text-ink-3">近 7 天暂无已发布的赛道内容。</p>}</CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>共享信源健康情况</CardTitle><CardDescription>数据反映实际采集范围，不保证覆盖整个站点。</CardDescription></CardHeader>
+        <CardContent className="p-0 sm:px-5">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead><tr className="border-y border-line bg-bg-sunk text-xs font-medium text-ink-3"><th scope="col" className="px-4 py-3 sm:first:pl-0">信源</th><th scope="col" className="px-3 py-3">实际范围</th><th scope="col" className="px-3 py-3">发现方式</th><th scope="col" className="px-3 py-3">初次预览</th><th scope="col" className="px-3 py-3">近 7 天</th><th scope="col" className="px-3 py-3">状态</th><th scope="col" className="px-3 py-3 sm:last:pr-0">最近成功</th></tr></thead>
+              <tbody>{sources.map(source => <tr key={source.id} className="border-b border-line-soft last:border-0">
+                <th scope="row" className="max-w-48 truncate px-4 py-3 font-medium sm:first:pl-0">{source.name}</th>
+                <td className="px-3 py-3 text-ink-2">{scopeLabel(source.discovery_scope)}</td>
+                <td className="px-3 py-3 text-ink-2">{discoveryLabel(source.discovery_method)}</td>
+                <td className="px-3 py-3 text-ink-2">{source.preview_count ?? "—"}</td>
+                <td className="px-3 py-3 text-ink-2">{source.items_7d}</td>
+                <td className="px-3 py-3"><Badge variant={!source.enabled || source.health === "paused" ? "secondary" : source.health === "ok" ? "success" : source.health === "failing" ? "destructive" : "warning"}>{source.enabled ? source.health : "已停用"}</Badge></td>
+                <td className="whitespace-nowrap px-3 py-3 text-xs text-ink-3 sm:last:pr-0">{source.last_ok_at ? new Date(source.last_ok_at).toLocaleString("zh-CN") : "暂无成功记录"}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+          {!sources.length && <p className="px-4 py-5 text-sm text-ink-3 sm:px-0">暂无共享信源。</p>}
+        </CardContent>
+      </Card>
+    </div>
+  </main>;
 }
