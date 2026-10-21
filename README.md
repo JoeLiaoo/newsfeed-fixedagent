@@ -34,6 +34,7 @@ npm run typecheck
 - [Agent 工作约定](AGENTS.md)
 - [建设需求基线](docs/PLAN.md)
 - [实施状态和剩余验收](docs/IMPLEMENTATION.md)
+- [P2 首个专家适配矩阵](docs/P2-EXPERT-ADAPTER.md)
 - [P0 资料盘点与外部阻碍](docs/P0-STATUS.md)
 - [AIHOT 上游版本、许可证和适配记录](docs/UPSTREAM.md)
 - [文档与日志索引](docs/README.md)
