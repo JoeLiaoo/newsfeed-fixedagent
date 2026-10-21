@@ -1,0 +1,1 @@
+{"name":"{{siteName}} — {{tagline}}","short_name":"{{siteName}}","description":"{{description}}","lang":"{{locale}}","start_url":"/","scope":"/","display":"standalone","background_color":"#faf9f7","theme_color":"#a62b36"}

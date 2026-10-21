@@ -1,0 +1,7 @@
+{
+  "name": "@citic/membership",
+  "private": true,
+  "type": "module",
+  "exports": { "./module": "./module.ts", "./server": "./server.ts", "./web": "./web.tsx" },
+  "dependencies": { "@aihot/backend": "*", "@aihot/site": "*", "@aihot/web": "*", "react": "19.3.0", "react-router": "8.4.0" }
+}

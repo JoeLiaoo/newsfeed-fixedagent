@@ -1,0 +1,1 @@
+ALTER TABLE admin_sessions VALIDATE CONSTRAINT admin_sessions_auth_method_check_v2;
