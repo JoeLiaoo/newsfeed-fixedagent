@@ -23,7 +23,8 @@
     "typecheck": "tsc -p packages/contracts && tsc -p packages/backend && tsc -p apps/api && tsc -p apps/worker && tsc -p tests && tsc -p modules && npm run typecheck -w @aihot/web",
     "test": "node --test-global-setup=tests/databases.ts --import ./tests/databases.ts --test --test-concurrency=6 --test-timeout=120000 \"tests/*.test.ts\" \"modules/*/tests/*.test.ts\"",
     "test:standalone": "node --import ./tests/standalone.ts --test --test-concurrency=6 --test-timeout=120000 \"tests/*.standalone.test.ts\" \"modules/*/tests/*.standalone.test.ts\"",
-    "member:bootstrap-admin": "node --env-file-if-exists=.env scripts/bootstrap-admin.ts"
+    "member:bootstrap-admin": "node --env-file-if-exists=.env scripts/bootstrap-admin.ts",
+    "member:seed-gp": "node --env-file-if-exists=.env scripts/seed-gp-candidates.ts"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.3.0",

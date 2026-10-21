@@ -4,6 +4,8 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { sql } from "@aihot/backend/db";
 import { createSource, previewSource } from "@aihot/backend/admin/sources";
 import { registerExpertRoutes } from "./experts/routes.ts";
+import { registerGpRoutes } from "./gp/routes.ts";
+import { registerNotificationRoutes } from "./notifications/routes.ts";
 import { listedCondition } from "@aihot/backend/publication/scope";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
 import * as cheerio from "cheerio";
@@ -92,6 +94,8 @@ async function issueSession(userId: string, reply: any) {
 
 export function registerMembership(app: FastifyInstance) {
   registerExpertRoutes(app, memberSession);
+  registerGpRoutes(app, memberSession);
+  registerNotificationRoutes(app, memberSession);
   app.post("/api/v1/membership/register", async (req, reply) => {
     noStore(reply);
     if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
@@ -391,7 +395,7 @@ async function discoverSiteFeeds(home: URL): Promise<{ rss: string | null; sitem
 export function registerMembershipAccessBoundary(app: FastifyInstance) {
   const privateContentPath = (req: FastifyRequest) => {
     const pathname = (req.raw.url ?? "/").split("?", 1)[0]!;
-    if (pathname.startsWith("/api/")) return pathname !== "/api/health" && !["/api/v1/membership/register", "/api/v1/membership/login", "/api/v1/membership/logout"].includes(pathname);
+    if (pathname.startsWith("/api/")) return pathname !== "/api/health" && !["/api/v1/membership/register", "/api/v1/membership/login", "/api/v1/membership/logout", "/api/v1/membership/bridge/claim"].includes(pathname);
     return pathname === "/feed.xml" || pathname.startsWith("/feed/") || pathname.startsWith("/og/") || pathname.startsWith("/items/")
       || ["/sitemap.xml", "/llms.txt", "/openapi-v1.json"].includes(pathname);
   };

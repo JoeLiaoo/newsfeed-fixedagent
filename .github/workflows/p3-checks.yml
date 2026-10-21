@@ -1,0 +1,51 @@
+name: P3 checks
+on:
+  pull_request:
+    paths:
+      - "modules/membership/**"
+      - "site/modules/**"
+      - "database/migrations/**"
+      - "apps/**"
+      - "package*.json"
+      - ".github/workflows/p3-checks.yml"
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: node scripts/check-migrations.ts --base=origin/main
+      - run: npm run typecheck
+      - run: npm run build -w @aihot/web
+      - run: node --import ./tests/standalone.ts --test modules/membership/tests/gp-core.standalone.test.ts
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/p3_schema_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: node --test-global-setup=tests/databases.ts --import ./tests/databases.ts --test modules/membership/tests/p3-db.test.ts
