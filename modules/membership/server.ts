@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { sql } from "@aihot/backend/db";
 import { createSource, previewSource } from "@aihot/backend/admin/sources";
+import { registerExpertRoutes } from "./experts/routes.ts";
 import { listedCondition } from "@aihot/backend/publication/scope";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
 import * as cheerio from "cheerio";
@@ -21,6 +22,8 @@ const safeEqual = (a: string, b: string) => {
   return aa.length === bb.length && timingSafeEqual(aa, bb);
 };
 
+export type MemberSession = { id: string; username: string; real_name: string; role: string; status: string };
+
 async function passwordHash(password: string, salt = randomBytes(16).toString("hex")) {
   const digest = (await scrypt(password, salt, 64)) as Buffer;
   return `${salt}:${digest.toString("hex")}`;
@@ -38,7 +41,7 @@ function cookieToken(req: FastifyRequest) {
   return value ? decodeURIComponent(value) : null;
 }
 
-async function session(req: FastifyRequest, allowPending = false) {
+export async function memberSession(req: FastifyRequest, allowPending = false): Promise<MemberSession | null> {
   const token = cookieToken(req);
   if (!token) return null;
   const rows = await sql<{ id: string; username: string; real_name: string; role: string; status: string }[]>`
@@ -88,6 +91,7 @@ async function issueSession(userId: string, reply: any) {
 }
 
 export function registerMembership(app: FastifyInstance) {
+  registerExpertRoutes(app, memberSession);
   app.post("/api/v1/membership/register", async (req, reply) => {
     noStore(reply);
     if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
@@ -130,7 +134,7 @@ export function registerMembership(app: FastifyInstance) {
 
   app.get("/api/v1/membership/me", async (req, reply) => {
     noStore(reply);
-    const user = await session(req);
+    const user = await memberSession(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const tags = await sql<{ tag: string }[]>`SELECT tag FROM member_interest_tags WHERE user_id = ${user.id} ORDER BY tag`;
     const publicTags = await sql<{ tag: string }[]>`SELECT tag FROM public_interest_tags ORDER BY tag`;
@@ -140,7 +144,7 @@ export function registerMembership(app: FastifyInstance) {
   app.put("/api/v1/membership/interests", async (req, reply) => {
     noStore(reply);
     if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
-    const user = await session(req);
+    const user = await memberSession(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const rawTags = body(req).tags;
     if (!Array.isArray(rawTags) || rawTags.length > 100 || rawTags.some((tag) => typeof tag !== "string" || tag.trim().length < 2 || tag.trim().length > 80)) return reply.code(400).send({ error: "invalid_tags" });
@@ -171,7 +175,7 @@ export function registerMembership(app: FastifyInstance) {
   app.post("/api/v1/membership/interests/custom", async (req, reply) => {
     noStore(reply);
     if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
-    const user = await session(req);
+    const user = await memberSession(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const tag = typeof body(req).tag === "string" ? (body(req).tag as string).trim() : "";
     if (tag.length < 2 || tag.length > 80 || PRESET_TAGS.includes(tag as never)) return reply.code(400).send({ error: "invalid_tag" });
@@ -186,7 +190,7 @@ export function registerMembership(app: FastifyInstance) {
 
   app.get("/api/v1/membership/digest", async (req, reply) => {
     noStore(reply);
-    const user = await session(req);
+    const user = await memberSession(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const todayRows = await sql<{ date: string }[]>`SELECT to_char(now() AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS date`;
     const today = todayRows[0]!.date;
@@ -236,7 +240,7 @@ export function registerMembership(app: FastifyInstance) {
 
   app.get("/api/v1/membership/digest/history", async (req, reply) => {
     noStore(reply);
-    const user = await session(req);
+    const user = await memberSession(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const digests = await sql`SELECT local_date::text AS date, preference_version AS "preferenceVersion", window_start AS "windowStart", cutoff_at AS cutoff, generated_at AS "generatedAt", jsonb_array_length(items) AS "itemCount" FROM member_daily_digests WHERE user_id = ${user.id} ORDER BY local_date DESC, preference_version DESC`;
     return { digests };
@@ -244,7 +248,7 @@ export function registerMembership(app: FastifyInstance) {
 
   app.get("/api/v1/membership/admin/pending", async (req, reply) => {
     noStore(reply);
-    const admin = await session(req);
+    const admin = await memberSession(req);
     if (!admin || admin.role !== "admin") return reply.code(403).send({ error: "admin_required" });
     const users = await sql`SELECT id, username, real_name, created_at FROM member_users WHERE status = 'pending' ORDER BY created_at`;
     return { users };
@@ -252,7 +256,7 @@ export function registerMembership(app: FastifyInstance) {
 
   app.get("/api/v1/membership/sources", async (req, reply) => {
     noStore(reply);
-    if (!(await session(req))) return reply.code(401).send({ error: "login_required" });
+    if (!(await memberSession(req))) return reply.code(401).send({ error: "login_required" });
     const sources = await sql`
       SELECT s.id, s.name, s.kind, s.enabled, s.health, s.last_ok_at,
         s.config->'_aihot'->>'discoveryScope' AS discovery_scope,
@@ -274,7 +278,7 @@ export function registerMembership(app: FastifyInstance) {
   app.post("/api/v1/membership/sources", async (req, reply) => {
     noStore(reply);
     if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
-    const user = await session(req);
+    const user = await memberSession(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const { name, sourceUrl, kind } = body(req);
     if (typeof sourceUrl !== "string" || typeof name !== "string" || name.trim().length < 2 || name.trim().length > 120 || (kind !== "rss" && kind !== "web_list" && kind !== "sitemap")) return reply.code(400).send({ error: "invalid_source" });
@@ -338,7 +342,7 @@ export function registerMembership(app: FastifyInstance) {
   app.post("/api/v1/membership/admin/:id/decision", async (req, reply) => {
     noStore(reply);
     if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
-    const admin = await session(req);
+    const admin = await memberSession(req);
     if (!admin || admin.role !== "admin") return reply.code(403).send({ error: "admin_required" });
     const { decision } = body(req);
     if (decision !== "approve" && decision !== "reject") return reply.code(400).send({ error: "invalid_decision" });
@@ -396,7 +400,7 @@ export function registerMembershipAccessBoundary(app: FastifyInstance) {
     noStore(reply);
     reply.removeHeader("Access-Control-Allow-Origin");
     reply.removeHeader("Access-Control-Allow-Credentials");
-    if (!(await session(req))) return reply.code(401).send({ error: "login_required" });
+    if (!(await memberSession(req))) return reply.code(401).send({ error: "login_required" });
   });
   app.addHook("onSend", async (req, reply, payload) => {
     if (privateContentPath(req)) {
@@ -407,3 +411,6 @@ export function registerMembershipAccessBoundary(app: FastifyInstance) {
     return payload;
   });
 }
+
+export { EXPERT_QUEUE } from "./experts/queue.ts";
+export { cleanupExpertData, recoverExpertTasks } from "./experts/worker.ts";

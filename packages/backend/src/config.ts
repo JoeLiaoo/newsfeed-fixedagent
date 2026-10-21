@@ -90,7 +90,19 @@ export function credentials(group: CredentialGroup): Record<string, string> {
 
 export function credential(group: CredentialGroup, name: string): string | null {
   const value = env[name] ?? credentials(group)[name];
-  return value && value.trim() !== "" ? value : null;
+  if (value && value.trim() !== "") return value.trim();
+  // This product's local integration keys were supplied as raw text files, not dotenv snippets.
+  // Read only the two known filenames and never parse them as JSON or include their contents in errors.
+  const rawFile = name === "DEEPSEEK_API_KEY" ? "deepseek-api-key.json" : name === "XINHUA_MCP_API_KEY" ? "xinhua-mcp-key.json" : null;
+  if (!rawFile) return null;
+  const candidates = [config.credentialsDir, path.join(REPO_ROOT, ".config")].filter((dir): dir is string => !!dir);
+  for (const directory of new Set(candidates)) {
+    try {
+      const raw = readFileSync(path.join(directory, rawFile), "utf8").trim();
+      if (raw) return raw;
+    } catch { /* An unset integration key is reported by the provider at task time. */ }
+  }
+  return null;
 }
 
 const PLACEHOLDER = /^(changeme|placeholder|dummy|test|xxx+|your[-_ ].*|<.*>)$/i;
