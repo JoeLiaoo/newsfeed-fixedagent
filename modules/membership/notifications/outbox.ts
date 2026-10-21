@@ -18,14 +18,18 @@ function dateInfo() {
   return {day,hour};
 }
 
+// Each edition records a source cutoff before reading any rows. Items are deduplicated by
+// stable fact/relationship keys within the same transaction that creates the outbox.
 export async function generateDueNotifications() {
   if(process.env.P3_NOTIFICATIONS_ENABLED!=="true") return {disabled:true};
   const {day,hour}=dateInfo();
   const holiday=offDay(day,[...flags("P3_CN_HOLIDAYS")],[...flags("P3_CN_MAKEUP_WORKDAYS")]);
   const types:("news"|"gp")[]=[];
-  if(hour===(holiday?11:9)) types.push("news");
-  if(hour===(holiday?12:10)) types.push("gp");
+  // An outage at the exact edition hour must not discard the entire day.
+  if(hour>=(holiday?11:9)) types.push("news");
+  if(hour>=(holiday?12:10)) types.push("gp");
   if(!types.length) return {due:false};
+  const cutoff=new Date();
   const users=await sql<User[]>`SELECT u.id,COALESCE(s.news_enabled,true) AS news_enabled,COALESCE(s.gp_enabled,true) AS gp_enabled,
     COALESCE(s.binding_version,1) AS binding_version,b.bound_at,s.news_since,s.gp_since
     FROM member_users u JOIN member_weixin_bindings b ON b.user_id=u.id AND b.status='active'
@@ -36,41 +40,58 @@ export async function generateDueNotifications() {
   for(const kind of types){
     for(const user of users){
       if(kind==="news"&&!user.news_enabled || kind==="gp"&&!user.gp_enabled) continue;
-      // Latest outbox creation is the delivery window cursor, including empty-day messages.
-      const [cursor]=await sql<{last_at:Date|null}[]>`SELECT max(created_at) AS last_at FROM member_notification_outbox
+      const [cursor]=await sql<{last_at:Date|null}[]>`SELECT max(window_end_at) AS last_at FROM member_notification_outbox
         WHERE user_id=${user.id} AND kind=${kind} AND binding_version=${user.binding_version}`;
       const start=kind==="news"?user.news_since:user.gp_since;
-      const since=cursor?.last_at??(start&&start>user.bound_at?start:user.bound_at);
-      let lines:string[]=[];
+      const minimum=new Date(Math.max(user.bound_at.getTime(),start?.getTime()??0));
+      const since=new Date(Math.max(minimum.getTime(),cursor?.last_at?.getTime()??0));
+      // Reread a bounded overlap to cover transactions that commit after a prior edition's
+      // snapshot and records that become visible with old publication timestamps.
+      const overlap=new Date(Math.max(minimum.getTime(),since.getTime()-48*60*60*1000));
+      const candidates:{key:string;text:string}[]=[];
       if(kind==="gp"){
         const observations=await sql<{id:string;gp_name:string;investee_name:string;approved_event_date:string;approved_source_url:string;sector_tags:string[]}[]>`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.approved_event_date::text,i.approved_source_url,i.sector_tags
           FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
-          WHERE i.status='verified' AND g.status='active' AND i.approved_at>${since} AND i.approved_at<=now()
+          WHERE i.status='verified' AND g.status='active' AND i.approved_at>=${overlap} AND i.approved_at<${cutoff}
             AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id} AND t.tag=ANY(i.sector_tags))
           ORDER BY i.approved_at,i.id`;
-        lines=observations.map(o=>"• "+o.gp_name+" → "+o.investee_name+"（"+o.approved_event_date+"）\n"+o.sector_tags.join("、")+"\n"+o.approved_source_url);
+        for(const o of observations) candidates.push({
+          key:"gp:"+o.id,text:"• "+o.gp_name+" → "+o.investee_name+"（"+o.approved_event_date+"）\n"+
+            o.sector_tags.join("、")+"\n"+o.approved_source_url,
+        });
       }else{
-        const cutoff=new Date();
-        const items=await sql<{title:string;summary:string|null;url:string}[]>`SELECT DISTINCT ON (COALESCE('story:'||p.story_id::text,'fact:'||p.fact_id::text,'article:'||p.article_id))
+        const items=await sql<{source_key:string;title:string;summary:string|null;url:string}[]>`SELECT DISTINCT ON (COALESCE('story:'||p.story_id::text,'fact:'||p.fact_id::text,'article:'||p.article_id))
+          COALESCE('story:'||p.story_id::text,'fact:'||p.fact_id::text,'article:'||p.article_id) AS source_key,
           p.title,p.summary,p.url FROM publications p
-          WHERE ${listedCondition(cutoff)} AND p.timeline_at>=${since} AND p.timeline_at<${cutoff}
+          WHERE ${listedCondition(cutoff)}
+            AND GREATEST(p.updated_at,COALESCE(p.visible_after,p.updated_at))>=${overlap}
+            AND GREATEST(p.updated_at,COALESCE(p.visible_after,p.updated_at))<${cutoff}
             AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id} AND t.tag=ANY(p.tags))
           ORDER BY COALESCE('story:'||p.story_id::text,'fact:'||p.fact_id::text,'article:'||p.article_id),p.timeline_at DESC`;
-        lines=items.map(item=>"• "+item.title+"\n"+(item.summary??"暂无摘要")+"\n"+item.url);
+        for(const item of items) candidates.push({
+          key:item.source_key,text:"• "+item.title+"\n"+(item.summary??"暂无摘要")+"\n"+item.url,
+        });
       }
-      const headline=kind==="news"?"个人资讯日报":"GP 新增投资动向";
-      const parts=splitMessageLines(lines.length?[headline+" "+day,...lines]:[headline+" "+day,"\n今日无更新"]);
-      // Generate all chunks atomically so retries never create a partial edition.
+      const headline=kind==="news"?"个人资讯日报":"GP 新增投资关系";
+      // User lock ensures two generators do not consume item keys for an edition twice.
       const count=await sql.begin(async tx=>{
-        const ids=[];
+        await tx`SELECT id FROM member_users WHERE id=${user.id} FOR UPDATE`;
+        const existing=await tx`SELECT id FROM member_notification_outbox
+          WHERE user_id=${user.id} AND kind=${kind} AND local_date=${day}::date AND binding_version=${user.binding_version} LIMIT 1`;
+        if(existing.length) return 0;
+        const lines:string[]=[];
+        for(const item of candidates){
+          const claimed=await tx`INSERT INTO member_notification_seen(user_id,kind,source_key)
+            VALUES(${user.id},${kind},${item.key}) ON CONFLICT DO NOTHING RETURNING source_key`;
+          if(claimed.length) lines.push(item.text);
+        }
+        const parts=splitMessageLines(lines.length?[headline+" "+day,...lines]:[headline+" "+day,"今日无更新"]);
         for(let index=0;index<parts.length;index++){
           const content=parts[index]!;
-          const inserted=await tx`INSERT INTO member_notification_outbox(id,user_id,kind,local_date,binding_version,part_index,payload,payload_sha256)
-            VALUES(${randomUUID()},${user.id},${kind},${day}::date,${user.binding_version},${index},${content},${sha256(content)})
-            ON CONFLICT (user_id,kind,local_date,binding_version,part_index) DO NOTHING RETURNING id`;
-          if(inserted.length) ids.push(inserted[0]!.id);
+          await tx`INSERT INTO member_notification_outbox(id,user_id,kind,local_date,binding_version,part_index,payload,payload_sha256,window_end_at)
+            VALUES(${randomUUID()},${user.id},${kind},${day}::date,${user.binding_version},${index},${content},${sha256(content)},${cutoff})`;
         }
-        return ids.length;
+        return parts.length;
       });
       created+=count;
     }

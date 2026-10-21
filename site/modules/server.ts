@@ -11,7 +11,7 @@ export const SERVER_MODULES: readonly ServerModule[] = [{
   http: registerMembership,
   queues: [EXPERT_QUEUE, GP_QUEUE],
   schedules: [
-    {name: "membership.notifications-generate",cron:"0 9,10,11,12 * * *",run:generateDueNotifications,when:()=>process.env.P3_NOTIFICATIONS_ENABLED==="true"},
+    {name: "membership.notifications-generate",cron:"0 9-23 * * *",missed:"once",run:generateDueNotifications,when:()=>process.env.P3_NOTIFICATIONS_ENABLED==="true"},
     {name: "membership.notifications-dispatch",cron:"*/5 * * * *",run:dispatchOutbox,when:()=>process.env.P3_DELIVERY_ENABLED==="true"},
     { name: "membership.gp-sync", cron: "0 * * * *", when: () => process.env.P3_GP_SYNC_ENABLED === "true", run: syncAllGps }, {
     name: "membership.expert-recover",
