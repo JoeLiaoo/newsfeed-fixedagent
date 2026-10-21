@@ -45,7 +45,7 @@ export async function generateDueNotifications() {
           WHERE i.status='verified' AND g.status='active' AND i.approved_at>${since} AND i.approved_at<=now()
             AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id} AND t.tag=ANY(i.sector_tags))
           ORDER BY i.approved_at,i.id`;
-        lines=observations.map(o=>${"• "+o.gp_name+" → "+o.investee_name+"（"+o.approved_event_date+"）\n"+o.sector_tags.join("、")+"\n"+o.approved_source_url});
+        lines=observations.map(o=>"• "+o.gp_name+" → "+o.investee_name+"（"+o.approved_event_date+"）\n"+o.sector_tags.join("、")+"\n"+o.approved_source_url);
       }else{
         const cutoff=new Date();
         const items=await sql<{title:string;summary:string|null;url:string}[]>`SELECT DISTINCT ON (COALESCE('story:'||p.story_id::text,'fact:'||p.fact_id::text,'article:'||p.article_id))
@@ -53,7 +53,7 @@ export async function generateDueNotifications() {
           WHERE ${listedCondition(cutoff)} AND p.timeline_at>=${since} AND p.timeline_at<${cutoff}
             AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id} AND t.tag=ANY(p.tags))
           ORDER BY COALESCE('story:'||p.story_id::text,'fact:'||p.fact_id::text,'article:'||p.article_id),p.timeline_at DESC`;
-        lines=items.map(item=>${"• "+item.title+"\n"+(item.summary??"暂无摘要")+"\n"+item.url});
+        lines=items.map(item=>"• "+item.title+"\n"+(item.summary??"暂无摘要")+"\n"+item.url);
       }
       const headline=kind==="news"?"个人资讯日报":"GP 新增投资动向";
       const parts=splitMessageLines(lines.length?[headline+" "+day,...lines]:[headline+" "+day,"\n今日无更新"]);
