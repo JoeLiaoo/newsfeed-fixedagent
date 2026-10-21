@@ -71,10 +71,10 @@ export async function syncGp(id:string) {
       const observationId=randomUUID();
       const inserted=await tx`INSERT INTO member_gp_investments
         (id,gp_id,investee_key,investee_name,investee_id,data_date,provider_updated_at,investment_date,raw_evidence,status)
-        VALUES(${observationId},${id},${row.key},${row.name},${row.investeeId},${row.dataDate},${row.updatedAt},${row.investmentDate},${tx.json(row.raw)},${baseline?"baseline":"observed"})
+        VALUES(${observationId},${id},${row.key},${row.name},${row.investeeId},${row.dataDate},${row.updatedAt},${row.investmentDate},${tx.json(row.raw as never)},${baseline?"baseline":"observed"})
         ON CONFLICT(gp_id,investee_key) DO NOTHING RETURNING id`;
       if(inserted.length && !baseline) discovered.push({id:observationId,name:row.name,raw:row.raw});
-      if(!inserted.length) await tx`UPDATE member_gp_investments SET last_seen_at=now(),data_date=${row.dataDate},provider_updated_at=${row.updatedAt},raw_evidence=${tx.json(row.raw)}
+      if(!inserted.length) await tx`UPDATE member_gp_investments SET last_seen_at=now(),data_date=${row.dataDate},provider_updated_at=${row.updatedAt},raw_evidence=${tx.json(row.raw as never)}
         WHERE gp_id=${id} AND investee_key=${row.key}`;
     }
     await tx`INSERT INTO member_gp_snapshots(id,gp_id,complete,source_total,fetched_count,row_count)
