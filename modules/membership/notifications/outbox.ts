@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { sql } from "@aihot/backend/db";
 import { listedCondition } from "@aihot/backend/publication/scope";
-import { matchInterests, offDay, splitMessageLines } from "../gp/core.ts";
+import { dueNotificationKinds, offDay, splitMessageLines } from "../gp/core.ts";
 
 const sha256=(value:string)=>createHash("sha256").update(value).digest("hex");
 const flags=(name:string)=>new Set((process.env[name]??"").split(",").map(x=>x.trim()).filter(Boolean));
@@ -24,10 +24,7 @@ export async function generateDueNotifications() {
   if(process.env.P3_NOTIFICATIONS_ENABLED!=="true") return {disabled:true};
   const {day,hour}=dateInfo();
   const holiday=offDay(day,[...flags("P3_CN_HOLIDAYS")],[...flags("P3_CN_MAKEUP_WORKDAYS")]);
-  const types:("news"|"gp")[]=[];
-  // An outage at the exact edition hour must not discard the entire day.
-  if(hour>=(holiday?11:9)) types.push("news");
-  if(hour>=(holiday?12:10)) types.push("gp");
+  const types=dueNotificationKinds(hour,holiday);
   if(!types.length) return {due:false};
   const cutoff=new Date();
   const users=await sql<User[]>`SELECT u.id,COALESCE(s.news_enabled,true) AS news_enabled,COALESCE(s.gp_enabled,true) AS gp_enabled,

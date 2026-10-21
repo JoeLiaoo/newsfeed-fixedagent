@@ -1,0 +1,1 @@
+ALTER TABLE member_gp_investments ADD COLUMN classification_claimed_at timestamptz;

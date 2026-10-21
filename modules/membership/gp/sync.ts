@@ -32,6 +32,12 @@ async function capture(gp:GP):Promise<Capture> {
 
 async function classify(id:string,name:string,raw:Record<string,unknown>) {
   if(process.env.MODEL_CALLS_ENABLED!=="true") return;
+  const claimedAt=new Date();
+  const claimed=await sql`UPDATE member_gp_investments SET classification_attempts=classification_attempts+1,
+    classification_claimed_at=${claimedAt} WHERE id=${id} AND classification_state IN('pending','failed')
+    AND classification_attempts<3
+    AND (classification_claimed_at IS NULL OR classification_claimed_at<now()-interval '20 minutes') RETURNING id`;
+  if(!claimed.length) return;
   try {
     const result=await chatJson({
       model:"default",purpose:"expert",subject:"gp-sector:"+id,promptVersion:"gp-sector-1",
@@ -41,9 +47,9 @@ async function classify(id:string,name:string,raw:Record<string,unknown>) {
     });
     const tags=[...new Set(result.data.tags)].filter(t=>GP_TAGS.includes(t));
     await sql`UPDATE member_gp_investments SET sector_tags=${tags},sector_reason=${result.data.reason},classification_model=${result.model},classification_state='suggested'
-      WHERE id=${id} AND classification_state='pending'`;
+      WHERE id=${id} AND classification_state IN('pending','failed') AND classification_claimed_at=${claimedAt}`;
   }catch{
-    await sql`UPDATE member_gp_investments SET classification_state='failed' WHERE id=${id} AND classification_state='pending'`;
+    await sql`UPDATE member_gp_investments SET classification_state='failed' WHERE id=${id} AND classification_state IN('pending','failed') AND classification_claimed_at=${claimedAt}`;
   }
 }
 
@@ -88,8 +94,7 @@ export async function syncGp(id:string) {
     await tx`UPDATE member_gp_watchlist SET last_synced_at=now(),last_error=NULL WHERE id=${id}`;
     return {state:baseline?"baseline":"synced",count:snapshot.records.length,newlyObserved:discovered.length};
   });
-  // Advisory categorization only. New relationship is not promoted to confirmed investment without evidence review.
-  for(const row of discovered.slice(0,20)) await classify(row.id,row.name,row.raw);
+  // Classification is a persistent bounded backlog, not a one-shot slice of newly discovered rows.
   return outcome;
 }
 
@@ -99,4 +104,19 @@ export async function syncAllGps() {
   const results=[];
   for(const gp of gps) results.push(await syncGp(gp.id));
   return {count:gps.length,results};
+}
+
+// One bounded batch per run; unprocessed and retryable rows persist across worker restarts.
+export async function classifyPendingGps() {
+  if(process.env.P3_GP_SYNC_ENABLED!=="true"||process.env.MODEL_CALLS_ENABLED!=="true")
+    return {disabled:true};
+  const pending=await sql<{id:string;investee_name:string;raw_evidence:Record<string,unknown>}[]>`
+    SELECT i.id,i.investee_name,i.raw_evidence FROM member_gp_investments i
+    JOIN member_gp_watchlist g ON g.id=i.gp_id
+    WHERE g.status='active' AND i.classification_state IN('pending','failed')
+      AND i.classification_attempts<3
+      AND (i.classification_claimed_at IS NULL OR i.classification_claimed_at<now()-interval '20 minutes')
+    ORDER BY i.first_seen_at,i.id LIMIT 20`;
+  for(const row of pending) await classify(row.id,row.investee_name,row.raw_evidence);
+  return {examined:pending.length};
 }

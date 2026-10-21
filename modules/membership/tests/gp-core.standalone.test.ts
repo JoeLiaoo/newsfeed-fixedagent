@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeInvestment,uniqueInvestments,validSectorTags,matchInterests,offDay,splitMessageLines } from "../gp/core.ts";
+import { normalizeInvestment,uniqueInvestments,validSectorTags,matchInterests,offDay,splitMessageLines,canReviewInvestment,dueNotificationKinds } from "../gp/core.ts";
 
 test("data source update time is not treated as deal date",()=>{
   const row=normalizeInvestment({company_name:"Example",company_id:"abc",include_date:"2026-10-22"});
@@ -26,4 +26,18 @@ test("configured Chinese holiday and makeup workday override weekends",()=>{
 test("long messages are split without dropping any part",()=>{
   const data="一".repeat(3100);
   assert.equal(splitMessageLines([data],1000).join(""),data);
+});
+
+test("historical baseline and retracted observations are never new approved investments",()=>{
+  assert.equal(canReviewInvestment("baseline","verified"),false);
+  assert.equal(canReviewInvestment("retracted","verified"),false);
+  assert.equal(canReviewInvestment("observed","verified"),true);
+  assert.equal(canReviewInvestment("verified","verified"),true); // edits keep the first approval timestamp
+});
+test("late daily cron runs still include already-due channels",()=>{
+  assert.deepEqual(dueNotificationKinds(8,false),[]);
+  assert.deepEqual(dueNotificationKinds(9,false),["news"]);
+  assert.deepEqual(dueNotificationKinds(14,false),["news","gp"]);
+  assert.deepEqual(dueNotificationKinds(11,true),["news"]);
+  assert.deepEqual(dueNotificationKinds(16,true),["news","gp"]);
 });

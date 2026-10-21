@@ -58,3 +58,20 @@ export function splitMessageLines(lines: readonly string[], limit = 1600) {
   if(current) chunks.push(current);
   return chunks.length?chunks:["今日无更新"];
 }
+
+/** A historical baseline or a retracted item can never become a newly approved investment. */
+export function canReviewInvestment(from:string,to:string) {
+  const allowed:Record<string,string[]>={
+    baseline:["baseline","retracted"],observed:["observed","verified","retracted"],
+    verified:["verified","retracted"],retracted:["retracted"],
+  };
+  return allowed[from]?.includes(to)??false;
+}
+
+/** Schedules can be delayed after a restart, but only one digest per calendar edition is created. */
+export function dueNotificationKinds(hour:number,isOffDay:boolean):("news"|"gp")[] {
+  const due:("news"|"gp")[]=[];
+  if(hour>=(isOffDay?11:9)) due.push("news");
+  if(hour>=(isOffDay?12:10)) due.push("gp");
+  return due;
+}

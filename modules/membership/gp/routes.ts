@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { sql } from "@aihot/backend/db";
 import { enqueueOn } from "@aihot/backend/jobs/queue";
 import { GP_QUEUE } from "./queue.ts";
-import { GP_TAGS, validSectorTags } from "./core.ts";
+import { GP_TAGS, canReviewInvestment, validSectorTags } from "./core.ts";
 import type { MemberSession } from "../server.ts";
 
 type Auth = (req:FastifyRequest)=>Promise<MemberSession|null>;
@@ -52,7 +52,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const id=(req.params as {id:string}).id;
     const changed=await sql`UPDATE member_gp_watchlist SET status=${status as string},entity_role=${role as string},entity_id=${entityId||null},credit_code=${creditCode||null},aliases=${aliases},
       source_ref=${source},reviewed_by=${user.id},reviewed_at=now() WHERE id=${id}
-      AND (NOT EXISTS(SELECT 1 FROM member_gp_snapshots WHERE gp_id=${id} AND complete=true)
+      AND (NOT EXISTS(SELECT 1 FROM member_gp_snapshots WHERE gp_id=${id})
            OR (entity_id IS NOT DISTINCT FROM ${entityId||null} AND entity_role=${role as string}))
       RETURNING id`;
     if(changed.length) return {ok:true};
@@ -96,11 +96,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       }[]>`SELECT status,sector_tags,sector_reason,approved_event_date::text,approved_source_url,approved_by,
         approved_at,revision,source_snapshot_id FROM member_gp_investments WHERE id=${id} FOR UPDATE`;
       if(!old) return "not_found";
-      const allowed:Record<string,string[]> = {
-        baseline:["baseline","retracted"], observed:["observed","verified","retracted"],
-        verified:["verified","retracted"], retracted:["retracted"],
-      };
-      if(!allowed[old.status]?.includes(String(status))) return "invalid_transition";
+      if(!canReviewInvestment(old.status,String(status))) return "invalid_transition";
       const firstApproval=old.status==="observed" && status==="verified";
       const approvedAt=firstApproval ? new Date() : old.approved_at;
       const approvedBy=firstApproval ? user.id : old.approved_by;
