@@ -30,9 +30,12 @@ npm run typecheck
 
 ## 文档
 
+- [贡献与仓库治理](CONTRIBUTING.md)
+- [Agent 工作约定](AGENTS.md)
 - [建设需求基线](docs/PLAN.md)
 - [实施状态和剩余验收](docs/IMPLEMENTATION.md)
+- [P0 资料盘点与外部阻碍](docs/P0-STATUS.md)
 - [AIHOT 上游版本、许可证和适配记录](docs/UPSTREAM.md)
-- [P1 实施记录](docs/logs/2026-10-21-P1-platform.md)
+- [文档与日志索引](docs/README.md)
 
 `.env` 和 `.config/` 不提交到 Git。生产环境上线前还需按实施计划完成人员试用和服务器部署核验。

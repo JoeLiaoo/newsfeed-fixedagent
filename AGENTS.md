@@ -2,6 +2,8 @@
 
 本文件适用于整个仓库。用户的最新指示优先于本文；产品需求以 `docs/PLAN.md` 为准，执行进度以 `docs/IMPLEMENTATION.md` 为准。
 
+面向所有贡献者的分支、评审、检查和安全约定见 [`CONTRIBUTING.md`](CONTRIBUTING.md)；仓库治理清单不替代 GitHub 上实际配置的分支保护和权限设置。
+
 ## 开始工作前
 
 1. 阅读 `README.md`、`docs/PLAN.md`、`docs/IMPLEMENTATION.md` 和最近的 `docs/logs/` 日志；检查 Git 状态，保留其他人尚未提交的改动。
