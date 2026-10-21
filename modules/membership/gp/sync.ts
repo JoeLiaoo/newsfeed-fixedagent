@@ -23,7 +23,7 @@ async function capture(gp:GP):Promise<Capture> {
       total=parsed.total??total;
       // Never infer a full inventory from a short page without a provider completion signal.
       if(parsed.hasMore===false || (total!==null && fetched>=total)){complete=true;break;}
-      if(parsed.rows.length===0){complete=parsed.hasMore===false;break;}
+      if(parsed.rows.length===0){break;}
     }
     const normalized=uniqueInvestments(all);
     return {...normalized,total,fetched,complete:complete && normalized.missing===0 && (total===null||fetched>=total)};

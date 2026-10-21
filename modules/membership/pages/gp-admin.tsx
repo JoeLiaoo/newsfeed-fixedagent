@@ -3,11 +3,12 @@ import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Button } from "@aihot/web/components/member-ui/button";
 import { Card,CardContent,CardHeader,CardTitle } from "@aihot/web/components/member-ui/card";
 import { Input } from "@aihot/web/components/member-ui/input";
+import { Checkbox } from "@aihot/web/components/member-ui/checkbox";
 import { Label } from "@aihot/web/components/member-ui/label";
 import { DIRECTIONS } from "../catalog.ts";
 const GP_TAGS = DIRECTIONS.filter(d => d.name !== "战略配售").flatMap(d => [...d.tags]);
 
-type GP={id:string;canonical_name:string;entity_id:string|null;credit_code:string|null;entity_role:string;status:string;source_ref:string;last_synced_at:string|null;last_error:string|null};
+type GP={id:string;canonical_name:string;aliases:string[];entity_id:string|null;credit_code:string|null;entity_role:string;status:string;source_ref:string;last_synced_at:string|null;last_error:string|null};
 type Observation={id:string;gp_name:string;investee_name:string;status:string;sector_tags:string[];sector_reason:string|null;data_date:string|null;first_seen_at:string;approved_source_url:string|null;approved_event_date:string|null};
 const prefix="/api/v1/membership/admin";
 
@@ -72,7 +73,7 @@ export default function GpAdminPage(){
         <div className="font-medium">{row.gp_name} → {row.investee_name}</div>
         <p className="text-sm text-ink-3">{row.status} · 首次发现 {new Date(row.first_seen_at).toLocaleDateString("zh-CN")} · 数据日期 {row.data_date||"未提供"}</p>
         <fieldset className="flex flex-wrap gap-3"><legend className="mb-1 text-sm">细分赛道</legend>
-          {GP_TAGS.map(tag=><label key={tag} className="inline-flex items-center gap-1 text-xs"><input type="checkbox" name="tags" value={tag} defaultChecked={row.sector_tags.includes(tag)}/>{tag}</label>)}
+          {GP_TAGS.map(tag=><label key={tag} className="inline-flex items-center gap-1 text-xs"><Checkbox name="tags" value={tag} defaultChecked={row.sector_tags.includes(tag)}/>{tag}</label>)}
         </fieldset>
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="grid gap-1 text-sm">状态<select name="status" defaultValue={row.status} className="rounded-control border border-line bg-surface p-2"><option value="baseline">历史基线</option><option value="observed">新发现（待核）</option><option value="verified">证据核准，可推送</option><option value="retracted">撤回</option></select></label>
@@ -91,7 +92,7 @@ function GpRow({gp,busy,onSave,onSync}:{gp:GP;busy:boolean;onSave:(input:Record<
   return <form onSubmit={event=>{
     event.preventDefault();
     const values=new FormData(event.currentTarget);
-    onSave({role:values.get("role"),status:values.get("status"),entityId:values.get("entityId"),creditCode:values.get("creditCode"),sourceRef:values.get("sourceRef")});
+    onSave({role:values.get("role"),status:values.get("status"),entityId:values.get("entityId"),creditCode:values.get("creditCode"),sourceRef:values.get("sourceRef"),aliases:String(values.get("aliases")??"").split(/[,，、]/).map(v=>v.trim()).filter(Boolean)});
   }} className="grid gap-2 rounded-control border border-line-soft p-4">
     <strong>{gp.canonical_name}</strong><p className="text-xs text-ink-3">上次同步：{gp.last_synced_at||"未同步"} · {gp.last_error||"无错误"}</p>
     <div className="grid gap-2 sm:grid-cols-2">
@@ -100,6 +101,7 @@ function GpRow({gp,busy,onSave,onSync}:{gp:GP;busy:boolean;onSave:(input:Record<
       <label className="grid gap-1 text-sm">身份<select name="role" defaultValue={gp.entity_role} className="rounded-control border border-line bg-surface p-2"><option value="manager">管理人</option><option value="gp">直接投资 GP（已核实）</option><option value="fund">基金产品</option></select></label>
       <label className="grid gap-1 text-sm">监测状态<select name="status" defaultValue={gp.status} className="rounded-control border border-line bg-surface p-2"><option value="candidate">待核</option><option value="active">启用（仅核实 GP）</option><option value="paused">暂停</option></select></label>
     </div>
+    <label className="grid gap-1 text-sm">别名（逗号分隔）<Input name="aliases" defaultValue={gp.aliases.join("、")}/></label>
     <label className="grid gap-1 text-sm">依据<Input name="sourceRef" defaultValue={gp.source_ref} required/></label>
     <div className="flex gap-2"><Button size="sm" disabled={busy} type="submit">保存主体</Button><Button size="sm" variant="outline" disabled={busy||gp.status!=="active"} type="button" onClick={onSync}>请求同步</Button></div>
   </form>;

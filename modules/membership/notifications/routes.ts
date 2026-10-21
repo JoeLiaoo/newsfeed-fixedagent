@@ -34,9 +34,12 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
       return reply.code(400).send({error:"invalid_notification_settings"});
     await sql.begin(async tx=>{
       await tx`INSERT INTO member_notification_settings(user_id) VALUES(${user.id}) ON CONFLICT DO NOTHING`;
-      const [old]=await tx<{news_enabled:boolean;gp_enabled:boolean}[]>`SELECT news_enabled,gp_enabled FROM member_notification_settings WHERE user_id=${user.id} FOR UPDATE`;
-      const changed=old.news_enabled!==input.newsEnabled || old.gp_enabled!==input.gpEnabled;
+      const [old]=await tx<{news_enabled:boolean;gp_enabled:boolean;paused_until:Date|null}[]>`SELECT news_enabled,gp_enabled,paused_until FROM member_notification_settings WHERE user_id=${user.id} FOR UPDATE`;
+      const pauseChanged=(!!old.paused_until)!==(input.paused===true);
+      const changed=old.news_enabled!==input.newsEnabled || old.gp_enabled!==input.gpEnabled || pauseChanged;
       await tx`UPDATE member_notification_settings SET news_enabled=${input.newsEnabled as boolean},gp_enabled=${input.gpEnabled as boolean},paused_until=${input.paused===true?new Date("2099-01-01T00:00:00Z"):null},
+        news_since=CASE WHEN news_enabled<>${input.newsEnabled as boolean} OR ${pauseChanged} THEN now() ELSE news_since END,
+        gp_since=CASE WHEN gp_enabled<>${input.gpEnabled as boolean} OR ${pauseChanged} THEN now() ELSE gp_since END,
         binding_version=binding_version+${changed?1:0},updated_at=now() WHERE user_id=${user.id}`;
       await tx`UPDATE member_notification_outbox SET status='cancelled',error_code='subscription_changed'
         WHERE user_id=${user.id} AND status IN('pending','failed')`;

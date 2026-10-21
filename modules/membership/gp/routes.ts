@@ -43,12 +43,14 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const entityId=typeof input.entityId==="string"?input.entityId.trim():"";
     const creditCode=typeof input.creditCode==="string"?input.creditCode.trim():"";
     const source=typeof input.sourceRef==="string"?input.sourceRef.trim():"";
+    const aliases=Array.isArray(input.aliases)&&input.aliases.length<=20&&input.aliases.every(v=>typeof v==="string"&&v.length<=180)?[...new Set(input.aliases as string[])]:null;
+    if(!aliases) return reply.code(400).send({error:"invalid_aliases"});
     if(!["candidate","active","paused"].includes(String(status))||!["manager","gp","fund"].includes(String(role))||
        entityId.length>128||creditCode.length>32||source.length<8||source.length>1000||
        (status==="active"&&(role!=="gp"||!entityId)))
       return reply.code(400).send({error:"gp_identity_verification_required"});
     const id=(req.params as {id:string}).id;
-    const changed=await sql`UPDATE member_gp_watchlist SET status=${status as string},entity_role=${role as string},entity_id=${entityId||null},credit_code=${creditCode||null},
+    const changed=await sql`UPDATE member_gp_watchlist SET status=${status as string},entity_role=${role as string},entity_id=${entityId||null},credit_code=${creditCode||null},aliases=${aliases},
       source_ref=${source},reviewed_by=${user.id},reviewed_at=now() WHERE id=${id} RETURNING id`;
     return changed.length?{ok:true}:reply.code(404).send({error:"not_found"});
   });

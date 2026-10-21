@@ -5,7 +5,7 @@ import { matchInterests, offDay, splitMessageLines } from "../gp/core.ts";
 
 const sha256=(value:string)=>createHash("sha256").update(value).digest("hex");
 const flags=(name:string)=>new Set((process.env[name]??"").split(",").map(x=>x.trim()).filter(Boolean));
-type User={ id:string; news_enabled:boolean;gp_enabled:boolean;binding_version:number;bound_at:Date };
+type User={ id:string; news_enabled:boolean;gp_enabled:boolean;binding_version:number;bound_at:Date;news_since:Date|null;gp_since:Date|null };
 type Binding={ recipient_id:string;channel_account_id:string };
 type OutboxRow={id:string;user_id:string;kind:"news"|"gp";payload:string;attempts:number;binding_version:number};
 
@@ -27,7 +27,7 @@ export async function generateDueNotifications() {
   if(hour===(holiday?12:10)) types.push("gp");
   if(!types.length) return {due:false};
   const users=await sql<User[]>`SELECT u.id,COALESCE(s.news_enabled,true) AS news_enabled,COALESCE(s.gp_enabled,true) AS gp_enabled,
-    COALESCE(s.binding_version,1) AS binding_version,b.bound_at
+    COALESCE(s.binding_version,1) AS binding_version,b.bound_at,s.news_since,s.gp_since
     FROM member_users u JOIN member_weixin_bindings b ON b.user_id=u.id AND b.status='active'
     LEFT JOIN member_notification_settings s ON s.user_id=u.id
     WHERE u.status='active' AND (s.paused_until IS NULL OR s.paused_until<=now())
@@ -39,7 +39,8 @@ export async function generateDueNotifications() {
       // Latest outbox creation is the delivery window cursor, including empty-day messages.
       const [cursor]=await sql<{last_at:Date|null}[]>`SELECT max(created_at) AS last_at FROM member_notification_outbox
         WHERE user_id=${user.id} AND kind=${kind} AND binding_version=${user.binding_version}`;
-      const since=cursor?.last_at??user.bound_at;
+      const start=kind==="news"?user.news_since:user.gp_since;
+      const since=cursor?.last_at??(start&&start>user.bound_at?start:user.bound_at);
       let lines:string[]=[];
       if(kind==="gp"){
         const observations=await sql<{id:string;gp_name:string;investee_name:string;approved_event_date:string;approved_source_url:string;sector_tags:string[]}[]>`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.approved_event_date::text,i.approved_source_url,i.sector_tags
@@ -92,6 +93,8 @@ export async function dispatchOutbox() {
   if(process.env.P3_DELIVERY_ENABLED!=="true") return {disabled:true};
   const config=bridgeConfig();
   if(!config) return {disabled:true,reason:"bridge_not_configured"};
+  // Old unsent digests must not suddenly flood a recovered channel.
+  await sql`UPDATE member_notification_outbox SET status='cancelled',error_code='stale_outbox' WHERE status IN ('pending','failed') AND created_at<now()-interval '2 days'`;
   // A crashed 'sending' row is ambiguous. Never blindly replay it.
   await sql`UPDATE member_notification_outbox SET status='unknown',error_code='send_lease_expired',lease_expires_at=NULL
     WHERE status='sending' AND lease_expires_at<now()`;
@@ -126,7 +129,7 @@ export async function dispatchOutbox() {
         headers:{"content-type":"application/json",authorization:"Bearer "+config.token,"x-idempotency-key":job.id},
         body:JSON.stringify({recipientId:recipient.recipient_id,channelAccountId:recipient.channel_account_id,text:job.payload,idempotencyKey:job.id}),
       });
-      if(response.status===401||response.status===410){
+      if(response.status===410){
         await sql.begin(async tx=>{
           await tx`UPDATE member_weixin_bindings SET status='requires_rebind' WHERE user_id=${job.user_id}`;
           await tx`UPDATE member_notification_outbox SET status='requires_rebind',lease_expires_at=NULL,error_code='channel_expired' WHERE id=${job.id}`;
