@@ -10,6 +10,9 @@ const isMigration = (file: string) => /^(database\/migrations|modules\/[^/]+\/mi
 export function checkMigrations(root: string, base: string): string[] {
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   const before = new Set(git("ls-tree", "-r", "--name-only", base).split("\n").filter(isMigration));
+  // The initial AIHOT import adds its already-numbered 0001–0089 history to this docs-only repository.
+  // Those files are the pinned upstream baseline, not online migrations authored by this change.
+  const importingEngineBaseline = before.size === 0;
   const current = git("ls-files", "--cached", "--others", "--exclude-standard").split("\n").filter((file) => isMigration(file) && existsSync(path.join(root, file)));
   const problems: string[] = [];
   for (const file of before) {
@@ -21,6 +24,7 @@ export function checkMigrations(root: string, base: string): string[] {
     if (names.has(name)) problems.push(`${file}: two migrations are named ${name}`);
     names.add(name);
     if (before.has(file)) continue;
+    if (importingEngineBaseline && file.startsWith("database/migrations/") && Number(name.slice(0, 4)) <= 89) continue;
     if (!/^\d{4}_[a-z0-9_]+\.sql$/.test(name) || Number(name.slice(0, 4)) < FIRST_ONLINE_MIGRATION) {
       problems.push(`${file}: new migrations start at ${String(FIRST_ONLINE_MIGRATION).padStart(4, "0")} and use NNNN_name.sql`);
       continue;

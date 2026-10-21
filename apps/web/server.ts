@@ -9,7 +9,8 @@ import { pathToFileURL } from "node:url";
 import { createRequestListener } from "@react-router/node";
 import type { ServerBuild } from "react-router";
 import { isApiOwned, resolveRedirect } from "@aihot/contracts/http-policy";
-import { BROWSER_MAX_SECONDS } from "./app/lib/api.server.ts";
+import { API_BASE_URL, BROWSER_MAX_SECONDS } from "./app/lib/api.server.ts";
+import { withRequestCookie } from "./app/lib/request-context.server.ts";
 import { proxyToApi } from "./app/lib/api-proxy.server.ts";
 import { logError } from "./app/lib/errors.server.ts";
 
@@ -95,7 +96,8 @@ function pageResponse(req: import("node:http").IncomingMessage, res: import("nod
   // An origin-form target is a path even when it starts with //, not a new URL authority.
   const url = new URL(target.startsWith("/") ? `http://web.local${target}` : target, "http://web.local");
   const pathname = decodeURIComponent(url.pathname).replace(/\.data$/, "");
-  const publicRead = (req.method === "GET" || req.method === "HEAD") && !/^\/admin(?:\/|$)/i.test(pathname);
+  // Every page belongs to an employee account; shared caches must never retain rendered content.
+  const publicRead = false;
   if (publicRead && url.pathname.endsWith(".data")) {
     url.searchParams.delete("_routes");
     req.url = url.pathname + url.search;
@@ -160,8 +162,25 @@ async function handle(req: import("node:http").IncomingMessage, res: import("nod
   }
 
   if ((req.method === "GET" || req.method === "HEAD") && pathname.includes(".") && (await serveStatic(pathname, res))) return;
+
+  if (!/^\/(?:login|register)(?:\/|$)/i.test(pathname)) {
+    const check = await fetch(`${API_BASE_URL}/api/v1/membership/me`, {
+      headers: { cookie: req.headers.cookie ?? "", accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (check.status === 401) {
+      res.writeHead(302, { Location: `/login?next=${encodeURIComponent(pathname + search)}`, "Cache-Control": "private, no-store", Vary: "Cookie" });
+      return res.end();
+    }
+    if (!check.ok) {
+      res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "private, no-store" });
+      return res.end("员工门户暂时不可用");
+    }
+  }
+
   pageResponse(req, res);
-  return ssr(req, res);
+  return withRequestCookie(req.headers.cookie ?? "", () => ssr(req, res));
 }
 
 process.on("unhandledRejection", (reason) => {

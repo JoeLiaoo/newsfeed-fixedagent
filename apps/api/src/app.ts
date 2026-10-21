@@ -17,6 +17,7 @@ import { registerFeeds } from "./routes/feeds.ts";
 import { registerStatic } from "./routes/static.ts";
 import { registerMcp } from "./routes/mcp.ts";
 import { sendProblem } from "./http/respond.ts";
+import { registerMembershipAccessBoundary } from "@citic/membership/server";
 
 /** Quiet ordinary access logs, while keeping errors that happen after the route has returned. */
 class RequestLogs extends LogController {
@@ -65,6 +66,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     }
     for (const m of serverModules()) m.on?.requestAnswered?.(req, reply, path);
   });
+
+  // The original AIHOT data routes are also private in this employee-only deployment.
+  registerMembershipAccessBoundary(app);
 
   // Central redirect table (shared with the web server).
   app.addHook("onRequest", async (req, reply) => {

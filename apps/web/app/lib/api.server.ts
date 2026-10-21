@@ -3,6 +3,7 @@
 // requests per page.
 import { data, redirect, type HeadersArgs } from "react-router";
 import { logError } from "./errors.server.ts";
+import { requestCookie } from "./request-context.server.ts";
 
 /** Where the api listens (API_BASE_URL, set by the deployment); development uses the default. */
 export const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:3001";
@@ -23,7 +24,7 @@ class ApiError extends Error {
 export async function apiGet<T>(path: string, init?: { signal?: AbortSignal; headers?: Record<string, string>; responseHeaders?: Headers }): Promise<T> {
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
-      headers: { accept: "application/json", "x-aihot-ssr": "1", ...init?.headers },
+      headers: { accept: "application/json", cookie: requestCookie(), "x-aihot-ssr": "1", ...init?.headers },
       redirect: "manual",
       signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
