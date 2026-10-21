@@ -7,6 +7,7 @@ import { Checkbox } from "@aihot/web/components/member-ui/checkbox";
 import { Input } from "@aihot/web/components/member-ui/input";
 import { Label } from "@aihot/web/components/member-ui/label";
 import { DIRECTIONS } from "../catalog.ts";
+import { toggleTagGroup } from "./interests-state.ts";
 
 type Me = { tags: string[]; catalog: string[]; user: { role: string } };
 
@@ -68,7 +69,7 @@ export default function InterestsPage() {
         return <Card key={direction.name}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-3 text-base">
-              <Checkbox id={`direction-${direction.name}`} checked={checked} onCheckedChange={() => setSelected(current => checked ? current.filter(tag => !(direction.tags as readonly string[]).includes(tag)) : [...new Set([...current, ...direction.tags])])} />
+              <Checkbox id={`direction-${direction.name}`} checked={checked} onCheckedChange={next => setSelected(current => toggleTagGroup(current, direction.tags, next === true))} />
               <Label htmlFor={`direction-${direction.name}`} className="cursor-pointer text-base">{direction.name}</Label>
             </CardTitle>
             <CardDescription>已选 {chosen} / {direction.tags.length} 个细分赛道</CardDescription>

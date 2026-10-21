@@ -2,6 +2,19 @@
   "name": "@citic/membership",
   "private": true,
   "type": "module",
-  "exports": { "./module": "./module.ts", "./server": "./server.ts", "./web": "./web.tsx" },
-  "dependencies": { "@aihot/backend": "*", "@aihot/site": "*", "@aihot/web": "*", "@modelcontextprotocol/client": "2.3.0", "fflate": "0.7.5", "react": "19.3.0", "react-router": "8.4.0" }
+  "exports": {
+    "./module": "./module.ts",
+    "./server": "./server.ts",
+    "./web": "./web.tsx"
+  },
+  "dependencies": {
+    "@aihot/backend": "*",
+    "@aihot/site": "*",
+    "@aihot/web": "*",
+    "@modelcontextprotocol/client": "2.3.0",
+    "fflate": "0.7.5",
+    "lucide-react": "1.61.0",
+    "react": "19.3.0",
+    "react-router": "8.4.0"
+  }
 }

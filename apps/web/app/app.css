@@ -4,6 +4,7 @@
 @source "../../../site/brand";
 @source "../../../site/changelog";
 @source "../../../modules/*/{web.tsx,web/**}";
+@source "../../../modules/*/pages/*.tsx";
 
 /* ---------------------------------------------------------------------------
    Design tokens: warm off-white paper, ink text, one restrained red accent
