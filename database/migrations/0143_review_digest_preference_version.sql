@@ -1,0 +1,1 @@
+ALTER TABLE member_notification_outbox ADD COLUMN digest_preference_version integer;

@@ -113,8 +113,8 @@ test("the public scope and the composite rule are spelled once, in publication/s
 const PRODUCTION = ["packages/backend/src", "packages/contracts/src", "apps/api/src", "apps/worker/src", "apps/web/app"];
 /** The site's modules (modules/<name>/), their tests and local tools left out. */
 const modules = (kind?: RegExp) => (existsSync(path.join(ROOT, "modules")) ? sources("modules", kind).filter(({ file }) => !/\/(tests|scripts)\//.test(file)) : []);
-/** The modules' pages: each one's web.tsx and web/ folder. */
-const moduleWeb = (kind?: RegExp) => modules(kind).filter(({ file }) => /^modules\/[^/]+\/web(?:\.|\/)/.test(file));
+/** The modules' browser code: composition entry points, web folders, and declared page components. */
+const moduleWeb = (kind?: RegExp) => modules(kind).filter(({ file }) => /^modules\/[^/]+\/(?:web(?:\.|\/)|pages\/)/.test(file));
 const production = () => [...PRODUCTION.flatMap((dir) => sources(dir)), { file: "apps/web/server.ts", text: readFileSync(path.join(ROOT, "apps/web/server.ts"), "utf8") }, ...modules()];
 const words = (text: string) => new Set(text.match(/[A-Za-z_][A-Za-z0-9_]*/g));
 
@@ -206,6 +206,19 @@ test("modules do not import other modules", () => {
     return !!target && installed.includes(target) && target !== owner;
   });
   assert.deepEqual(found, [], "compose modules in site/modules instead of importing their implementation");
+});
+
+test("each module declares the packages its production source imports directly",()=>{
+  const manifest=JSON.parse(readFileSync(path.join(ROOT,"modules/membership/package.json"),"utf8")) as {dependencies:Record<string,string>};
+  const declared=new Set(Object.keys(manifest.dependencies));
+  const imports=(text:string)=>text.split("\n").flatMap(line=>{
+    const match=/^\s*import\s+(?:type\s+)?(?:[\w*\s{},]+?\s+from\s+)?["']([^"']+)["']\s*;?\s*$/.exec(line);
+    return match?[match[1]!]:[];
+  });
+  const external=new Set([...modules().filter(({file})=>file.startsWith("modules/membership/")).flatMap(({text})=>imports(text))
+    .filter(spec=>!spec.startsWith(".")&&!spec.startsWith("node:"))
+    .map(spec=>spec.startsWith("@")?spec.split("/").slice(0,2).join("/"):spec.split("/")[0]!)]);
+  assert.deepEqual([...external].filter(name=>!declared.has(name)).sort(),[],"add a direct workspace dependency instead of relying on npm hoisting");
 });
 
 // The web's own code: the app, the modules' pages, and the site's pages and drawings, stylesheets included.

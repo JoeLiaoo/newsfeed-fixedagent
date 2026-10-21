@@ -81,3 +81,15 @@ test("ZIP importer rejects extra entries, malformed manifest and archive travers
   const traversal = zipSync({ "manifest.json": strToU8("{}"), "SKILL.md": goodMd, "../SKILL.md": goodMd });
   assert.throws(() => parseSkillUpload("skill.zip", Buffer.from(traversal).toString("base64")), /zip_path_unsafe/);
 });
+
+test("ZIP import carries SKILL frontmatter dependencies into the normalized package manifest",()=>{
+  const skill=`---\nname: Tool Research\ndescription: Requires a platform tool\ndependencies:\n  tools:\n    - get_direct_investment\n---\nRead the investment data.\n`;
+  const single=parseSkillMarkdown(skill);
+  const archive=zipSync({"manifest.json":strToU8("{}"),"SKILL.md":strToU8(skill)});
+  const zipped=parseSkillUpload("tool-research.zip",Buffer.from(archive).toString("base64"));
+  assert.deepEqual(zipped.manifest,single.manifest);
+  assert.deepEqual(zipped.missingDependencies,single.missingDependencies);
+  assert.deepEqual(zipped.missingDependencies,["工具依赖（纯文本模式不可用）：get_direct_investment"]);
+  const unsafe=zipSync({"manifest.json":strToU8('{"unknownDependencyField":[]}'),"SKILL.md":strToU8(skill)});
+  assert.throws(()=>parseSkillUpload("unknown.zip",Buffer.from(unsafe).toString("base64")),/manifest_dependencies_invalid/);
+});

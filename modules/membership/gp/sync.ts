@@ -4,6 +4,7 @@ import { sql } from "@aihot/backend/db";
 import { chatJson } from "@aihot/backend/providers/llm";
 import { withXinhua } from "../experts/xinhua.ts";
 import { parseInvestmentPage, querySelectedCompanyProfile } from "../experts/data.ts";
+import { collectProviderPages, investmentRowIdentity } from "../provider-pages.ts";
 import { GP_TAGS, uniqueInvestments } from "./core.ts";
 
 type GP = { id:string;canonical_name:string;entity_id:string;credit_code:string|null };
@@ -14,19 +15,15 @@ async function capture(gp:GP):Promise<Capture> {
     const identity=await querySelectedCompanyProfile(call,{
       id:gp.entity_id,name:gp.canonical_name,creditCode:gp.credit_code,status:null,address:null,startDate:null,
     });
-    const all:Record<string,unknown>[]=[];
-    let total:number|null=null, fetched=0, complete=false;
-    for(let page=0;page<10;page++){
-      const raw=await call("get_direct_investment",{query:identity.query,query_type:identity.queryType,limit:100,offset:page*100});
-      const parsed=parseInvestmentPage(raw);
-      all.push(...parsed.rows); fetched+=parsed.rows.length;
-      total=parsed.total??total;
-      // Never infer a full inventory from a short page without a provider completion signal.
-      if(parsed.hasMore===false || (total!==null && fetched>=total)){complete=true;break;}
-      if(parsed.rows.length===0){break;}
-    }
-    const normalized=uniqueInvestments(all);
-    return {...normalized,total,fetched,rawRows:all,complete:complete && normalized.missing===0 && (total===null||fetched>=total)};
+    const inventory=await collectProviderPages<Record<string,unknown>>({
+      pageSize:100,maxPages:10,identity:investmentRowIdentity,
+      fetchPage:async(offset,limit)=>{
+        const raw=await call("get_direct_investment",{query:identity.query,query_type:identity.queryType,limit,offset});
+        return parseInvestmentPage(raw);
+      },
+    });
+    const normalized=uniqueInvestments(inventory.rows);
+    return {...normalized,total:inventory.total,fetched:inventory.fetched,rawRows:inventory.rawRows,complete:inventory.complete && normalized.missing===0};
   });
 }
 

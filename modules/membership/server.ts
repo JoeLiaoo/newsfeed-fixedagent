@@ -6,6 +6,8 @@ import { createSource, previewSource } from "@aihot/backend/admin/sources";
 import { registerExpertRoutes } from "./experts/routes.ts";
 import { registerGpRoutes } from "./gp/routes.ts";
 import { registerNotificationRoutes } from "./notifications/routes.ts";
+import { getDailyDigest } from "./notifications/digest.ts";
+import { beijingDate } from "@aihot/contracts/time";
 import { listedCondition } from "@aihot/backend/publication/scope";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
 import * as cheerio from "cheerio";
@@ -196,48 +198,11 @@ export function registerMembership(app: FastifyInstance) {
     noStore(reply);
     const user = await memberSession(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
-    const todayRows = await sql<{ date: string }[]>`SELECT to_char(now() AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS date`;
-    const today = todayRows[0]!.date;
+    const today = beijingDate(new Date());
     const requestedDate = typeof req.query === "object" && req.query && "date" in req.query ? String((req.query as { date?: unknown }).date ?? "") : "";
     const date = requestedDate || today;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today) return reply.code(400).send({ error: "invalid_digest_date" });
-    const result = await sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(hashtext(${user.id}))`;
-      const [account] = await tx<{ interests_version: number }[]>`SELECT interests_version FROM member_users WHERE id = ${user.id} FOR UPDATE`;
-      const version = account!.interests_version;
-      const existing = await tx<{ local_date: string; preference_version: number; window_start: Date; cutoff_at: Date; tags: string[]; items: unknown; generated_at: Date }[]>`
-        SELECT local_date::text, preference_version, window_start, cutoff_at, tags, items, generated_at
-        FROM member_daily_digests WHERE user_id = ${user.id} AND local_date = ${date}::date
-        ORDER BY preference_version DESC LIMIT 1`;
-      if (existing[0]) return existing[0];
-      if (date !== today) return null;
-      const tagRows = await tx<{ tag: string }[]>`SELECT tag FROM member_interest_tags WHERE user_id = ${user.id} ORDER BY tag`;
-      const tags = tagRows.map((row) => row.tag);
-      const previous = await tx<{ cutoff_at: Date }[]>`
-        SELECT cutoff_at FROM member_daily_digests WHERE user_id = ${user.id} AND local_date < ${date}::date
-        ORDER BY local_date DESC, generated_at DESC LIMIT 1`;
-      let windowStart: Date;
-      if (previous[0]) windowStart = previous[0].cutoff_at;
-      else {
-        const [initialWindow] = await tx<{ window_start: Date }[]>`
-          SELECT (${date}::date::timestamp AT TIME ZONE 'Asia/Shanghai') AS window_start`;
-        windowStart = initialWindow!.window_start;
-      }
-      const cutoff = new Date();
-      const items = tags.length ? await tx<{ article_id: string; title: string; summary: string | null; url: string; tags: string[]; source_name: string; published_at: Date | null; timeline_at: Date }[]>`
-        SELECT DISTINCT ON (COALESCE('story:' || p.story_id::text, 'fact:' || p.fact_id::text, 'article:' || p.article_id))
-          p.article_id, p.title, p.summary, p.url, p.tags, s.name AS source_name, p.published_at, p.timeline_at
-        FROM publications p JOIN sources s ON s.id = p.source_id
-        WHERE ${listedCondition(cutoff)} AND p.timeline_at >= ${windowStart} AND p.timeline_at < ${cutoff}
-          AND EXISTS (SELECT 1 FROM member_interest_tags t WHERE t.user_id = ${user.id} AND t.tag = ANY(p.tags))
-        ORDER BY COALESCE('story:' || p.story_id::text, 'fact:' || p.fact_id::text, 'article:' || p.article_id), p.timeline_at DESC
-      ` : [];
-      const snapshot = await tx<{ local_date: string; preference_version: number; window_start: Date; cutoff_at: Date; tags: string[]; items: unknown; generated_at: Date }[]>`
-        INSERT INTO member_daily_digests(user_id, local_date, preference_version, window_start, cutoff_at, tags, items)
-        VALUES (${user.id}, ${date}::date, ${version}, ${windowStart}, ${cutoff}, ${tx.array(tags)}::text[], ${tx.json(items as never)})
-        RETURNING local_date::text, preference_version, window_start, cutoff_at, tags, items, generated_at`;
-      return snapshot[0]!;
-    });
+    const result = await getDailyDigest(user.id, date);
     if (!result) return reply.code(404).send({ error: "digest_not_generated" });
     return { date: result.local_date, preferenceVersion: result.preference_version, window: { start: result.window_start, cutoff: result.cutoff_at }, generatedAt: result.generated_at, tags: result.tags, items: result.items };
   });

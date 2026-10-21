@@ -17,11 +17,7 @@ export const SERVER_MODULES: readonly ServerModule[] = [{
     { name: "membership.gp-classify", cron: "*/5 * * * *", when: () => process.env.P3_GP_SYNC_ENABLED === "true" && process.env.MODEL_CALLS_ENABLED === "true", run: classifyPendingGps }, {
     name: "membership.expert-recover",
     cron: "*/5 * * * *",
-    run: async () => {
-      const taskIds = await recoverExpertTasks();
-      for (const taskId of taskIds) await enqueueOn(EXPERT_QUEUE, { taskId }, { singletonKey: taskId });
-      return { recovered: taskIds.length };
-    },
+    run: () => recoverExpertTasks((taskId, tx) => enqueueOn(EXPERT_QUEUE, { taskId }, { singletonKey: taskId }, tx)),
   }],
   retention: async now => ({...await cleanupExpertData(now),...await cleanupP3Data()}),
 }];

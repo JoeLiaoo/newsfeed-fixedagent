@@ -7,7 +7,7 @@ import { stopBossNow } from "@aihot/backend/jobs/queue";
 import { buildApp } from "../../../apps/api/src/app.ts";
 import { SERVER_MODULES } from "../../../site/modules/server.ts";
 import { stub, tag } from "../../../tests/setup.ts";
-import { runExpertTask } from "../experts/worker.ts";
+import { cleanupExpertData, recoverExpertTasks, runExpertTask } from "../experts/worker.ts";
 
 test("expert tasks enforce per-user isolation, idempotency, cancellation, retry caps and expiry", async t => {
   installModules(SERVER_MODULES);
@@ -76,6 +76,30 @@ test("expert tasks enforce per-user isolation, idempotency, cancellation, retry 
 
   const customSlug = `test-expert-${suffix}`;
   await sql`INSERT INTO member_experts(slug,owner_id,name,description,version,skill_md,manifest,status,missing_dependencies) VALUES (${customSlug},${userIds[0]},'Test','Test','1.0.0','---\nname: Test\ndescription: Test\n---\n',${sql.json({ tools: [], skills: [] })},'available',ARRAY[]::text[])`;
+  const sharedTask=await app.inject({method:"POST",url:"/api/v1/membership/expert-tasks",headers:{cookie:cookies[1]!,...common},payload:{slug:customSlug,notes:"共享专家隔离测试"}});
+  assert.equal(sharedTask.statusCode,202,"a published expert can be executed by another employee");
+  const sharedTaskId=(await sharedTask.json() as {id:string}).id;
+  const tasksA=await (await app.inject({method:"GET",url:"/api/v1/membership/expert-tasks",headers:{cookie:cookies[0]!,...common}})).json() as {tasks:Array<{id:string}>};
+  const tasksB=await (await app.inject({method:"GET",url:"/api/v1/membership/expert-tasks",headers:{cookie:cookies[1]!,...common}})).json() as {tasks:Array<{id:string}>};
+  assert(!tasksA.tasks.some(task=>task.id===sharedTaskId));
+  assert(tasksB.tasks.some(task=>task.id===sharedTaskId));
+  assert.equal((await app.inject({method:"POST",url:`/api/v1/membership/expert-tasks/${sharedTaskId}/cancel`,headers:{cookie:cookies[0]!,...common}})).statusCode,404);
+  assert.equal((await app.inject({method:"POST",url:`/api/v1/membership/expert-tasks/${sharedTaskId}/cancel`,headers:{cookie:cookies[1]!,...common}})).statusCode,200);
+
+  const recoverable=randomUUID(),exhausted=randomUUID();
+  for(const [id,attempts] of [[recoverable,1],[exhausted,3]] as const)
+    await sql`INSERT INTO member_expert_tasks(id,user_id,expert_slug,state,input,execution_attempts,lease_expires_at)
+      VALUES(${id},${userIds[0]},${customSlug},'running',${sql.json({notes:"recovery fixture"})},${attempts},now()-interval '1 minute')`;
+  await assert.rejects(recoverExpertTasks(async()=>{throw new Error("queue unavailable")}),/queue unavailable/);
+  const afterRollback=await sql<{state:string}[]>`SELECT state FROM member_expert_tasks WHERE id=${recoverable}`;
+  assert.equal(afterRollback[0]?.state,"running","state must roll back when enqueue fails");
+  const enqueued:string[]=[];
+  assert.deepEqual(await recoverExpertTasks(async id=>{enqueued.push(id);}),{recovered:1,exhausted:1});
+  assert.deepEqual(enqueued,[recoverable]);
+  const recoveredStates=await sql<{id:string;state:string;error_code:string|null}[]>`SELECT id,state,error_code FROM member_expert_tasks WHERE id IN (${recoverable},${exhausted}) ORDER BY id`;
+  assert.equal(recoveredStates.find(row=>row.id===recoverable)?.state,"queued");
+  assert.equal(recoveredStates.find(row=>row.id===exhausted)?.error_code,"expert_retry_exhausted");
+
   const concurrentId = randomUUID();
   await sql`INSERT INTO member_expert_tasks(id,user_id,expert_slug,state,input) VALUES (${concurrentId},${userIds[0]},${customSlug},'queued',${sql.json({ notes: "mocked retry boundary" })})`;
   const previousModelEnv = Object.fromEntries(["MODEL_CALLS_ENABLED", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"].map(key => [key, process.env[key]]));
@@ -96,9 +120,24 @@ test("expert tasks enforce per-user isolation, idempotency, cancellation, retry 
   await sql`UPDATE member_expert_tasks SET state='failed',execution_attempts=3 WHERE id=${concurrentId}`;
   assert.equal((await app.inject({ method: "POST", url: `/api/v1/membership/expert-tasks/${concurrentId}/retry`, headers: { cookie: cookies[0]!, ...common } })).statusCode, 404);
 
+  const marker="receipt-response-marker-7d";
+  await sql`INSERT INTO receipts(logical_key,service,purpose,subject,member_user_id,member_task_id,status,response,usage,cost,currency,cost_basis)
+    VALUES(${"expert-expiry:"+taskId},'deepseek','expert','expert:test',${userIds[0]},${taskId},'received',${sql.json({report:marker})},${sql.json({tokens:42})},0.25,'USD','actual')`;
+  const unrelatedReceipt="expert-unrelated:"+taskId;
+  await sql`INSERT INTO receipts(logical_key,service,purpose,subject,status,response)
+    VALUES(${unrelatedReceipt},'deepseek','expert','expert:test','received',${sql.json({report:"retain-audit-response"})})`;
   await sql`UPDATE member_expert_tasks SET expires_at=now()-interval '1 second' WHERE id=${taskId}`;
   await sql`UPDATE member_expert_artifacts SET expires_at=now()-interval '1 second' WHERE task_id=${taskId}`;
   const expiredList = await app.inject({ method: "GET", url: "/api/v1/membership/expert-tasks", headers: { cookie: cookies[0]! } });
   assert(!((await expiredList.json() as { tasks: Array<{ id: string }> }).tasks).some(task => task.id === taskId));
   assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${taskId}/artifact`, headers: { cookie: cookies[0]! } })).statusCode, 404);
+  const retained=await cleanupExpertData();
+  assert.equal(retained.expertReceiptResponsesRedacted,1);
+  const redacted=await sql<{response:unknown;response_redacted_at:Date|null;usage:{tokens:number};cost:string}[]>`SELECT response,response_redacted_at,usage,cost FROM receipts WHERE logical_key=${"expert-expiry:"+taskId}`;
+  assert.equal(redacted[0]?.response,null);
+  assert.ok(redacted[0]?.response_redacted_at);
+  assert.deepEqual(redacted[0]?.usage,{tokens:42});
+  assert.equal(Number(redacted[0]?.cost),0.25);
+  const unrelated=await sql<{response:{report:string}}[]>`SELECT response FROM receipts WHERE logical_key=${unrelatedReceipt}`;
+  assert.equal(unrelated[0]?.response.report,"retain-audit-response");
 });

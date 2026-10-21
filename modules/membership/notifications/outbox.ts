@@ -1,34 +1,53 @@
 import { createHash, randomUUID } from "node:crypto";
 import { sql } from "@aihot/backend/db";
 import { listedCondition } from "@aihot/backend/publication/scope";
-import { dueNotificationKinds, offDay, splitMessageLines } from "../gp/core.ts";
+import { beijingDate, beijingTime } from "@aihot/contracts/time";
+import { dueNotificationKinds, offDay } from "../gp/core.ts";
+import { getDailyDigest, type DigestItem } from "./digest.ts";
 
 const sha256=(value:string)=>createHash("sha256").update(value).digest("hex");
 const flags=(name:string)=>new Set((process.env[name]??"").split(",").map(x=>x.trim()).filter(Boolean));
-type User={ id:string; news_enabled:boolean;gp_enabled:boolean;binding_version:number;bound_at:Date;news_since:Date|null;gp_since:Date|null };
+type User={ id:string; news_enabled:boolean;gp_enabled:boolean;binding_version:number;news_version:number;gp_version:number;bound_at:Date;gp_since:Date|null };
 type Binding={ recipient_id:string;channel_account_id:string };
-type OutboxRow={id:string;user_id:string;kind:"news"|"gp";payload:string;attempts:number;binding_version:number};
+export type OutboxRow={id:string;user_id:string;kind:"news"|"gp";payload:string;attempts:number;binding_version:number;subscription_version:number;local_date:string;part_index:number;sources_tracked:boolean};
+export type Candidate={key:string;seenKey:string;text:string};
+type MessagePart={payload:string;sourceKeys:string[]};
+type RenderCandidate=Pick<Candidate,"key"|"text">;
 
-function dateInfo() {
-  const now=new Date();
-  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(now);
-  const get=(type:string)=>parts.find(p=>p.type===type)?.value??"";
-  const day=get("year")+"-"+get("month")+"-"+get("day");
-  const hour=Number(new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Shanghai",hour:"2-digit",hourCycle:"h23"}).format(now));
+function dateInfo(now=new Date()) {
+  const day=beijingDate(now);
+  const hour=Number(beijingTime(now).slice(0,2));
   return {day,hour};
+}
+
+export function splitNotificationParts(headline:string,candidates:readonly RenderCandidate[],emptyText="今日无更新",limit=1600):MessagePart[]{
+  if(!candidates.length) return [{payload:[headline,emptyText].join("\n"),sourceKeys:[]}];
+  const parts:MessagePart[]=[];
+  let lines=[headline],sourceKeys:string[]=[];
+  let currentLength=headline.length;
+  const flush=()=>{if(lines.length){parts.push({payload:lines.join("\n"),sourceKeys:[...new Set(sourceKeys)]});lines=[];sourceKeys=[];currentLength=0;}};
+  for(const candidate of candidates){
+    for(let offset=0;offset<candidate.text.length;offset+=limit){
+      const chunk=candidate.text.slice(offset,offset+limit);
+      if(currentLength&&currentLength+chunk.length+1>limit) flush();
+      lines.push(chunk);sourceKeys.push(candidate.key);currentLength+=chunk.length+1;
+    }
+  }
+  flush();
+  return parts;
 }
 
 // Each edition records a source cutoff before reading any rows. Items are deduplicated by
 // stable fact/relationship keys within the same transaction that creates the outbox.
-export async function generateDueNotifications() {
+export async function generateDueNotifications(now=new Date()) {
   if(process.env.P3_NOTIFICATIONS_ENABLED!=="true") return {disabled:true};
-  const {day,hour}=dateInfo();
+  const {day,hour}=dateInfo(now);
   const holiday=offDay(day,[...flags("P3_CN_HOLIDAYS")],[...flags("P3_CN_MAKEUP_WORKDAYS")]);
   const types=dueNotificationKinds(hour,holiday);
   if(!types.length) return {due:false};
-  const cutoff=new Date();
+  const cutoff=now;
   const users=await sql<User[]>`SELECT u.id,COALESCE(s.news_enabled,true) AS news_enabled,COALESCE(s.gp_enabled,true) AS gp_enabled,
-    COALESCE(s.binding_version,1) AS binding_version,b.bound_at,s.news_since,s.gp_since
+    COALESCE(s.binding_version,1) AS binding_version,COALESCE(s.news_version,1) AS news_version,COALESCE(s.gp_version,1) AS gp_version,b.bound_at,s.gp_since
     FROM member_users u JOIN member_weixin_bindings b ON b.user_id=u.id AND b.status='active'
     LEFT JOIN member_notification_settings s ON s.user_id=u.id
     WHERE u.status='active' AND (s.paused_until IS NULL OR s.paused_until<=now())
@@ -37,58 +56,60 @@ export async function generateDueNotifications() {
   for(const kind of types){
     for(const user of users){
       if(kind==="news"&&!user.news_enabled || kind==="gp"&&!user.gp_enabled) continue;
-      const [cursor]=await sql<{last_at:Date|null}[]>`SELECT max(window_end_at) AS last_at FROM member_notification_outbox
-        WHERE user_id=${user.id} AND kind=${kind} AND binding_version=${user.binding_version}`;
-      const start=kind==="news"?user.news_since:user.gp_since;
-      const minimum=new Date(Math.max(user.bound_at.getTime(),start?.getTime()??0));
-      const since=new Date(Math.max(minimum.getTime(),cursor?.last_at?.getTime()??0));
-      // Reread a bounded overlap to cover transactions that commit after a prior edition's
-      // snapshot and records that become visible with old publication timestamps.
-      const overlap=new Date(Math.max(minimum.getTime(),since.getTime()-48*60*60*1000));
-      const candidates:{key:string;text:string}[]=[];
+      let editionCutoff=cutoff;
+      let digestPreferenceVersion:number|null=null;
+      const subscriptionVersion=kind==="news"?user.news_version:user.gp_version;
+      let candidates:Candidate[]=[];
       if(kind==="gp"){
+        const [cursor]=await sql<{last_at:Date|null}[]>`SELECT max(window_end_at) AS last_at FROM member_notification_outbox
+          WHERE user_id=${user.id} AND kind='gp' AND binding_version=${user.binding_version} AND subscription_version=${subscriptionVersion}`;
+        const minimum=new Date(Math.max(user.bound_at.getTime(),user.gp_since?.getTime()??0));
+        const since=new Date(Math.max(minimum.getTime(),cursor?.last_at?.getTime()??0));
+        // Reread a bounded overlap to cover late commits and delayed publication.
+        const overlap=new Date(Math.max(minimum.getTime(),since.getTime()-48*60*60*1000));
         const observations=await sql<{id:string;gp_name:string;investee_name:string;approved_event_date:string;approved_source_url:string;sector_tags:string[]}[]>`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.approved_event_date::text,i.approved_source_url,i.sector_tags
           FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
           WHERE i.status='verified' AND g.status='active' AND i.approved_at>=${overlap} AND i.approved_at<${cutoff}
             AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id} AND t.tag=ANY(i.sector_tags))
           ORDER BY i.approved_at,i.id`;
         for(const o of observations) candidates.push({
-          key:"gp:"+o.id,text:"• "+o.gp_name+" → "+o.investee_name+"（"+o.approved_event_date+"）\n"+
+          key:o.id,seenKey:"gp:"+o.id,text:"• "+o.gp_name+" → "+o.investee_name+"（"+o.approved_event_date+"）\n"+
             o.sector_tags.join("、")+"\n"+o.approved_source_url,
         });
       }else{
-        const items=await sql<{source_key:string;title:string;summary:string|null;url:string}[]>`SELECT DISTINCT ON (COALESCE('story:'||p.story_id::text,'fact:'||p.fact_id::text,'article:'||p.article_id))
-          COALESCE('story:'||p.story_id::text,'fact:'||p.fact_id::text,'article:'||p.article_id) AS source_key,
-          p.title,p.summary,p.url FROM publications p
-          WHERE ${listedCondition(cutoff)}
-            AND GREATEST(p.updated_at,COALESCE(p.visible_after,p.updated_at))>=${overlap}
-            AND GREATEST(p.updated_at,COALESCE(p.visible_after,p.updated_at))<${cutoff}
-            AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id} AND t.tag=ANY(p.tags))
-          ORDER BY COALESCE('story:'||p.story_id::text,'fact:'||p.fact_id::text,'article:'||p.article_id),p.timeline_at DESC`;
-        for(const item of items) candidates.push({
-          key:item.source_key,text:"• "+item.title+"\n"+(item.summary??"暂无摘要")+"\n"+item.url,
+        const digest=await getDailyDigest(user.id,day,now);
+        if(!digest) continue;
+        editionCutoff=digest.cutoff_at;
+        digestPreferenceVersion=digest.preference_version;
+        for(const item of digest.items as DigestItem[]) candidates.push({
+          key:item.source_key,seenKey:item.source_key,text:"• "+item.title+"\n"+(item.summary??"暂无摘要")+"\n"+item.url,
         });
       }
-      const headline=kind==="news"?"个人资讯日报":"GP 新增投资关系";
-      // User lock ensures two generators do not consume item keys for an edition twice.
+      const headline=(kind==="news"?"个人资讯日报":"GP 新增投资关系")+" "+day;
+      // User lock protects both edition creation and per-source reservations from overlapping runs.
       const count=await sql.begin(async tx=>{
         await tx`SELECT id FROM member_users WHERE id=${user.id} FOR UPDATE`;
         const existing=await tx`SELECT id FROM member_notification_outbox
-          WHERE user_id=${user.id} AND kind=${kind} AND local_date=${day}::date AND binding_version=${user.binding_version} LIMIT 1`;
+          WHERE user_id=${user.id} AND kind=${kind} AND local_date=${day}::date AND binding_version=${user.binding_version} AND subscription_version=${subscriptionVersion} LIMIT 1`;
         if(existing.length) return 0;
-        const lines:string[]=[];
-        for(const item of candidates){
-          const claimed=await tx`INSERT INTO member_notification_seen(user_id,kind,source_key)
-            VALUES(${user.id},${kind},${item.key}) ON CONFLICT DO NOTHING RETURNING source_key`;
-          if(claimed.length) lines.push(item.text);
+        const seenRows=candidates.length?await tx<{source_key:string}[]>`SELECT source_key FROM member_notification_seen
+          WHERE user_id=${user.id} AND kind=${kind} AND source_key=ANY(${tx.array(candidates.map(item=>item.seenKey))}::text[])`:[];
+        const seenSet=new Set(seenRows.map(row=>row.source_key));
+        const available=candidates.filter(item=>!seenSet.has(item.seenKey));
+        const currentParts=splitNotificationParts(headline,available);
+        for(let index=0;index<currentParts.length;index++){
+          const part=currentParts[index]!;
+          const id=randomUUID();
+          await tx`INSERT INTO member_notification_outbox(id,user_id,kind,local_date,binding_version,subscription_version,part_index,payload,payload_sha256,window_end_at,digest_preference_version,sources_tracked)
+            VALUES(${id},${user.id},${kind},${day}::date,${user.binding_version},${subscriptionVersion},${index},${part.payload},${sha256(part.payload)},${editionCutoff},${digestPreferenceVersion},true)`;
+          for(const sourceKey of part.sourceKeys){
+            await tx`INSERT INTO member_notification_outbox_sources(outbox_id,source_key) VALUES(${id},${sourceKey}) ON CONFLICT DO NOTHING`;
+            const item=candidates.find(candidate=>candidate.key===sourceKey);
+            if(item) await tx`INSERT INTO member_notification_seen(user_id,kind,source_key,outbox_id)
+              VALUES(${user.id},${kind},${item.seenKey},${id}) ON CONFLICT DO NOTHING`;
+          }
         }
-        const parts=splitMessageLines(lines.length?[headline+" "+day,...lines]:[headline+" "+day,"今日无更新"]);
-        for(let index=0;index<parts.length;index++){
-          const content=parts[index]!;
-          await tx`INSERT INTO member_notification_outbox(id,user_id,kind,local_date,binding_version,part_index,payload,payload_sha256,window_end_at)
-            VALUES(${randomUUID()},${user.id},${kind},${day}::date,${user.binding_version},${index},${content},${sha256(content)},${cutoff})`;
-        }
-        return parts.length;
+        return currentParts.length;
       });
       created+=count;
     }
@@ -105,6 +126,54 @@ function bridgeConfig() {
   if(!((url.protocol==="https:"&&url.username===""&&url.password==="")||
     (url.protocol==="http:"&&["127.0.0.1","localhost","::1"].includes(url.hostname)))) throw new Error("invalid_hermes_bridge_url");
   return {url,token};
+}
+
+async function currentSource(key:string,kind:"news"|"gp",userId:string,at:Date):Promise<string|null>{
+  if(kind==="news"){
+    const [item]=await sql<{title:string;summary:string|null;url:string}[]>`SELECT p.title,p.summary,p.url FROM publications p
+      WHERE COALESCE('story:'||p.story_id::text,'fact:'||p.fact_id::text,'article:'||p.article_id)=${key}
+        AND ${listedCondition(at)}
+        AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${userId} AND t.tag=ANY(p.tags))
+      ORDER BY p.timeline_at DESC LIMIT 1`;
+    return item?"• "+item.title+"\n"+(item.summary??"暂无摘要")+"\n"+item.url:null;
+  }
+  const [item]=await sql<{gp_name:string;investee_name:string;approved_event_date:string;approved_source_url:string;sector_tags:string[]}[]>`SELECT g.canonical_name AS gp_name,i.investee_name,i.approved_event_date::text,i.approved_source_url,i.sector_tags
+    FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
+    WHERE i.id=${key} AND i.status='verified' AND g.status='active' AND g.entity_role='gp'
+      AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${userId} AND t.tag=ANY(i.sector_tags))`;
+  return item?"• "+item.gp_name+" → "+item.investee_name+"（"+item.approved_event_date+"）\n"+item.sector_tags.join("、")+"\n"+item.approved_source_url:null;
+}
+
+async function cancelAndRelease(id:string,errorCode:string){
+  await sql.begin(async tx=>{
+    await tx`UPDATE member_notification_outbox SET status='cancelled',lease_expires_at=NULL,error_code=${errorCode} WHERE id=${id}`;
+    await tx`DELETE FROM member_notification_seen WHERE outbox_id=${id}`;
+  });
+}
+
+export async function revalidatePayload(job:OutboxRow):Promise<string|null>{
+  if(!job.sources_tracked){await cancelAndRelease(job.id,"legacy_source_untracked");return null;}
+  const sources=await sql<{source_key:string}[]>`SELECT source_key FROM member_notification_outbox_sources WHERE outbox_id=${job.id} ORDER BY source_key`;
+  if(!sources.length) return job.payload;
+  const checkedAt=new Date();
+  const valid:{key:string;text:string}[]=[];
+  const invalid:string[]=[];
+  for(const source of sources){
+    const text=await currentSource(source.source_key,job.kind,job.user_id,checkedAt);
+    if(text) valid.push({key:source.source_key,text}); else invalid.push(source.source_key);
+  }
+  if(!valid.length){await cancelAndRelease(job.id,"source_no_longer_visible");return null;}
+  const headline=(job.kind==="news"?"个人资讯日报":"GP 新增投资关系")+" "+job.local_date;
+  const payload=splitNotificationParts(headline,valid).map(part=>part.payload).join("\n");
+  await sql.begin(async tx=>{
+    if(invalid.length){
+      await tx`DELETE FROM member_notification_outbox_sources WHERE outbox_id=${job.id} AND source_key=ANY(${tx.array(invalid)}::text[])`;
+      const released=job.kind==="news"?invalid:invalid.map(key=>"gp:"+key);
+      await tx`DELETE FROM member_notification_seen WHERE outbox_id=${job.id} AND source_key=ANY(${tx.array(released)}::text[])`;
+    }
+    await tx`UPDATE member_notification_outbox SET payload=${payload},payload_sha256=${sha256(payload)} WHERE id=${job.id} AND status='sending'`;
+  });
+  return payload;
 }
 
 export async function dispatchOutbox() {
@@ -124,33 +193,37 @@ export async function dispatchOutbox() {
     const claimed:OutboxRow[]=[];
     for(const {id} of ids){
       const [row]=await tx<OutboxRow[]>`UPDATE member_notification_outbox SET status='sending',attempts=attempts+1,lease_expires_at=now()+interval '2 minutes'
-        WHERE id=${id} RETURNING id,user_id,kind,payload,attempts,binding_version`;
+        WHERE id=${id} RETURNING id,user_id,kind,payload,attempts,binding_version,subscription_version,local_date::text AS local_date,part_index,sources_tracked`;
       if(row) claimed.push(row);
     }
     return claimed;
   });
   let accepted=0;
   for(const job of jobs){
-    const [recipient]=await sql<(Binding & {binding_version:number;enabled:boolean})[]>`SELECT b.recipient_id,b.channel_account_id,
+    const [recipient]=await sql<(Binding & {binding_version:number;subscription_version:number;enabled:boolean})[]>`SELECT b.recipient_id,b.channel_account_id,
       COALESCE(s.binding_version,1) AS binding_version,
+      CASE WHEN ${job.kind}='news' THEN COALESCE(s.news_version,1) ELSE COALESCE(s.gp_version,1) END AS subscription_version,
       (u.status='active' AND b.status='active' AND (s.paused_until IS NULL OR s.paused_until<=now())
        AND CASE WHEN ${job.kind}='news' THEN COALESCE(s.news_enabled,true) ELSE COALESCE(s.gp_enabled,true) END) AS enabled
       FROM member_weixin_bindings b JOIN member_users u ON u.id=b.user_id
       LEFT JOIN member_notification_settings s ON s.user_id=b.user_id WHERE b.user_id=${job.user_id}`;
-    if(!recipient||!recipient.enabled||recipient.binding_version!==job.binding_version){
-      await sql`UPDATE member_notification_outbox SET status='cancelled',lease_expires_at=NULL,error_code='subscription_changed' WHERE id=${job.id}`;
+    if(!recipient||!recipient.enabled||recipient.binding_version!==job.binding_version||recipient.subscription_version!==job.subscription_version){
+      await cancelAndRelease(job.id,"subscription_changed");
       continue;
     }
+    const payload=await revalidatePayload(job);
+    if(!payload) continue;
     try{
       const response=await fetch(config.url,{
         method:"POST",redirect:"error",signal:AbortSignal.timeout(15000),
         headers:{"content-type":"application/json",authorization:"Bearer "+config.token,"x-idempotency-key":job.id},
-        body:JSON.stringify({recipientId:recipient.recipient_id,channelAccountId:recipient.channel_account_id,text:job.payload,idempotencyKey:job.id}),
+        body:JSON.stringify({recipientId:recipient.recipient_id,channelAccountId:recipient.channel_account_id,text:payload,idempotencyKey:job.id}),
       });
       if(response.status===410){
         await sql.begin(async tx=>{
           await tx`UPDATE member_weixin_bindings SET status='requires_rebind' WHERE user_id=${job.user_id}`;
           await tx`UPDATE member_notification_outbox SET status='requires_rebind',lease_expires_at=NULL,error_code='channel_expired' WHERE id=${job.id}`;
+          await tx`DELETE FROM member_notification_seen WHERE outbox_id=${job.id}`;
         });
       }else if(response.status===429){
         await sql`UPDATE member_notification_outbox SET status='failed',lease_expires_at=NULL,next_attempt_at=now()+interval '15 minutes',error_code='channel_rate_limited' WHERE id=${job.id}`;

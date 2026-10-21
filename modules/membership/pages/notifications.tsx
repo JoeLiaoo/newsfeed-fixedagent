@@ -1,9 +1,10 @@
-import { useEffect,useState } from "react";
+import { useCallback,useEffect,useState } from "react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
 import { Card,CardContent,CardHeader,CardTitle } from "@aihot/web/components/member-ui/card";
 import { Checkbox } from "@aihot/web/components/member-ui/checkbox";
+import { copyText } from "@aihot/web/lib/clipboard";
 
 type Settings={news_enabled:boolean;gp_enabled:boolean;paused_until:string|null;binding_version:number};
 type Binding={status:string;recipient_suffix:string;bound_at:string};
@@ -15,14 +16,35 @@ const endpoint="/api/v1/membership/";
 export default function NotificationsPage(){
   const [data,setData]=useState<Data|null>(null),[message,setMessage]=useState(""),[code,setCode]=useState(""),[busy,setBusy]=useState(false);
   const [news,setNews]=useState(true),[gp,setGp]=useState(true),[paused,setPaused]=useState(false);
-  async function reload(){
+  const reload=useCallback(async(syncSettings=true)=>{
     const response=await fetch(endpoint+"notifications");
     if(!response.ok){setMessage("需要登录后查看通知设置。");return;}
     const result=await response.json() as Data;
-    setData(result);setNews(result.settings.news_enabled);setGp(result.settings.gp_enabled);
-    setPaused(!!result.settings.paused_until&&new Date(result.settings.paused_until)>new Date());
+    setData(result);
+    if(syncSettings){setNews(result.settings.news_enabled);setGp(result.settings.gp_enabled);setPaused(!!result.settings.paused_until&&new Date(result.settings.paused_until)>new Date());}
+    if(!result.challenge)setCode("");
+  },[]);
+  useEffect(()=>{void reload().catch(()=>setMessage("加载失败，请刷新。"));},[reload]);
+  useEffect(()=>{
+    const challenge=data?.challenge;
+    if(!challenge)return;
+    const refresh=()=>{if(document.visibilityState==="visible")void reload(false).catch(()=>setMessage("刷新绑定状态失败，请稍后重试。"));};
+    window.addEventListener("focus",refresh);
+    document.addEventListener("visibilitychange",refresh);
+    const interval=!challenge.claimed?window.setInterval(refresh,2000):undefined;
+    const remaining=Date.parse(challenge.expires_at)-Date.now();
+    const expiry=window.setTimeout(refresh,Math.max(0,remaining)+100);
+    return()=>{
+      window.removeEventListener("focus",refresh);
+      document.removeEventListener("visibilitychange",refresh);
+      if(interval!==undefined)window.clearInterval(interval);
+      window.clearTimeout(expiry);
+    };
+  },[data?.challenge?.expires_at,data?.challenge?.claimed,reload]);
+  async function copyCode(){
+    try{await copyText(code);setMessage("绑定码已复制。");}
+    catch{setMessage("复制失败，请长按绑定码并手动复制。");}
   }
-  useEffect(()=>{void reload().catch(()=>setMessage("加载失败，请刷新。"));},[]);
   async function request(path:string,body?:Record<string,unknown>,method="POST"){
     setBusy(true);setMessage("");
     try{
@@ -30,7 +52,7 @@ export default function NotificationsPage(){
       const result=await response.json() as {error?:string;code?:string};
       if(!response.ok){setMessage(result.error==="binding_in_progress"?"绑定码仍有效，请完成或到期后重试。":result.error==="not_claimed"?"机器人尚未收到绑定码。":"请求失败："+(result.error??"未知错误"));return;}
       if(result.code){setCode(result.code);setMessage("绑定码已生成。");}else{setCode("");setMessage("已保存。");}
-      await reload();
+      await reload(true);
     }catch{setMessage("网络异常，请重试。");}finally{setBusy(false);}
   }
   return <main className="mx-auto w-full max-w-3xl px-5 py-8">
@@ -44,7 +66,7 @@ export default function NotificationsPage(){
       {code&&<div className="rounded-control border border-line-soft bg-bg-sunk p-4">
         <p className="mb-1 text-sm text-ink-3">向平台指定的微信机器人私聊发送此码（10 分钟有效）</p>
         <div className="flex items-center gap-3"><code className="break-all font-mono text-lg font-semibold">{code}</code>
-        <Button size="sm" variant="outline" onClick={()=>void navigator.clipboard.writeText(code)}>复制</Button></div>
+        <Button size="sm" variant="outline" onClick={()=>void copyCode()}>复制</Button></div>
       </div>}
       {data?.challenge?.claimed&&<p className="text-sm">机器人已收到绑定码，请确认。</p>}
       <div className="flex flex-wrap gap-2">

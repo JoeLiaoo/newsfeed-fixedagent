@@ -154,6 +154,8 @@ export function parseSkillUpload(fileName: string, base64: string): ImportedSkil
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
     manifest = parsed as Record<string, unknown>;
   } catch { throw new Error("manifest_json_invalid"); }
+  const allowedManifestFields = new Set(["name", "description", "version", "tools", "skills", "dependencies"]);
+  if (Object.keys(manifest).some(key => !allowedManifestFields.has(key))) throw new Error("manifest_dependencies_invalid");
   const skillMd = new TextDecoder("utf-8", { fatal: true }).decode(skillBytes);
   const metadata = parseFrontmatter(skillMd);
   const name = safeString(manifest.name, 120) ?? metadata.name;
@@ -161,7 +163,11 @@ export function parseSkillUpload(fileName: string, base64: string): ImportedSkil
   const version = safeString(manifest.version, 40) ?? metadata.version;
   if (manifest.dependencies !== undefined && (!manifest.dependencies || typeof manifest.dependencies !== "object" || Array.isArray(manifest.dependencies))) throw new Error("manifest_dependencies_invalid");
   const nested = manifest.dependencies ? manifest.dependencies as Record<string, unknown> : {};
-  const normalizedManifest = { tools: dependenciesList(manifest.tools ?? nested.tools), skills: dependenciesList(manifest.skills ?? nested.skills) };
+  if (Object.keys(nested).some(key => !["tools", "skills"].includes(key))) throw new Error("manifest_dependencies_invalid");
+  const normalizedManifest = {
+    tools: [...new Set([...metadata.manifest.tools, ...dependenciesList(manifest.tools), ...dependenciesList(nested.tools)])],
+    skills: [...new Set([...metadata.manifest.skills, ...dependenciesList(manifest.skills), ...dependenciesList(nested.skills)])],
+  };
   return { name, description, version, skillMd, manifest: normalizedManifest, missingDependencies: dependencies(skillMd, normalizedManifest) };
 }
 

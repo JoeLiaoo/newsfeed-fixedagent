@@ -1,12 +1,14 @@
 
-【AI 领域翻译规则 — 本平台 100% 是 AI/ML/LLM 行业内容，严格遵守】
+【行业术语与专有名词规则】
+
+平台覆盖新能源、新一代信息技术、新材料、先进制造和战略配售。先依据材料上下文确定其行业；以下 AI/ML 术语释义只在材料确实讨论 AI/ML/LLM 时采用，其他语境按原行业含义理解。不能因为平台包含 AI 资讯就把其他行业内容改写成 AI 内容。
 
 1. 歧义默认值：以下词在中文有非 AI 歧义，**一律按 AI 含义翻译**：
    - LLM = 大语言模型（绝不译"法学硕士"/"Master of Laws"）
-   - Token / tokens = 模型 token（保留英文；绝不译"代币"/"令牌"）
-   - Transformer = Transformer 架构（保留英文；不译"变压器"）
-   - Diffusion = 扩散模型（AI 生成，不是物理扩散）
-   - Agent / Agentic = AI 智能体 / 智能体的（不译"代理人"/"中介"）
+   - Token / tokens = AI 模型语境中的模型 token（金融资产语境可指代币）
+   - Transformer = AI 模型语境中的 Transformer 架构（电力设备语境可指变压器）
+   - Diffusion = AI 生成语境中的扩散模型（其他技术语境按原意）
+   - Agent / Agentic = AI 软件语境中的智能体（其他业务语境可指代理人或中介）
    - Alignment = 对齐（AI 安全语境）
    - Inference = 推理（模型生成）
    - Reasoning = 推理（注意：与 inference 都译"推理"，必要时用"链式推理"区分 CoT；reasoning model 指 o1/o3/R1 这类思考型模型）
@@ -26,7 +28,7 @@
    - 模型版本号（举例 + 通用规则）：GPT-5 / Claude 4.7 / Claude Sonnet 4.6 / Llama 4 / Gemini 3 / o3 / o4 / DeepSeek-V4 / Qwen3.7
      **规则**：版本号一字不改（包括字母数字后缀如 4o / 4.7 / 405B / V4 / R1），绝不"翻译性扩写"（不要把 "405B" 译成 "4050 亿"，不要把 "V4" 译成 "第 4 代"）
    - 技术缩写（举例 + 通用规则）：LLM / RAG / RLHF / DPO / LoRA / QLoRA / PEFT / MoE / CoT / ReAct / KV cache / SOTA / AGI / MCP / ADK / NPU / GPU / TPU
-     **规则**：任何 2-5 字母的全大写缩写，默认按 AI/ML 含义保留英文
+     **规则**：AI/ML 语境中的技术缩写保留英文；其他语境先按行业上下文消歧，不把所有 2-5 字母缩写都解释成 AI 术语
    - 评测基准（举例 + 通用规则）：MMLU / GPQA / HumanEval / SWE-bench / SWE-bench Verified / AIME / HLE / ARC-AGI / ARC-AGI 2 / MT-Bench / Chatbot Arena / Aider Polyglot / LiveCodeBench
      **规则**：以 -bench / -eval 结尾或全大写的评测名一律保留英文
    - AI 工具/产品：Cursor / Copilot / Codex / Aider / Devin / Cline / Claude Code / Windsurf / Zed / v0 / Bolt / Lovable / Replit Agent

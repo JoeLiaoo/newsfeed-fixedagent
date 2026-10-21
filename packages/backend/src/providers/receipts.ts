@@ -157,6 +157,9 @@ export interface ReceiptRequest {
   model?: string | null;
   purpose: string;
   subject?: string | null;
+  /** Optional membership ownership for seven-day expert-response redaction. */
+  memberUserId?: string | null;
+  memberTaskId?: string | null;
   /** Everything that determines the output. Hashed into the logical key; only a redacted summary is stored. */
   identity: unknown;
   /** Stored for diagnosis; must not contain secrets. */
@@ -281,8 +284,8 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
     await checkBudget(tx, req.service, req.model);
     await beforeRequest?.(tx);
     const [row] = await tx<{ id: number }[]>`
-      INSERT INTO receipts (logical_key, service, model, purpose, subject, status, request, attempts)
-      VALUES (${logicalKey}, ${req.service}, ${req.model ?? null}, ${req.purpose}, ${req.subject ?? null}, 'pending',
+      INSERT INTO receipts (logical_key, service, model, purpose, subject, member_user_id, member_task_id, status, request, attempts)
+      VALUES (${logicalKey}, ${req.service}, ${req.model ?? null}, ${req.purpose}, ${req.subject ?? null}, ${req.memberUserId ?? null}, ${req.memberTaskId ?? null}, 'pending',
               ${tx.json((req.requestSummary ?? {}) as never)}, 1)
       RETURNING id`;
     if (req.fallbackFor) {
@@ -398,6 +401,14 @@ export async function releaseUnknownReceipt(db: Db, id: number, error: string): 
 
 export async function completeReceipt(db: Db, receiptId: number): Promise<void> {
   await db`UPDATE receipts SET status = 'completed', completed_at = coalesce(completed_at, now()), updated_at = now() WHERE id = ${receiptId}`;
+}
+
+/** Redact task-owned response bodies after their seven-day artifact/task retention period. */
+export async function redactMembershipTaskResponses(db: Db, taskIds: readonly string[], now = new Date()): Promise<number> {
+  if (!taskIds.length) return 0;
+  const rows = await db`UPDATE receipts SET response=NULL,response_redacted_at=${now}
+    WHERE member_task_id=ANY(${db.array([...taskIds])}::text[]) AND response IS NOT NULL RETURNING id`;
+  return rows.length;
 }
 
 /** Marks a received response that could not be used (e.g. unparsable) so a fresh attempt can be made. */
