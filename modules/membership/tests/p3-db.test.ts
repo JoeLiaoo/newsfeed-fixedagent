@@ -8,8 +8,8 @@ after(async()=>closeDb());
 test("P3 PostgreSQL migration creates durable identity, evidence and delivery ledgers",async()=>{
   const user=randomUUID(), other=randomUUID(), gp=randomUUID();
   await sql`INSERT INTO member_users(id,username,real_name,password_hash,status,role)
-    VALUES(${user},${"admin-"+user},"Admin","test-hash",'active','admin'),
-          (${other},${"user-"+other},"Member","test-hash",'active','member')`;
+    VALUES(${user},${"admin-"+user},'Admin','test-hash','active','admin'),
+          (${other},${"user-"+other},'Member','test-hash','active','member')`;
   await sql`INSERT INTO member_gp_watchlist(id,canonical_name,entity_id,entity_role,status,source_ref,reviewed_by)
     VALUES(${gp},${"GP-"+gp},'official-id','gp','active','https://example.org/independent',${user})`;
   const s1=randomUUID(),s2=randomUUID(),inv=randomUUID();
