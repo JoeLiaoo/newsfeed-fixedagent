@@ -1,6 +1,6 @@
 # 分步骤实施计划
 
-日期：2026-10-21（Asia/Shanghai）
+需求基线日期：2026-10-21（Asia/Shanghai） · 状态核对：2026-10-22
 依据：`docs/PLAN.md` v0.65；当前开发先用 DeepSeek API 与新华财经 MCP。
 
 ## 执行规则
@@ -61,7 +61,7 @@ P2 已交付专家导入、依赖状态、持久化队列、实体确认、任�
 | [ ] | P3-03 | 用 DeepSeek 将被投企业归入四类产业的细分赛道，支持管理员修正和一事一用户只推一次；战略配售不参与 GP 匹配 | [代码施工（待外部验收）](logs/2026-10-22-P3-implementation.md) |
 | [ ] | P3-04 | 员工自行绑定或解绑个人微信；新闻及 GP 动向按已定时间分别投递，空内容、重试和失效状态可追踪 | [代码施工（待外部验收）](logs/2026-10-22-P3-implementation.md) |
 
-P3 代码分支已搭建；真实新华财经、DeepSeek、Hermes/iLink 和两个微信用户跨日验收均未完成，四项尚未打勾。详见 [施工日志](logs/2026-10-22-P3-implementation.md) 与 [联调手册](P3-OPERATIONS.md)。
+P3 的 GP 管理、快照证据、AI 分类审核、微信绑定与持久化 outbox **已在 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并至 `main`**（合并提交 `3048ef48`）。针对性 Review 整改及质量／PostgreSQL 集成 CI 已通过，但 **代码合并不是产品验收**：真实新华财经 MCP、DeepSeek、Hermes/iLink sidecar 和两名微信用户跨日送达均未核验，P3-01～P3-04 仍保持 `[ ]`。运行开关 `P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED` 均默认关闭。详见 [实施与整改日志](logs/2026-10-22-P3-implementation.md) 与 [联调和上线闸门](P3-OPERATIONS.md)。
 
 P3 出口：用户实际验证两个账号、两类定向消息及跨日送达；数据源无法证明的投资事件不推送为确定事实。
 
