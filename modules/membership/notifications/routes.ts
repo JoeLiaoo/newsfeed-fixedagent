@@ -36,7 +36,7 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
       await tx`INSERT INTO member_notification_settings(user_id) VALUES(${user.id}) ON CONFLICT DO NOTHING`;
       const [old]=await tx<{news_enabled:boolean;gp_enabled:boolean}[]>`SELECT news_enabled,gp_enabled FROM member_notification_settings WHERE user_id=${user.id} FOR UPDATE`;
       const changed=old.news_enabled!==input.newsEnabled || old.gp_enabled!==input.gpEnabled;
-      await tx`UPDATE member_notification_settings SET news_enabled=${input.newsEnabled},gp_enabled=${input.gpEnabled},paused_until=${input.paused?new Date("2099-01-01T00:00:00Z"):null},
+      await tx`UPDATE member_notification_settings SET news_enabled=${input.newsEnabled as boolean},gp_enabled=${input.gpEnabled as boolean},paused_until=${input.paused===true?new Date("2099-01-01T00:00:00Z"):null},
         binding_version=binding_version+${changed?1:0},updated_at=now() WHERE user_id=${user.id}`;
       await tx`UPDATE member_notification_outbox SET status='cancelled',error_code='subscription_changed'
         WHERE user_id=${user.id} AND status IN('pending','failed')`;
