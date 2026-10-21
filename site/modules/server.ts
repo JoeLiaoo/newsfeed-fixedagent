@@ -4,12 +4,16 @@ import { enqueueOn } from "@aihot/backend/jobs/queue";
 import { registerMembership, cleanupExpertData, recoverExpertTasks, EXPERT_QUEUE } from "@citic/membership/server";
 import { GP_QUEUE } from "@citic/membership/gp-queue";
 import { syncAllGps } from "@citic/membership/gp-sync";
+import { generateDueNotifications,dispatchOutbox,cleanupP3Data } from "@citic/membership/notifications-outbox";
 
 export const SERVER_MODULES: readonly ServerModule[] = [{
   name: "membership",
   http: registerMembership,
   queues: [EXPERT_QUEUE, GP_QUEUE],
-  schedules: [{ name: "membership.gp-sync", cron: "0 * * * *", when: () => process.env.P3_GP_SYNC_ENABLED === "true", run: syncAllGps }, {
+  schedules: [
+    {name: "membership.notifications-generate",cron:"0 9,10,11,12 * * *",run:generateDueNotifications,when:()=>process.env.P3_NOTIFICATIONS_ENABLED==="true"},
+    {name: "membership.notifications-dispatch",cron:"*/5 * * * *",run:dispatchOutbox,when:()=>process.env.P3_DELIVERY_ENABLED==="true"},
+    { name: "membership.gp-sync", cron: "0 * * * *", when: () => process.env.P3_GP_SYNC_ENABLED === "true", run: syncAllGps }, {
     name: "membership.expert-recover",
     cron: "*/5 * * * *",
     run: async () => {
@@ -18,5 +22,5 @@ export const SERVER_MODULES: readonly ServerModule[] = [{
       return { recovered: taskIds.length };
     },
   }],
-  retention: cleanupExpertData,
+  retention: async now => ({...await cleanupExpertData(now),...await cleanupP3Data()}),
 }];

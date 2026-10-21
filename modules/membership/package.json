@@ -7,7 +7,8 @@
     "./server": "./server.ts",
     "./web": "./web.tsx",
     "./gp-queue": "./gp/queue.ts",
-    "./gp-sync": "./gp/sync.ts"
+    "./gp-sync": "./gp/sync.ts",
+    "./notifications-outbox": "./notifications/outbox.ts"
   },
   "dependencies": {
     "@aihot/backend": "*",
