@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { sql } from "@aihot/backend/db";
 import { createSource, previewSource } from "@aihot/backend/admin/sources";
 import { registerExpertRoutes } from "./experts/routes.ts";
+import { registerGpRoutes } from "./gp/routes.ts";
 import { listedCondition } from "@aihot/backend/publication/scope";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
 import * as cheerio from "cheerio";
@@ -92,6 +93,7 @@ async function issueSession(userId: string, reply: any) {
 
 export function registerMembership(app: FastifyInstance) {
   registerExpertRoutes(app, memberSession);
+  registerGpRoutes(app, memberSession);
   app.post("/api/v1/membership/register", async (req, reply) => {
     noStore(reply);
     if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });

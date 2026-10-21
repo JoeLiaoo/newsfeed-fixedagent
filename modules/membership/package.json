@@ -5,7 +5,9 @@
   "exports": {
     "./module": "./module.ts",
     "./server": "./server.ts",
-    "./web": "./web.tsx"
+    "./web": "./web.tsx",
+    "./gp-queue": "./gp/queue.ts",
+    "./gp-sync": "./gp/sync.ts"
   },
   "dependencies": {
     "@aihot/backend": "*",

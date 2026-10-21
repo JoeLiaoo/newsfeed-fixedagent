@@ -9,6 +9,7 @@ export const membershipModule: ModuleDeclaration = {
     { path: "settings/sources", file: "pages/sources.tsx" },
     { path: "experts", file: "pages/experts.tsx" },
     { path: "settings/admin-members", file: "pages/admin-members.tsx" },
+    { path: "settings/admin-gps", file: "pages/gp-admin.tsx" },
   ],
   apiPaths: [/^\/api\/v1\/membership(?:\/|$)/],
 };
