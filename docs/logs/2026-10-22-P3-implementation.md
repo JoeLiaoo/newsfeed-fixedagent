@@ -11,7 +11,7 @@
 
 ## 代码变化
 
-`database/migrations/0116_p3.sql`、`0117_gp_candidates.sql`；`modules/membership/gp/`、`notifications/`；新增两张业务页面；修改 membership 路由、worker 注册及环境变量范例；增加规则单元测试与质量工作流。
+`database/migrations/0116_member_gp_watchlist.sql` 至 `0137_member_gp_classification_claimed.sql`（多份按序追加迁移）；`modules/membership/gp/`、`notifications/`；新增两张业务页面；修改 membership 路由、worker 注册及环境变量范例；增加规则单元测试与质量工作流。
 
 ## 遗留与不可验证
 
@@ -19,7 +19,7 @@
 - 实际 DeepSeek 数据分类未验证。
 - Hermes Weixin/iLink 网关未部署；需要在已锁定版本编写 sidecar，真实双用户绑定和跨日投递均未验证。
 - 不允许把 PostgreSQL 代码和 mocked 规则测试误写为已在生产环境验证。
-- 当前开发环境不能通过本地 npm/数据库/浏览器跑完整测试；需要 CI 和部署环境检查。
+- 本地没有独立复跑完整应用或真实浏览器测试；GitHub CI 在提交 `c29089b3` 上完成类型检查、Web 构建、迁移静态检查、GP 单元测试与 PostgreSQL 17 迁移／隔离约束集成测试；这不代表真实提供商或微信投递通过。
 - P4 服务器没有触碰，同事备份与恢复性未确认。
 
 **结论：** P3 代码链路已经搭建，但所有外部依赖和最终业务验收仍待完成。`IMPLEMENTATION.md` 的 P3 四项保持未勾选。
@@ -32,3 +32,8 @@
 - 启用生成调度的同日迟到恢复；DeepSeek 分类从持久队列限量领取、追踪尝试次数与失败补偿。
 - 增加 GP 状态与日历回归单测，并新增 PostgreSQL 迁移及多用户数据约束集成 CI。
 - 外部数据服务与微信渠道仍未验证，开关必须保持关闭。
+
+## 合并记录
+
+- [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 已于 2026-10-22（北京时间）合并到 `main`，合并提交 `3048ef48`；合并前 head 为 `c29089b3`，对应 [GitHub Actions 检查](https://github.com/JoeLiaoo/newsfeed-fixedagent/actions/runs/39648379536) 成功。
+- P3-01～P3-04 仍须实际外部服务、双用户与跨日投递核验；`docs/IMPLEMENTATION.md` 保持未勾选。合并不授权打开 P3 功能开关，不授权清理 `ai-work-mvp`。

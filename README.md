@@ -28,9 +28,32 @@ npm ci
 npm run typecheck
 ```
 
+## 当前开发状态（2026-10-22）
+
+| 阶段 | 代码状态 | 业务／上线状态 |
+|---|---|---|
+| P0 | 材料与方案预核已开展 | 真实凭据、微信试用、服务器边界核验未完成 |
+| P1 | 账号、兴趣、资讯与个人日报已实现 | 需真实员工账号和信源覆盖验证 |
+| P2 | 专家导入、任务、新华财经适配底稿已实现 | 仅一层直接投资；真实 MCP / DeepSeek 和完整规则仍待验收 |
+| P3 | GP 监测与微信消息管线已由 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并至 `main`，自动化质量与 PostgreSQL 集成检查通过 | **仍未上线**；真实服务商、Hermes sidecar 和双用户跨日投递均未验收，所有 P3 功能开关默认关闭 |
+| P4 | 尚未部署试运行 | 清理旧服务前必须取得同事备份及可恢复性确认 |
+
+生产运行与功能激活是两个独立关口。不要因为 P3 代码已合并，就打开 `P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED`，详见 [P3 运维与验收手册](docs/P3-OPERATIONS.md)。
+
+## 开发检查
+
+```sh
+npm ci
+npm run typecheck
+npm run test:standalone
+node scripts/check-doc-links.ts
+```
+
+`npm test` 需要临时 PostgreSQL 环境，不能将未运行的测试视为通过。具体集成检查见 [CI 工作流](.github/workflows/p3-checks.yml)；文档链接检查见 [Docs 工作流](.github/workflows/docs-checks.yml)。
+
 ## 文档
 
-- [贡献与仓库治理](CONTRIBUTING.md)
+- [贡献与仓库治理、合并及上线门槛](CONTRIBUTING.md)
 - [Agent 工作约定](AGENTS.md)
 - [建设需求基线](docs/PLAN.md)
 - [实施状态和剩余验收](docs/IMPLEMENTATION.md)
@@ -40,4 +63,4 @@ npm run typecheck
 - [AIHOT 上游版本、许可证和适配记录](docs/UPSTREAM.md)
 - [文档与日志索引](docs/README.md)
 
-`.env` 和 `.config/` 不提交到 Git。生产环境上线前还需按实施计划完成人员试用和服务器部署核验。
+仓库为 **public**：不得提交 `.env`、`.config/`、私人名单、用户数据、供应商原始响应或其他敏感内容。生产环境上线前仍需完成人员试用和服务器部署核验。

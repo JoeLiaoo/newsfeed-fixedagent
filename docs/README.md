@@ -1,22 +1,33 @@
 # 文档索引
 
-## 当前状态
+## 从这里开始
 
-- 产品需求基线：[`PLAN.md`](PLAN.md) v0.65。
-- 分步实施和验收状态：[`IMPLEMENTATION.md`](IMPLEMENTATION.md)。P1 本地功能已有实现；P0 外部核验、P2 专家、P3 GP/微信以及 P4 部署试运行仍按表中状态推进。
-- P2 适配边界：[`P2-EXPERT-ADAPTER.md`](P2-EXPERT-ADAPTER.md)，逐项列出首个专家对原悟道规则的支持情况和缺口。
-- 资料预核和访问阻碍：[`P0-STATUS.md`](P0-STATUS.md)。
-- AIHOT 上游固定版本、许可证和适配：[`UPSTREAM.md`](UPSTREAM.md)。
+- [项目 README](../README.md)：本地启动、各阶段代码与上线状态。
+- [产品需求基线](PLAN.md)：v0.65；需求讨论与确认范围，不代表功能已验收。
+- [实施状态](IMPLEMENTATION.md)：P0–P4 唯一任务勾选来源，按对应验收条件完成后才标记 `[x]`。
+- [贡献与仓库治理](../CONTRIBUTING.md) / [Agent 开发约定](../AGENTS.md)：分支、PR、设计系统、日志、保密与验证规则。
 
-## 工作日志
+## 阶段文档
 
-所有日志位于 [`logs/`](logs/)，使用 `YYYY-MM-DD-任务ID.md` 命名。新日志参考 [`logs/TEMPLATE.md`](logs/TEMPLATE.md)。
+| 阶段 | 说明 | 状态依据 |
+|---|---|---|
+| P0 | [材料、凭据与外部阻碍](P0-STATUS.md) | 待真实凭据及服务器、微信核验 |
+| P1 | [实施状态](IMPLEMENTATION.md#p1--账号与资讯) | 代码完成，待真实员工试用 |
+| P2 | [专家适配矩阵](P2-EXPERT-ADAPTER.md) | 一层直接投资适配版，真实 MCP／模型尚未联调 |
+| P3 | [GP 监测与微信运维手册](P3-OPERATIONS.md) | [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 已合并；三项运行开关默认关闭，外部验收未完成 |
+| P4 | [部署与试运行任务](IMPLEMENTATION.md#p4--部署与试运行) | 旧环境备份与可恢复性尚未确认，禁止提前清理 |
+| 上游 | [AIHOT 来源、许可证与适配](UPSTREAM.md) | 保留来源归属及边界 |
 
-- [`2026-10-21-P0-00.md`](logs/2026-10-21-P0-00.md)：仓库约定和实施计划的建立。
-- [`2026-10-21-P0-03-04-precheck.md`](logs/2026-10-21-P0-03-04-precheck.md)：微信试用预核及服务器访问阻碍。
-- [`2026-10-21-P1-platform.md`](logs/2026-10-21-P1-platform.md)：首版平台实现记录。
-- [`2026-10-21-PR1-review.md`](logs/2026-10-21-PR1-review.md)：PR #1 评审修复及验证。
-- [`2026-10-21-P2-expert.md`](logs/2026-10-21-P2-expert.md)：专家导入、异步任务与新华财经适配版。
-- [`2026-10-21-repo-governance.md`](logs/2026-10-21-repo-governance.md)：本次仓库治理和文档整理。
+**注意：** P3 合并的是可供联调的代码链路，不等于微信、新华财经和 DeepSeek 已在真实环境验证。P3-01～P3-04 的任务仍保持未完成，详情以实施状态表为准。
 
-状态表是任务完成情况的索引；日志记录具体证据。若两处不一致，以实施计划的验收规则为准并及时修正。
+## 实施日志
+
+日志位于 [`logs/`](logs/)，命名为 `YYYY-MM-DD-任务ID.md`，模板见 [`logs/TEMPLATE.md`](logs/TEMPLATE.md)。
+
+- [仓库治理初版](logs/2026-10-21-repo-governance.md)；[2026-10-22 治理与文档同步](logs/2026-10-22-repository-governance.md)
+- [P0 建立约定](logs/2026-10-21-P0-00.md)；[P0 预核与访问阻碍](logs/2026-10-21-P0-03-04-precheck.md)；[P0 凭据相关记录](logs/2026-10-21-P0-credentials.md)；[P0 云环境记录](logs/2026-10-21-P0-cloud-credentials.md)
+- [P1 平台](logs/2026-10-21-P1-platform.md)；[PR #1 Review](logs/2026-10-21-PR1-review.md)；[P1/P2 UI](logs/2026-10-21-P1-P2-ui.md)
+- [P2 专家](logs/2026-10-21-P2-expert.md)
+- [P3 实施、Review 整改与剩余阻碍](logs/2026-10-22-P3-implementation.md)
+
+状态表记录任务验收，日志记录代码、验证证据和未完成事项；如有冲突，以明确的验收标准为准并立即修正文档。
