@@ -11,7 +11,9 @@ type OutboxRow={id:string;user_id:string;kind:"news"|"gp";payload:string;attempt
 
 function dateInfo() {
   const now=new Date();
-  const day=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit"}).format(now);
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(now);
+  const get=(type:string)=>parts.find(p=>p.type===type)?.value??"";
+  const day=get("year")+"-"+get("month")+"-"+get("day");
   const hour=Number(new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Shanghai",hour:"2-digit",hourCycle:"h23"}).format(now));
   return {day,hour};
 }

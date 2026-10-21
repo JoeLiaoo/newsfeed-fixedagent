@@ -41,7 +41,7 @@ export function matchInterests(tags: readonly string[],selected: readonly string
 }
 
 export function offDay(date: string, holidays: readonly string[], makeupWorkdays: readonly string[]) {
-  const day = new Date(date+"T00:00:00+08:00").getUTCDay();
+  const day = new Date(date+"T00:00:00Z").getUTCDay();
   return !makeupWorkdays.includes(date) && (holidays.includes(date) || day === 0 || day === 6);
 }
 

@@ -13,11 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - run: node scripts/check-migrations.ts --base=origin/main
       - run: npm run typecheck
       - run: npm run build -w @aihot/web
       - run: node --import ./tests/standalone.ts --test modules/membership/tests/gp-core.standalone.test.ts
