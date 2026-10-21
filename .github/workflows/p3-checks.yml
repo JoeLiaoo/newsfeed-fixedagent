@@ -1,0 +1,23 @@
+name: P3 checks
+on:
+  pull_request:
+    paths:
+      - "modules/membership/**"
+      - "site/modules/**"
+      - "database/migrations/**"
+      - "apps/**"
+      - "package*.json"
+      - ".github/workflows/p3-checks.yml"
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build -w @aihot/web
+      - run: node --import ./tests/standalone.ts --test modules/membership/tests/gp-core.standalone.test.ts
