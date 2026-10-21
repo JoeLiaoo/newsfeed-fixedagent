@@ -3,7 +3,7 @@
 日期：2026-10-21（Asia/Shanghai）
 状态：已完成本地材料盘点；当前开发先用 DeepSeek API 与新华财经 MCP，外部接口和个人微信投递尚未实测，用户参与实际试用。
 
-用户已告知 GitHub Actions 配置了 `DEEPSEEK_API_KEY` 和 `XINHUA_MCP_API_KEY`，上线服务器的凭据也已放在 `.config/`；上述可用性及服务器具体路径尚未核验。Codex 云端环境仍需单独配置凭据。
+用户已告知 Codex 云端环境变量和 GitHub Actions 仓库级 secrets 均配置了 `DEEPSEEK_API_KEY`、`XINHUA_MCP_API_KEY`，上线服务器的凭据也已放在 `.config/`；上述可用性及服务器具体路径尚未核验。
 
 ## 已收到的材料与业务安排
 
