@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY IF NOT EXISTS member_notification_outbox_due_idx ON member_notification_outbox(status,next_attempt_at);
