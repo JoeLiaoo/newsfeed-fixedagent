@@ -2,9 +2,9 @@
 
 - Agent：ChatGPT（GitHub connector）
 - 对应任务：维护任务（不对应单独 P0–P4）；支撑 `P3-04` 的代码交付
-- 完成状态：文档治理与代码审查准备已完成；真机验收尚未开始
+- 完成状态：文档治理与 PR #15 合并完成；真机验收尚未开始
 - 变更：[PR #15](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/15)
-- 状态说明：此文件由 PR #15 合并前提交，合并时间及 merge commit 以 GitHub PR 页面为准；**文档预先提交不代表已合并**。
+- 合并结果：PR #15 已于 2026-10-22 合并到 `main`；merge commit `acef3866367d4718cd05905feb6a487d6d7af6d9`。双员工微信真机验收和生产部署仍未进行。
 
 ## 本次改动
 
@@ -16,7 +16,7 @@
 
 ## 最小验证
 
-- 合并前必须以 PR 最新 head 提交核对 GitHub Actions 的 `Docs checks`、`P3 checks`（含 typecheck、Web build、迁移和 PostgreSQL 集成、独立协议测试）。旧提交的 CI 成功不能替代新提交的检查。
+- 合并前实际 head `3e6e2c0fa201b5fb1f6987e71e28859c56088c10` 的 `Docs checks`、`P3 checks` 均为 success（含 typecheck、Web build、迁移和 PostgreSQL 集成、独立协议测试）；合并结果为 `acef3866367d4718cd05905feb6a487d6d7af6d9`。
 - 文档链接检查由 `Docs checks` 执行；如失败先修复后合并。PR 最新 head 的具体检查结论及合并结果记于 GitHub，不提前在这里写为「成功」。
 - 本次不能证明的项目：微信真实 QR 的安全验证界面、多 Bot 持续在线、受限主动消息窗口、真实推送送达、两名员工跨日隔离；这些按照用户要求在合并部署后执行。
 
