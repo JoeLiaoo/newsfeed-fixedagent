@@ -365,6 +365,134 @@
       ],
       "site_fulltext": false,
       "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-pv-magazine",
+      "name": "pv magazine",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.pv-magazine.com/feed/",
+        "_aihot": { "initialBackfillLimit": 5 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["新能源", "光伏"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-cleantechnica-wind",
+      "name": "CleanTechnica Wind Energy",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://cleantechnica.com/category/wind-energy/feed/",
+        "_aihot": { "initialBackfillLimit": 5 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["新能源", "风电"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-nature-materials-science",
+      "name": "Nature Materials Science",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.nature.com/subjects/materials-science.rss",
+        "_aihot": { "initialBackfillLimit": 5 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": ["新材料", "研究"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-sciencedaily-materials-science",
+      "name": "ScienceDaily Materials Science",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sciencedaily.com/rss/matter_energy/materials_science.xml",
+        "_aihot": { "initialBackfillLimit": 5 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": ["新材料", "研究"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-sciencedaily-robotics",
+      "name": "ScienceDaily Robotics",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sciencedaily.com/rss/matter_energy/robotics.xml",
+        "_aihot": { "initialBackfillLimit": 5 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": ["先进制造", "机器人"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-3dprintingindustry",
+      "name": "3D Printing Industry",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://3dprintingindustry.com/feed/",
+        "_aihot": { "initialBackfillLimit": 5 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["先进制造", "增材制造"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-newtimespace-ipo",
+      "name": "新时空新股",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.newtimespace.com/zh-cn/feed/ipo.xml",
+        "_aihot": { "initialBackfillLimit": 5 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["战略配售", "新股"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-hkex-news-releases",
+      "name": "HKEX News Releases",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.hkex.com.hk/Services/RSS-Feeds/News-Releases?sc_lang=en",
+        "_aihot": { "initialBackfillLimit": 5 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "hkex",
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["战略配售", "交易所"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
     }
   ]
 }
