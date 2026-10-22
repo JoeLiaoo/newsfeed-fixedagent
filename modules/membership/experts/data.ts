@@ -16,7 +16,7 @@ export type InvestmentEvidence = {
   source: string;
 };
 
-export type InvestmentPage = { rows: Record<string, unknown>[]; total: number | null; hasMore: boolean | null };
+export type InvestmentPage = { rows: Record<string, unknown>[]; total: number | null; hasMore: boolean | null; nextOffset?: number | null };
 export type XinhuaCall = (tool: "get_company_profile", args: Record<string, unknown>) => Promise<unknown>;
 
 export function normalizeText(value: unknown): string | null {
@@ -93,12 +93,28 @@ export function parseInvestmentPage(value: unknown, keys = ["direct_investment_i
     for (const child of Object.values(object)) { const found = findField(child, names); if (found !== undefined) return found; }
     return undefined;
   };
-  const totalRaw = findField(root, ["total", "total_count", "totalCount", "count"]);
+  const pagination = root.pagination && typeof root.pagination === "object" && !Array.isArray(root.pagination)
+    ? root.pagination as Record<string, unknown>
+    : {};
+  // The live Xinhua contract uses pagination.count for this page's row count, not the full inventory.
+  // Do not treat it as a total; that would stop a multi-page snapshot after page one.
+  const totalRaw = root.total ?? root.total_count ?? root.totalCount
+    ?? pagination.total ?? pagination.total_count ?? pagination.totalCount
+    ?? findField(root, ["total", "total_count", "totalCount"]);
   const totalValue = typeof totalRaw === "number" ? totalRaw : typeof totalRaw === "string" ? Number(totalRaw) : NaN;
   const total = Number.isSafeInteger(totalValue) && totalValue >= 0 ? totalValue : null;
   const moreRaw = findField(root, ["has_more", "hasMore", "next_page", "nextPage"]);
-  const hasMore = typeof moreRaw === "boolean" ? moreRaw : moreRaw === null || moreRaw === undefined ? null : Boolean(moreRaw);
-  return { rows, total, hasMore };
+  const nextOffsetRaw = pagination.next_offset;
+  const hasMore = typeof moreRaw === "boolean" ? moreRaw
+    : moreRaw !== undefined ? Boolean(moreRaw)
+    : Object.hasOwn(pagination, "next_offset") ? nextOffsetRaw !== null && nextOffsetRaw !== undefined
+    : null;
+  const nextOffset = Object.hasOwn(pagination, "next_offset")
+    ? typeof nextOffsetRaw === "number" && Number.isSafeInteger(nextOffsetRaw) && nextOffsetRaw >= 0
+      ? nextOffsetRaw
+      : nextOffsetRaw === null ? null : Number.NaN
+    : undefined;
+  return { rows, total, hasMore, nextOffset };
 }
 
 export function mapInvestmentEvidence(rows: Record<string, unknown>[], source: string, cap = 500): InvestmentEvidence[] {
@@ -125,17 +141,16 @@ export function verifySelectedEntity(entity: EntityCandidate, profile: Record<st
 }
 
 export async function querySelectedCompanyProfile(call: XinhuaCall, entity: EntityCandidate) {
-  let query = entity.id;
-  let queryType = "company_id";
-  let raw: unknown;
-  try { raw = await call("get_company_profile", { query, query_type: queryType }); }
-  catch {
-    if (!entity.creditCode || entity.creditCode.length < 15) throw new Error("xinhua_identity_unverified");
-    query = entity.creditCode;
-    queryType = "credit_code";
-    raw = await call("get_company_profile", { query, query_type: queryType });
+  let query = entity.creditCode?.trim() || entity.name;
+  let queryType = entity.creditCode?.trim() ? "credit_code" : "company_name";
+  let profile = extractObject(await call("get_company_profile", { query, query_type: queryType }));
+  // Some accounts resolve an exact legal name even when a supplied credit code has no current profile.
+  // Always verify the returned ID/name/code before allowing it to seed an expert or GP query.
+  if (profile.not_found && queryType === "credit_code") {
+    query = entity.name;
+    queryType = "company_name";
+    profile = extractObject(await call("get_company_profile", { query, query_type: queryType }));
   }
-  const profile = extractObject(raw);
   const identity = verifySelectedEntity(entity, profile);
   if (!identity.ok) throw new Error(identity.reason === "entity_identity_unverified" ? "xinhua_identity_unverified" : "xinhua_entity_mismatch");
   return { profile, query, queryType };

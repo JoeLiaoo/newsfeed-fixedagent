@@ -16,9 +16,12 @@ async function capture(gp:GP):Promise<Capture> {
       id:gp.entity_id,name:gp.canonical_name,creditCode:gp.credit_code,status:null,address:null,startDate:null,
     });
     const inventory=await collectProviderPages<Record<string,unknown>>({
-      pageSize:100,maxPages:10,identity:investmentRowIdentity,
+      // Xinhua's live schema caps `limit` at 50 and exposes pagination.next_offset/has_more.
+      // Explicitly include historical and undated rows; still refuse a baseline beyond 500 rows.
+      pageSize:50,maxPages:10,identity:investmentRowIdentity,
       fetchPage:async(offset,limit)=>{
-        const raw=await call("get_direct_investment",{query:identity.query,query_type:identity.queryType,limit,offset});
+        const raw=await call("get_direct_investment",{query:identity.query,query_type:identity.queryType,limit,offset,
+          time:{start:"1900-01-01",end:null,missing_policy:"include_missing_last"}});
         return parseInvestmentPage(raw);
       },
     });

@@ -12,7 +12,7 @@ export function normalizeInvestment(raw: Record<string,unknown>): Investment | n
   const key = (investeeId ? "id:" + investeeId : "name:" + name.replace(/\s+/g,"").toLowerCase());
   return {
     key: createHash("sha256").update(key).digest("hex"), name, investeeId,
-    dataDate: textField(raw,"data_date","data_dt","as_of_date"),
+    dataDate: textField(raw,"data_date","data_dt","as_of_date","dates"),
     updatedAt: textField(raw,"update_time","updated_at","include_date","ingestion_time"),
     investmentDate: textField(raw,"invest_date","investment_date"),
     raw,
