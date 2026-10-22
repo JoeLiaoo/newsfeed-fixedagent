@@ -59,6 +59,7 @@ export default function InterestsPage() {
     <header className="mb-6">
       <h1 className="text-2xl font-semibold tracking-tight">关注赛道</h1>
       <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-3">选择一级方向时默认勾选全部细分赛道；之后可逐项调整。新增标签会进入全员共享目录。</p>
+      <Button asChild variant="link" className="mt-2 h-auto px-0"><Link to="/settings/sources">添加或查看资讯信源</Link></Button>
       <Button asChild variant="link" className="mt-2 h-auto px-0"><Link to="/settings/notifications">微信通知</Link></Button>
       {me?.user.role === "admin" && <Button asChild variant="link" className="mt-2 h-auto px-0"><Link to="/settings/admin-members">管理员：审核员工账号</Link></Button>}
       {me?.user.role === "admin" && <Button asChild variant="link" className="mt-2 h-auto px-0"><Link to="/settings/admin-gps">GP 投资动向管理</Link></Button>}

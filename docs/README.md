@@ -36,6 +36,7 @@
 - [P0 DeepSeek／新华财经 MCP 实际连通抽测](logs/2026-10-22-P0-live-providers.md)
 - [P1 平台](logs/2026-10-21-P1-platform.md)；[PR #1 Review](logs/2026-10-21-PR1-review.md)；[P1/P2 UI](logs/2026-10-21-P1-P2-ui.md)
 - [P1 其他方向示范信源](logs/2026-10-22-P1-04-direction-sources.md)：新能源、新材料、先进制造与战略配售的公开 RSS 补充及线上采集核验。
+- [P1 员工信源入口改进](logs/2026-10-22-P1-04-source-entry.md)：在主导航与关注赛道页增加员工添加公开信源的直达入口。
 - [P2 专家](logs/2026-10-21-P2-expert.md)
 - [P3 实施、Review 整改与剩余阻碍](logs/2026-10-22-P3-implementation.md)
 - [全仓架构与实现审查日志](logs/2026-10-22-repo-review.md)
