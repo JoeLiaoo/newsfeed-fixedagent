@@ -15,6 +15,8 @@
 - [PR #15 文档与仓库治理检查](logs/2026-10-22-pr15-docs-governance.md)：已合并（`acef3866367d`）；多 Bot 凭据隔离、发布闸门、代码 CI 与部署后双用户真机验收的职责划分。
 - [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 及通知投递复审的实现、验证和剩余边界；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 已合并。
 - [文档治理更新记录](logs/2026-10-22-repo-docs-governance.md)：文档状态、索引去重及合并后同步规则；[PR #7](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/7) 已合并（`409a2a7`）。
+- [P3 功能开关启用记录](logs/2026-10-22-P3-flags-enabled.md)：按用户指示在火山云启用扫码、GP 同步、通知生成与投递，并记录启用时的数据状态和验收缺口。
+- [P3 个人设置与扫码请求修复](logs/2026-10-22-P3-04-profile-qr-fix.md)：定位扫码请求被拒原因，记录个人设置入口和请求修复。
 
 ## 阶段文档
 
@@ -23,7 +25,7 @@
 | P0 | [材料、凭据与外部阻碍](P0-STATUS.md) | P0-03 微信试投已转入 P3-04；供应商持续性及 GP 主体核对待完成 |
 | P1 | [实施状态](IMPLEMENTATION.md#p1--账号与资讯) | 代码完成，待真实员工试用 |
 | P2 | [专家适配矩阵](P2-EXPERT-ADAPTER.md) | 一层直接投资适配版，真实 MCP／模型尚未联调 |
-| P3 | [GP 监测与微信运维手册](P3-OPERATIONS.md) | 旧绑定桥接已部署但被否决；已实现每用户 iLink 扫码授权及双用户模拟投递，真实双用户与跨日验收将在合并部署后进行，三项运行开关保持关闭 |
+| P3 | [GP 监测与微信运维手册](P3-OPERATIONS.md) | 四项运行开关已按用户指示启用；真实双用户扫码、GP 数据与跨日送达验收待完成 |
 | P4 | [部署与试运行任务](IMPLEMENTATION.md#p4--部署与试运行) | 新平台 HTTPS 入口已切换，旧版本归档已完成，Hermes 网关已运行；新平台运维、旧组件处置和员工试用待完成 |
 | 上游 | [AIHOT 来源、许可证与适配](UPSTREAM.md) | 保留来源归属及边界 |
 
@@ -54,6 +56,7 @@
 - [火山云部署准备清单](DEPLOY-VOLCENGINE.md)：复用 ai-work 的只读盘点、隔离预部署、入口切换与回退步骤。
 - [P4 火山云部署准备日志](logs/2026-10-22-P4-volcengine-prep.md)。
 - [P4 火山云隔离预部署日志](logs/2026-10-22-P4-volcengine-deploy.md)：独立 Compose 部署与启动检查。
+- [P4 最新主线发布日志](logs/2026-10-22-P4-latest-deployment.md)：记录 `5031e2c` 生产发布、迁移、健康检查与 iLink 受控试用开关状态。
 - [P4 Hermes Weixin/iLink 网关部署日志](logs/2026-10-22-P4-hermes-gateway.md)：单 bot 扫码、私聊策略、运行状态及未验收边界。
 - [P4 火山云现场复核与公网入口切换](logs/2026-10-22-P4-field-refresh.md)：用户确认后切换 HTTPS 上游，含健康检查及回退备份位置。
 - [P4 火山云旧应用归档](logs/2026-10-22-P4-old-app-archive.md)：保存旧应用代码/配置、数据库转储、持久卷副本与镜像，并记录归档限制。

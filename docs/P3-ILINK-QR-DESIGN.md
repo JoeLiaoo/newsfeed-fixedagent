@@ -2,7 +2,7 @@
 
 决策日期：2026-10-22。用户确认：这是 side project，不使用企业微信/需要组织审批的渠道；允许员工在会话窗口失效后**主动向机器人发一条消息**，恢复后续定向推送。无需限制每个员工是否共用同一个 bot。对外体验优先：登录网站 → 扫描专属二维码 → 微信端确认 → 网站自动显示绑定成功 → 根据网站兴趣及订阅设置收消息。
 
-**实现状态：代码经 [PR #15](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/15) 合并到 `main`（`acef3866367d`），仍待部署与双用户真机验收。** PR #15 已移除静态联系人二维码 + 手动验证码 + 网页确认的旧流程；新增平台会话绑定、iLink 二维码生成和轮询、原子身份绑定、AES-256-GCM Bot token 与 cursor 加密存储、多账号收件箱轮询、按收件人发送、会话互动恢复状态和自动化 mock/数据库测试。独立 iLink 账号的主动推送不再通过旧 Hermes 插件的单例 `_adapter`，旧插件仅兼容历史通道。代码层验收与真实微信端验收严格区分；新版本尚未部署，三个 P3 开关仍为 false，P3-04 未勾选。
+**实现状态：代码经 [PR #15](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/15) 合并到 `main`（`acef3866367d`），并已随 `main` 提交 `5031e2c04dec382263d05b38484b0cfaabeaa15b` 部署；功能开关已按用户指示启用，仍待双用户真机验收。** PR #15 已移除静态联系人二维码 + 手动验证码 + 网页确认的旧流程；新增平台会话绑定、iLink 二维码生成和轮询、原子身份绑定、AES-256-GCM Bot token 与 cursor 加密存储、多账号收件箱轮询、按收件人发送、会话互动恢复状态和自动化 mock/数据库测试。独立 iLink 账号的主动推送不再通过旧 Hermes 插件的单例 `_adapter`，旧插件仅兼容历史通道。生产迁移 `0152`–`0155` 已应用；`P3_ILINK_CREDENTIAL_KEY` 已安全配置，`P3_ILINK_BINDING_ENABLED`、`P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED` 均为 true。启用时有 0 个 active 微信绑定、0 个 iLink 账号、0 条通知 outbox、0 个 GP watchlist/active GP，因此暂无实际微信投递或 GP 同步；P3-04 仍未勾选。
 
 **范围说明：** 本轮完成网页扫码绑定和订阅推送通道。扫码得到的独立 iLink Bot 可以收取用户互动以刷新推送上下文，但**这些 Bot 的普通聊天消息暂不会被交给 Hermes Agent**；原 Hermes 聊天网关单独保留，不能把“推送 Bot 可绑定”描述为“多 Bot Hermes AI 对话已接通”。若后续需要每个员工在同一 Bot 内与 Hermes 直接对话，应另外增加租户隔离的 Hermes ingress/pairing 联调并独立验收。
 

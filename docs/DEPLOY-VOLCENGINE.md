@@ -46,7 +46,7 @@
 - `.env` 与凭据只放服务器受限路径；确保 Docker build context 和镜像中不包含 `.env`、`.config/` 或个人数据。
 - `P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED` 初始及试运行期间保持 `false`。
 
-### 隔离预部署现况（2026-10-22）
+### 首次隔离部署记录（2026-10-22，后续状态见“最新主线发布”）
 
 - 已在 `/opt/citic-newsfeed` 使用独立 Compose 项目 `citic-newsfeed-prod` 启动主分支提交 `4a243981aa731e9860c203beead926872d18327c`。新建独立 PostgreSQL 17 容器及 `db`、`data` 命名卷；旧应用、主机 PostgreSQL 16、其他 Compose 项目和 Nginx 均未停止或修改。
 - `web` 仅映射 `127.0.0.1:3000`；数据库和 API 没有主机端口映射，Caddy profile 未启用。健康端点返回 `ok=true`、`db=ok` 与上述 release；管理员入口返回 HTTP 302。迁移/种子容器退出码为 0。
@@ -59,9 +59,19 @@
 
 ### 资讯功能激活与页面热修复（2026-10-22）
 
-员工试用发现资讯为空且热点页加载失败后，已启用 `COLLECT_ENABLED=true`、`MODEL_CALLS_ENABLED=true`，配置 DeepSeek Flash 默认模型；三个 P3 开关仍为 `false`。Web 使用基于原发布源码的 `4a243981aa731e9860c203beead926872d18327c-webctx1` 热修复镜像，解决服务端渲染丢失员工会话 Cookie 的问题。原发布目录与配置修改前备份保留。现场数据、最小验证、空日报重建及剩余信源错误见[员工资讯不可用现场修复日志](logs/2026-10-22-P4-04-news-availability.md)。
+员工试用发现资讯为空且热点页加载失败后，已启用 `COLLECT_ENABLED=true`、`MODEL_CALLS_ENABLED=true`，配置 DeepSeek Flash 默认模型；**本节记录时**三个 P3 开关仍为 `false`，后续开关状态见“最新主线发布”。Web 使用基于原发布源码的 `4a243981aa731e9860c203beead926872d18327c-webctx1` 热修复镜像，解决服务端渲染丢失员工会话 Cookie 的问题。原发布目录与配置修改前备份保留。现场数据、最小验证、空日报重建及剩余信源错误见[员工资讯不可用现场修复日志](logs/2026-10-22-P4-04-news-availability.md)。
 
 随后为其余四个方向各增两个公开 RSS 来源，并重跑可重入的种子程序：新增 8 个来源，原有 18 个保持不变；生产采集器逐一试读均为 `ok`。当前容器的信源清单已同步，数据库中的来源记录持久保存；下次按新提交构建发布时，镜像也会包含同一清单。详见 [P1-04 其他方向示范信源日志](logs/2026-10-22-P1-04-direction-sources.md)。首次回填记录按来源时间处理，员工已有的今日日报快照不会因此自动重写。
+
+### 最新主线发布（2026-10-22）
+
+- 已将 GitHub `main` 提交 `5031e2c04dec382263d05b38484b0cfaabeaa15b` 部署到 `/opt/citic-newsfeed/releases/5031e2c04dec382263d05b38484b0cfaabeaa15b`；web、API、worker 均使用镜像 `citic-newsfeed:5031e2c04dec382263d05b38484b0cfaabeaa15b`。Hermes 网关、Nginx、公网端口映射、数据库卷和其他 Compose 项目未改动。
+- 在迁移前生成数据库转储 `/opt/citic-newsfeed/shared/backups/db-before-5031e2c-20261022.dump`（3,322,815 字节，权限 `0600`）；通过 PostgreSQL 17 容器执行 `pg_restore --list` 验证转储结构可读，未执行完整恢复演练。旧临时绑定表在迁移前均为 0 行；迁移 `0152`–`0155` 已成功应用。
+- `.env` 的 `AIHOT_RELEASE` 已更新至上述提交，并先保存为 `/opt/citic-newsfeed/shared/.env.before-release-5031e2c-20261022`；`.env` 权限为 `0600`。未记录或输出供应商凭据。
+- 本机与公网 `/api/health` 均返回 `ok=true`、`db=ok`、release 为上述提交；公网 `/login` 返回 HTTP 200。
+- 按用户指示，2026-10-22 已启用 `P3_ILINK_BINDING_ENABLED`、`P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED`。为扫码凭据生成 32 字节随机 `P3_ILINK_CREDENTIAL_KEY`；API 与 worker 已重建，两个容器环境均核验四项开关为 `true`，密钥有效性检查通过。密钥未记录在文档或日志中。启用前 `.env` 备份为 `/opt/citic-newsfeed/shared/.env.before-p3-enable-20261022`，受保护的启用后备份为 `/opt/citic-newsfeed/shared/backups/.env-p3-enabled-20261022`；文件权限 `0600`、备份目录权限 `0700`。
+- 启用时有 3 个 active 平台账号、0 个 active 微信绑定、0 个 iLink 账号、0 条通知 outbox、0 个 GP watchlist/active GP。扫码入口现已开放给 active 账号，但尚无已绑定收件人、待投递通知或 GP 监测对象，因此此次没有触发实际微信投递或 GP 同步。开关启用不代表业务验收完成；双用户真机扫码、数据源联调和实际送达仍待验证。
+- 数据库备份仅完成格式/目录可读检查，不等同于恢复验证。回退应用镜像前须评估 `0152`/`0153` 移除旧表后的兼容性；不要直接恢复旧版应用或回滚数据库。
 
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 

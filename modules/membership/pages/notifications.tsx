@@ -49,7 +49,7 @@ export default function NotificationsPage(){
   async function startScan(){
     setBusy(true);setMessage("");
     try{
-      const response=await fetch(endpoint+"weixin/start",{method:"POST",headers:{"content-type":"application/json"}});
+      const response=await fetch(endpoint+"weixin/start",{method:"POST"});
       const result=await response.json() as Scan&{error?:string};
       if(response.ok&&result.qrUrl){setScan(result);setMessage("");}
       else setMessage(result.error==="scan_in_progress"?"二维码尚未过期，稍后可重试。":"暂时无法生成二维码。");
@@ -69,7 +69,7 @@ export default function NotificationsPage(){
   async function request(path:string,body?:Record<string,unknown>,method="POST"){
     setBusy(true);setMessage("");
     try{
-      const response=await fetch(endpoint+path,{method,headers:{"content-type":"application/json"},body:body?JSON.stringify(body):undefined});
+      const response=await fetch(endpoint+path,{method,...(body?{headers:{"content-type":"application/json"},body:JSON.stringify(body)}:{})});
       const result=await response.json() as {error?:string};
       if(!response.ok){setMessage("请求失败："+(result.error??"未知错误"));return;}
       setMessage("已保存。");
