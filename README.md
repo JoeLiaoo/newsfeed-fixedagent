@@ -35,7 +35,7 @@ npm run typecheck
 | P0 | 材料与方案预核已开展 | 真实凭据、微信试用、服务器边界核验未完成 |
 | P1 | 账号、兴趣、资讯与个人日报已实现 | 需真实员工账号和信源覆盖验证 |
 | P2 | 专家导入、任务、新华财经适配底稿已实现 | 仅一层直接投资；真实 MCP / DeepSeek 和完整规则仍待验收 |
-| P3 | GP 监测与微信消息管线已由 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并至 `main`，自动化质量与 PostgreSQL 集成检查通过 | **仍未上线**；真实服务商、Hermes sidecar 和双用户跨日投递均未验收，所有 P3 功能开关默认关闭 |
+| P3 | GP 监测与微信管线由 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 引入；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并了全仓审查整改及通知分片、并发投递修复 | **仍未上线**；真实服务商、Hermes sidecar 和双用户跨日投递均未验收，所有 P3 功能开关默认关闭 |
 | P4 | 尚未部署试运行 | 清理旧服务前必须取得同事备份及可恢复性确认 |
 
 生产运行与功能激活是两个独立关口。不要因为 P3 代码已合并，就打开 `P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED`，详见 [P3 运维与验收手册](docs/P3-OPERATIONS.md)。

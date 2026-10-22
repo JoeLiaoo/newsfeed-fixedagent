@@ -7,8 +7,8 @@
 - [实施状态](IMPLEMENTATION.md)：P0–P4 唯一任务勾选来源，按对应验收条件完成后才标记 `[x]`。
 - [贡献与仓库治理](../CONTRIBUTING.md) / [Agent 开发约定](../AGENTS.md)：分支、PR、设计系统、日志、保密与验证规则。
 - [全仓架构与实现审查（2026-10-22）](REPO-REVIEW-2026-10-22.md)：基于 `13a89a5` 的风险、复现证据及建议演进顺序。
-- [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 的实现对应、验证结果及剩余边界；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6)。
-- [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 的实现对应、验证结果及剩余边界。
+- [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 及通知投递复审的实现、验证和剩余边界；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 已合并。
+- [文档治理更新记录](logs/2026-10-22-repo-docs-governance.md)：文档状态、索引去重及合并后同步规则。
 
 ## 阶段文档
 
@@ -17,7 +17,7 @@
 | P0 | [材料、凭据与外部阻碍](P0-STATUS.md) | 待真实凭据及服务器、微信核验 |
 | P1 | [实施状态](IMPLEMENTATION.md#p1--账号与资讯) | 代码完成，待真实员工试用 |
 | P2 | [专家适配矩阵](P2-EXPERT-ADAPTER.md) | 一层直接投资适配版，真实 MCP／模型尚未联调 |
-| P3 | [GP 监测与微信运维手册](P3-OPERATIONS.md) | [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 已合并；三项运行开关默认关闭，外部验收未完成 |
+| P3 | [GP 监测与微信运维手册](P3-OPERATIONS.md) | 基础管线 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 和投递整改 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 已合并；三项运行开关默认关闭，外部验收未完成 |
 | P4 | [部署与试运行任务](IMPLEMENTATION.md#p4--部署与试运行) | 旧环境备份与可恢复性尚未确认，禁止提前清理 |
 | 上游 | [AIHOT 来源、许可证与适配](UPSTREAM.md) | 保留来源归属及边界 |
 
@@ -34,6 +34,6 @@
 - [P3 实施、Review 整改与剩余阻碍](logs/2026-10-22-P3-implementation.md)
 - [全仓架构与实现审查日志](logs/2026-10-22-repo-review.md)
 - [全仓审查问题修复日志](logs/2026-10-22-repo-review-remediation.md)
-- [全仓审查问题修复日志](logs/2026-10-22-repo-review-remediation.md)
+- [文档治理更新日志](logs/2026-10-22-repo-docs-governance.md)
 
 状态表记录任务验收，日志记录代码、验证证据和未完成事项；如有冲突，以明确的验收标准为准并立即修正文档。
