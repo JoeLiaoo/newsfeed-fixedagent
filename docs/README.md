@@ -6,6 +6,9 @@
 - [产品需求基线](PLAN.md)：v0.65；需求讨论与确认范围，不代表功能已验收。
 - [实施状态](IMPLEMENTATION.md)：P0–P4 唯一任务勾选来源，按对应验收条件完成后才标记 `[x]`。
 - [贡献与仓库治理](../CONTRIBUTING.md) / [Agent 开发约定](../AGENTS.md)：分支、PR、设计系统、日志、保密与验证规则。
+- [全仓架构与实现审查（2026-10-22）](REPO-REVIEW-2026-10-22.md)：基于 `13a89a5` 的风险、复现证据及建议演进顺序。
+- [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 的实现对应、验证结果及剩余边界；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6)。
+- [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 的实现对应、验证结果及剩余边界。
 
 ## 阶段文档
 
@@ -29,5 +32,8 @@
 - [P1 平台](logs/2026-10-21-P1-platform.md)；[PR #1 Review](logs/2026-10-21-PR1-review.md)；[P1/P2 UI](logs/2026-10-21-P1-P2-ui.md)
 - [P2 专家](logs/2026-10-21-P2-expert.md)
 - [P3 实施、Review 整改与剩余阻碍](logs/2026-10-22-P3-implementation.md)
+- [全仓架构与实现审查日志](logs/2026-10-22-repo-review.md)
+- [全仓审查问题修复日志](logs/2026-10-22-repo-review-remediation.md)
+- [全仓审查问题修复日志](logs/2026-10-22-repo-review-remediation.md)
 
 状态表记录任务验收，日志记录代码、验证证据和未完成事项；如有冲突，以明确的验收标准为准并立即修正文档。

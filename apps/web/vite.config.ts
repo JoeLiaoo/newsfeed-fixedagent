@@ -5,6 +5,7 @@ import { defineConfig, type Plugin } from "vite";
 import { isApiOwned, resolveRedirect } from "@aihot/contracts/http-policy";
 import { DEPLOYMENT } from "@aihot/site";
 import { proxyToApi } from "./app/lib/api-proxy.server.ts";
+import { withRequestCookie } from "./app/lib/request-context.server.ts";
 
 /** Development stand-in for the production web server: the shared redirect table and api-owned path routing. */
 function devEdge(): Plugin {
@@ -24,7 +25,7 @@ function devEdge(): Plugin {
           res.statusCode = decision.status;
           return res.end();
         }
-        if (!isApiOwned(pathname)) return next();
+        if (!isApiOwned(pathname)) return withRequestCookie(req.headers.cookie ?? "", () => next());
         // The api sees the Host it gets in production.
         if (DEPLOYMENT.originHost) req.headers.host = DEPLOYMENT.originHost;
         proxyToApi(req, res);

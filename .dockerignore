@@ -3,6 +3,9 @@ apps/web/node_modules
 apps/web/build
 apps/web/.react-router
 .data
+.config/
+*.dump
+*.backup
 .env
 .env.*
 !.env.example

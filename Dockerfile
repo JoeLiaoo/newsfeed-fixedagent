@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # One image for every role: setup (migrations and seed), api, worker and web.
 # Build arg NPM_REGISTRY switches the npm registry (e.g. https://registry.npmmirror.com in mainland China).
 FROM node:24-trixie-slim AS base
@@ -16,8 +17,11 @@ COPY apps/worker/package.json apps/worker/
 COPY packages/backend/package.json packages/backend/
 COPY packages/contracts/package.json packages/contracts/
 COPY industry/package.json industry/
+COPY modules/membership/package.json modules/membership/
 COPY site/package.json site/
-RUN npm ci --no-audit --no-fund ${NPM_REGISTRY:+--registry=$NPM_REGISTRY}
+RUN --mount=type=secret,id=proxy_ca,target=/run/secrets/proxy_ca,required=false \
+    if [ -f /run/secrets/proxy_ca ]; then NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca npm ci --no-audit --no-fund ${NPM_REGISTRY:+--registry=$NPM_REGISTRY}; \
+    else npm ci --no-audit --no-fund ${NPM_REGISTRY:+--registry=$NPM_REGISTRY}; fi
 COPY . .
 RUN npm run build -w @aihot/web && npm prune --omit=dev --no-audit --no-fund
 

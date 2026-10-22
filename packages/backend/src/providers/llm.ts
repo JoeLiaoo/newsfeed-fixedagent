@@ -54,6 +54,9 @@ export interface ChatJsonOptions<S extends z.ZodType> {
   fallbackModel?: string;
   purpose: string;
   subject: string;
+  /** Optional membership ownership; used to redact expert response bodies at task expiry. */
+  memberUserId?: string;
+  memberTaskId?: string;
   promptVersion: string;
   system: string;
   user: string | ContentPart[];
@@ -121,7 +124,8 @@ function requestFor<S extends z.ZodType>(opts: ChatJsonOptions<S>, spec: ModelSp
   const userText = typeof opts.user === "string" ? opts.user : JSON.stringify(opts.user);
   const request: ReceiptRequest = {
     service: spec.service, model: spec.model, purpose: opts.purpose, subject: opts.subject,
-    identity: { model: spec.model, promptVersion: opts.promptVersion, system: sha256(opts.system), user: sha256(userText), temperature, maxTokens, extra: spec.extra ?? null },
+    memberUserId: opts.memberUserId, memberTaskId: opts.memberTaskId,
+    identity: { model: spec.model, promptVersion: opts.promptVersion, system: sha256(opts.system), user: sha256(userText), memberUserId: opts.memberUserId ?? null, memberTaskId: opts.memberTaskId ?? null, temperature, maxTokens, extra: spec.extra ?? null },
     requestSummary: { promptVersion: opts.promptVersion, systemHash: sha256(opts.system), userHash: sha256(userText), userChars: userText.length, temperature, maxTokens },
     attemptTag: opts.attemptTag,
   };

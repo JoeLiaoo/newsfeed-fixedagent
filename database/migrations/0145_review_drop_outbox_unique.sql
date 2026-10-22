@@ -1,0 +1,1 @@
+ALTER TABLE member_notification_outbox DROP CONSTRAINT IF EXISTS member_notification_outbox_user_id_kind_local_date_binding__key;

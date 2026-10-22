@@ -89,10 +89,9 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const notes = typeof body(req).notes === "string" ? (body(req).notes as string).trim() : "";
     const companyName = typeof body(req).companyName === "string" ? (body(req).companyName as string).trim() : "";
     if (notes.length > 20_000 || companyName.length > 200) return reply.code(413).send({ error: "task_input_too_large" });
-    const experts = typeof slug === "string" ? await sql<{ status: string; owner_id: string | null }[]>`SELECT status, owner_id FROM member_experts WHERE slug=${slug}` : [];
+    const experts = typeof slug === "string" ? await sql<{ status: string }[]>`SELECT status FROM member_experts WHERE slug=${slug}` : [];
     const expert = experts[0];
     if (!expert || expert.status !== "available") return reply.code(404).send({ error: expert ? "expert_dependencies_missing" : "expert_not_found" });
-    if (expert.owner_id && expert.owner_id !== user.id && user.role !== "admin") return reply.code(404).send({ error: "expert_not_found" });
     if (slug === EXPERT_SLUG && companyName.length < 2) return reply.code(400).send({ error: "company_name_required" });
     if (slug !== EXPERT_SLUG && notes.length < 2) return reply.code(400).send({ error: "task_text_required" });
     const id = taskId();
