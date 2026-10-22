@@ -64,6 +64,7 @@ node scripts/check-doc-links.ts
 - [可视化进度汇报](docs/PROGRESS-REPORT.md)
 - [P2 首个专家适配矩阵](docs/P2-EXPERT-ADAPTER.md)
 - [P3 GP 与微信联调](docs/P3-OPERATIONS.md)
+- [微信扫码绑定设计与部署后验收](docs/P3-ILINK-QR-DESIGN.md)
 - [P0-03/P0-04 外部验收手册](docs/P0-03-04-OPERATIONS.md)
 - [P0 资料盘点与外部阻碍](docs/P0-STATUS.md)
 - [AIHOT 上游版本、许可证和适配记录](docs/UPSTREAM.md)
