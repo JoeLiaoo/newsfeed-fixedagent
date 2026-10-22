@@ -6,7 +6,7 @@
 - [产品需求基线](PLAN.md)：v0.65；需求讨论与确认范围，不代表功能已验收。
 - [实施状态](IMPLEMENTATION.md)：P0–P4 唯一任务勾选来源，按对应验收条件完成后才标记 `[x]`。
 - [P0 DeepSeek／新华财经配置与字段矩阵](P0-DATA-MATRIX.md)：服务端凭据边界、接口静态 schema、GP 标准事件时间语义和真实联调缺口。
-- [P0-03/P0-04 外部验收手册](P0-03-04-OPERATIONS.md)：微信双用户跨日试投和 `ai-work` 只读盘点步骤；不代表真实验收已通过。
+- [P0-03/P0-04 外部验收手册](P0-03-04-OPERATIONS.md)：微信双用户跨日试投和 `ai-work` 只读盘点步骤；[PR #10](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/10) 已合并（`2cc14c3`），真实验收仍待完成。
 - [贡献与仓库治理](../CONTRIBUTING.md) / [Agent 开发约定](../AGENTS.md)：分支、PR、设计系统、日志、保密与验证规则。
 - [全仓架构与实现审查（2026-10-22）](REPO-REVIEW-2026-10-22.md)：基于 `13a89a5` 的风险、复现证据及建议演进顺序。
 - [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 及通知投递复审的实现、验证和剩余边界；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 已合并。
@@ -40,3 +40,6 @@
 - [文档治理更新日志](logs/2026-10-22-repo-docs-governance.md)
 
 状态表记录任务验收，日志记录代码、验证证据和未完成事项；如有冲突，以明确的验收标准为准并立即修正文档。
+
+- [火山云部署准备清单](DEPLOY-VOLCENGINE.md)：复用 ai-work 的只读盘点、隔离预部署、入口切换与回退步骤。
+- [P4 火山云部署准备日志](logs/2026-10-22-P4-volcengine-prep.md)。
