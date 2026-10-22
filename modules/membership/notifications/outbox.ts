@@ -292,7 +292,6 @@ export async function dispatchOutbox({revalidate=revalidatePayload,post=fetch}:D
 }
 
 export async function cleanupP3Data() {
-  await sql`DELETE FROM member_bridge_nonces WHERE created_at<now()-interval '1 day'`;
-  await sql`DELETE FROM member_weixin_challenges WHERE expires_at<now()-interval '1 day'`;
-  return {p3BridgeNoncesPruned:true};
+  // Legacy hand-entered binding challenge tables are removed by migration.
+  return {legacyWeixinBindingDisabled:true};
 }
