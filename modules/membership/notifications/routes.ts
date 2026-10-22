@@ -66,7 +66,6 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
     await sql.begin(async tx=>{
       await tx`SELECT pg_advisory_xact_lock(hashtext(${user.id}))`;
       await tx`DELETE FROM member_weixin_bindings WHERE user_id=${user.id}`;
-      await tx`DELETE FROM member_weixin_challenges WHERE user_id=${user.id}`;
       await tx`INSERT INTO member_notification_settings(user_id) VALUES(${user.id}) ON CONFLICT DO NOTHING`;
       await tx`UPDATE member_notification_settings SET binding_version=binding_version+1,updated_at=now() WHERE user_id=${user.id}`;
       const cancelled=await tx<{id:string}[]>`UPDATE member_notification_outbox SET status='cancelled',error_code='unbound',lease_expires_at=NULL WHERE user_id=${user.id} AND status IN('pending','failed','sending') RETURNING id`;
