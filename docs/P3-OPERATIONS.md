@@ -14,6 +14,8 @@
 
 ## Hermes 桥接层合同（需在目标版本实现）
 
+Hermes [官方 Weixin/iLink 适配器](https://github.com/NousResearch/hermes-agent/blob/ebc9960b9d42e11e35ddbb6f0918cc163f739eb1/website/docs/user-guide/messaging/weixin.md)已经支持扫码、长轮询、私聊和定向主动发送；[cron 定向目标](https://github.com/NousResearch/hermes-agent/blob/ebc9960b9d42e11e35ddbb6f0918cc163f739eb1/website/docs/developer-guide/cron-internals.md)可写为 `weixin:<wxid>`。P0 渠道试用可直接使用这些原生能力，不以本节桥接层为前置条件。本节的 bridge 只负责把本平台的网页用户、偏好和持久化 outbox 接到 Hermes；它不是另一套微信协议网关，也不要求额外购买云服务器。
+
 Hermes 端只启动一个 Weixin/iLink 网关，并在收到用户给机器人私聊的绑定码时，从真实渠道事件提取真实收件人 ID 和机器人账号 ID；不得信任网页登录传入的收件人。平台负责业务用户、偏好与消息 outbox，Hermes 只负责渠道收发。
 
 **入站确认**：用户先在 `/settings/notifications` 获取 10 分钟有效的随机绑定码，私聊机器人发送。可信的 Hermes 适配器请求：
@@ -27,7 +29,7 @@ Hermes 端只启动一个 Weixin/iLink 网关，并在收到用户给机器人�
 
 **出站发送**：平台 worker 通过固定地址 `P3_HERMES_BRIDGE_URL` 向部署在 ai-work 的适配 sidecar 发送 HTTPS 请求（或同主机 loopback HTTP），并使用 `P3_HERMES_BRIDGE_TOKEN` 作为 Bearer 授权。body 为 `{"recipientId":"...","channelAccountId":"...","text":"...","idempotencyKey":"outbox-id"}`，HTTP header `x-idempotency-key` 同步携带该 ID。bridge 必须持久化此幂等键、调用真正的 Hermes Weixin 发送接口，并在渠道已受理时返回 2xx JSON `{"accepted":true,"messageId":"渠道消息 ID"}`。当会话过期，返回 410；确认的渠道限流返回 429。平台仅把 `accepted` 当作接口受理，不代表已送达。超时或模糊故障转 `unknown`，不盲目重发。
 
-**注意：** 上述是平台定义的 sidecar 对接协议，不代表 Hermes 官方已经提供同名 HTTP API。还需对锁定版本的 Hermes adapter 编写并测试 sidecar，不能宣称真实微信已打通。
+**注意：** 上述是平台定义的 sidecar 对接协议，不代表 Hermes 官方已经提供同名 HTTP API。先核对锁定版本已有的消息发送、入站事件和状态接口；若仍需 sidecar，只编写本平台所需的薄适配层并复用 Hermes 原生 Weixin 适配器，不另行实现 iLink 协议。真实网页绑定和微信投递仍须联调。
 
 ## 日历与调度
 
