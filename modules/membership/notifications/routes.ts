@@ -33,6 +33,7 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
     if(typeof input.newsEnabled!=="boolean"||typeof input.gpEnabled!=="boolean"||typeof input.paused!=="boolean")
       return reply.code(400).send({error:"invalid_notification_settings"});
     await sql.begin(async tx=>{
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${user.id}))`;
       await tx`INSERT INTO member_notification_settings(user_id) VALUES(${user.id}) ON CONFLICT DO NOTHING`;
       const [old]=await tx<{news_enabled:boolean;gp_enabled:boolean;paused_until:Date|null}[]>`SELECT news_enabled,gp_enabled,paused_until FROM member_notification_settings WHERE user_id=${user.id} FOR UPDATE`;
       const now=Date.now();
@@ -47,7 +48,7 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
         news_version=news_version+${newsChanged||pauseChanged?1:0},gp_version=gp_version+${gpChanged||pauseChanged?1:0},updated_at=now() WHERE user_id=${user.id}`;
       const kinds=pauseChanged?["news","gp"]:[...(newsChanged?["news"]:[]),...(gpChanged?["gp"]:[])];
       const cancelled=await tx<{id:string}[]>`UPDATE member_notification_outbox SET status='cancelled',error_code='subscription_changed',lease_expires_at=NULL
-        WHERE user_id=${user.id} AND kind=ANY(${tx.array(kinds)}::text[]) AND status IN('pending','failed') RETURNING id`;
+        WHERE user_id=${user.id} AND kind=ANY(${tx.array(kinds)}::text[]) AND status IN('pending','failed','sending') RETURNING id`;
       if(cancelled.length) await tx`DELETE FROM member_notification_seen WHERE outbox_id=ANY(${tx.array(cancelled.map(row=>row.id))}::text[])`;
     });
     return {ok:true};
@@ -92,6 +93,7 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
   app.post("/api/v1/membership/weixin/confirm",async(req,reply)=>{
     const user=await member(req,reply);if(!user)return;
     const success=await sql.begin(async tx=>{
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${user.id}))`;
       const [pending]=await tx<{claimed_recipient:string|null;claimed_channel:string|null}[]>`SELECT claimed_recipient,claimed_channel FROM member_weixin_challenges
         WHERE user_id=${user.id} AND expires_at>now() FOR UPDATE`;
       if(!pending?.claimed_recipient||!pending.claimed_channel) return "not_claimed";
@@ -101,7 +103,7 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
       await tx`UPDATE member_notification_settings SET binding_version=binding_version+1,updated_at=now() WHERE user_id=${user.id}`;
       await tx`INSERT INTO member_weixin_bindings(user_id,recipient_id,channel_account_id) VALUES(${user.id},${pending.claimed_recipient},${pending.claimed_channel})
         ON CONFLICT(user_id) DO UPDATE SET recipient_id=EXCLUDED.recipient_id,channel_account_id=EXCLUDED.channel_account_id,status='active',bound_at=now()`;
-      const cancelled=await tx<{id:string}[]>`UPDATE member_notification_outbox SET status='cancelled',error_code='binding_changed',lease_expires_at=NULL WHERE user_id=${user.id} AND status IN('pending','failed') RETURNING id`;
+      const cancelled=await tx<{id:string}[]>`UPDATE member_notification_outbox SET status='cancelled',error_code='binding_changed',lease_expires_at=NULL WHERE user_id=${user.id} AND status IN('pending','failed','sending') RETURNING id`;
       if(cancelled.length) await tx`DELETE FROM member_notification_seen WHERE outbox_id=ANY(${tx.array(cancelled.map(row=>row.id))}::text[])`;
       await tx`DELETE FROM member_weixin_challenges WHERE user_id=${user.id}`;
       return "ok";
@@ -111,11 +113,12 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
   app.post("/api/v1/membership/weixin/unbind",async(req,reply)=>{
     const user=await member(req,reply);if(!user)return;
     await sql.begin(async tx=>{
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${user.id}))`;
       await tx`DELETE FROM member_weixin_bindings WHERE user_id=${user.id}`;
       await tx`DELETE FROM member_weixin_challenges WHERE user_id=${user.id}`;
       await tx`INSERT INTO member_notification_settings(user_id) VALUES(${user.id}) ON CONFLICT DO NOTHING`;
       await tx`UPDATE member_notification_settings SET binding_version=binding_version+1,updated_at=now() WHERE user_id=${user.id}`;
-      const cancelled=await tx<{id:string}[]>`UPDATE member_notification_outbox SET status='cancelled',error_code='unbound',lease_expires_at=NULL WHERE user_id=${user.id} AND status IN('pending','failed') RETURNING id`;
+      const cancelled=await tx<{id:string}[]>`UPDATE member_notification_outbox SET status='cancelled',error_code='unbound',lease_expires_at=NULL WHERE user_id=${user.id} AND status IN('pending','failed','sending') RETURNING id`;
       if(cancelled.length) await tx`DELETE FROM member_notification_seen WHERE outbox_id=ANY(${tx.array(cancelled.map(row=>row.id))}::text[])`;
     });
     return {ok:true};
