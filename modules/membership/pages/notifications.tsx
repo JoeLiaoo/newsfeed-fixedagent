@@ -10,7 +10,7 @@ type Settings={news_enabled:boolean;gp_enabled:boolean;paused_until:string|null;
 type Binding={status:string;recipient_suffix:string;bound_at:string};
 type Challenge={expires_at:string;claimed:boolean};
 type History={kind:"news"|"gp";date:string;status:string;part_index:number;attempts:number;error_code:string|null};
-type Data={settings:Settings;binding:Binding|null;challenge:Challenge|null;history:History[]};
+type Data={settings:Settings;binding:Binding|null;challenge:Challenge|null;history:History[];botContactQrUrl:string|null};
 const endpoint="/api/v1/membership/";
 
 export default function NotificationsPage(){
@@ -63,8 +63,16 @@ export default function NotificationsPage(){
         <Badge variant={data?.binding?.status==="active"?"success":"secondary"}>{data?.binding?.status==="active"?"已绑定":data?.binding?.status==="requires_rebind"?"需要重新绑定":"未绑定"}</Badge>
         {data?.binding&&<span className="text-sm text-ink-3">收件人尾号 {data.binding.recipient_suffix}</span>}
       </div>
+      {data?.binding?.status!=="active"&&<div className="flex flex-col gap-3 rounded-control border border-line-soft bg-bg-sunk p-4 sm:flex-row sm:items-center">
+        {data?.botContactQrUrl?<img src={data.botContactQrUrl} alt="Hermes 微信机器人联系二维码" width={176} height={176} className="size-44 rounded-control border border-line-soft bg-white object-contain p-2" referrerPolicy="no-referrer"/>:<div className="grid size-44 place-items-center rounded-control border border-dashed border-line bg-white p-4 text-center text-sm text-ink-3">管理员尚未配置机器人联系二维码</div>}
+        <div className="grid gap-2 text-sm">
+          <p className="font-medium">扫码连接 Hermes 微信机器人</p>
+          <p className="text-ink-3">管理员已批准的平台账号均可绑定微信。生成绑定码并在此机器人会话中发送，再回到此页确认；新闻和 GP 订阅默认开启，可在下方分别关闭。绑定和接收推送不代表已获准与机器人聊天，私聊权限须由管理员另行批准。</p>
+          {!data?.botContactQrUrl&&<p className="text-ink-3">联系二维码由管理员配置；Hermes 网关登录二维码不能用于员工绑定。</p>}
+        </div>
+      </div>}
       {code&&<div className="rounded-control border border-line-soft bg-bg-sunk p-4">
-        <p className="mb-1 text-sm text-ink-3">向平台指定的微信机器人私聊发送此码（10 分钟有效）</p>
+        <p className="mb-1 text-sm text-ink-3">在上方 Hermes 机器人微信私聊中发送此码（10 分钟有效）</p>
         <div className="flex items-center gap-3"><code className="break-all font-mono text-lg font-semibold">{code}</code>
         <Button size="sm" variant="outline" onClick={()=>void copyCode()}>复制</Button></div>
       </div>}
@@ -76,6 +84,7 @@ export default function NotificationsPage(){
       </div>
     </CardContent></Card>
     <Card className="mb-5"><CardHeader><CardTitle>订阅设置</CardTitle></CardHeader><CardContent className="grid gap-4">
+      <p className="text-sm text-ink-3">新账号默认开启资讯日报和 GP 投资动向推送；你可以分别取消订阅或暂停全部通知。</p>
       <label className="flex items-center gap-3"><Checkbox checked={news} onCheckedChange={value=>setNews(value===true)}/>个人资讯日报</label>
       <label className="flex items-center gap-3"><Checkbox checked={gp} onCheckedChange={value=>setGp(value===true)}/>GP 新增投资动向</label>
       <label className="flex items-center gap-3"><Checkbox checked={paused} onCheckedChange={value=>setPaused(value===true)}/>暂停全部通知</label>

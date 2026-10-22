@@ -148,9 +148,10 @@ function bridgeConfig() {
   const raw=process.env.P3_HERMES_BRIDGE_URL;
   if(!raw||!token) return null;
   const url=new URL(raw);
-  // Allow a TLS bridge or a loopback sidecar only. Never accept URLs from request payloads.
+  // The Hermes gateway runs on the Docker host. host.docker.internal is supplied
+  // only to the worker by Compose; the bridge separately checks its bearer token.
   if(!((url.protocol==="https:"&&url.username===""&&url.password==="")||
-    (url.protocol==="http:"&&["127.0.0.1","localhost","::1"].includes(url.hostname)))) throw new Error("invalid_hermes_bridge_url");
+    (url.protocol==="http:"&&["127.0.0.1","localhost","::1","host.docker.internal"].includes(url.hostname)))) throw new Error("invalid_hermes_bridge_url");
   return {url,token};
 }
 

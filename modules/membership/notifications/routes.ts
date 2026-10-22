@@ -8,6 +8,14 @@ const body=(req:FastifyRequest)=>req.body && typeof req.body==="object" ? req.bo
 const sha=(v:string)=>createHash("sha256").update(v).digest("hex");
 const originOk=(req:FastifyRequest)=>{if(!req.headers.origin)return true;try{return new URL(req.headers.origin).host===req.headers.host;}catch{return false;}};
 const secret=()=>process.env.P3_BINDING_HMAC_SECRET??"";
+function hermesContactQrUrl():string|null {
+  const raw=process.env.P3_HERMES_BOT_CONTACT_QR_URL?.trim();
+  if(!raw)return null;
+  try {
+    const url=new URL(raw);
+    return url.protocol==="https:"&&!url.username&&!url.password?url.toString():null;
+  } catch { return null; }
+}
 const constantEqual=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&timingSafeEqual(x,y);};
 
 export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
@@ -25,7 +33,7 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
     const [binding]=await sql`SELECT status,RIGHT(recipient_id,4) AS recipient_suffix,bound_at FROM member_weixin_bindings WHERE user_id=${user.id}`;
     const [challenge]=await sql`SELECT expires_at,claimed_recipient IS NOT NULL AS claimed FROM member_weixin_challenges WHERE user_id=${user.id} AND expires_at>now()`;
     const history=await sql`SELECT kind,local_date::text AS date,status,part_index,attempts,error_code,accepted_at FROM member_notification_outbox WHERE user_id=${user.id} ORDER BY created_at DESC,part_index DESC LIMIT 60`;
-    return {settings,binding:binding??null,challenge:challenge??null,history};
+    return {settings,binding:binding??null,challenge:challenge??null,history,botContactQrUrl:hermesContactQrUrl()};
   });
   app.put("/api/v1/membership/notifications",async(req,reply)=>{
     const user=await member(req,reply);if(!user)return;
