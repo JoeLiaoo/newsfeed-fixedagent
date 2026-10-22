@@ -16,7 +16,7 @@
 
 **2026-10-22 方案决策：** 不使用企业微信或公司审批流程，允许员工在 iLink 会话窗口失效后主动向自己的 bot 发消息恢复推送。选择 [每用户独立 iLink 扫码登录设计](P3-ILINK-QR-DESIGN.md) 为 PR #15 的后续目标：登录网站 → 短期二维码 → 微信扫码确认 → 网站自动绑定。员工不需要网页绑定码或点击二次确认。每个人是否使用独立 bot 是实现细节，当前 PoC 先验证每人一组可用的 iLink bot 身份。
 
-**代码已合并，真实渠道验收未执行。** [PR #15](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/15)（merge `acef3866367d`）实现个人短时 iLink 扫码授权、可信身份自动绑定、每用户独立加密凭据与长轮询上下文、按人定向推送及互动后恢复，UI 自动刷新。新版本尚未部署到火山云，现有部署仍为历史手动绑定码版本。两个员工的真实扫码及跨日送达根据用户决定改为**合并部署后**验收；P3-04 未勾选，三个 P3 运行开关继续默认关闭。普通 Hermes Agent 多 Bot 对话尚未接入新推送通道（旧 Hermes 网关保留），与推送授权分离。
+**功能开关已按用户指示启用，真实渠道验收未执行。** [PR #15](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/15)（merge `acef3866367d`）实现个人短时 iLink 扫码授权、可信身份自动绑定、每用户独立加密凭据与长轮询上下文、按人定向推送及互动后恢复，UI 自动刷新。该代码已随 `main` 提交 `5031e2c04dec382263d05b38484b0cfaabeaa15b` 发布到火山云；迁移 `0152`–`0155` 已应用。2026-10-22 已配置受保护的 `P3_ILINK_CREDENTIAL_KEY`，并在 API 与 worker 启用 `P3_ILINK_BINDING_ENABLED`、`P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED`。启用时有 3 个 active 平台账号、0 个 active 微信绑定、0 个 iLink 账号、0 条通知 outbox、0 个 GP watchlist/active GP，因此未发生实际微信投递或 GP 同步；扫码入口现向 active 账号开放。双用户真实扫码、数据源联调、微信送达与跨日试验仍待执行，P3-04 未勾选。普通 Hermes Agent 多 Bot 对话尚未接入新推送通道（旧 Hermes 网关保留），与推送授权分离。部署细节见[最新发布记录](logs/2026-10-22-P4-latest-deployment.md)及[开关启用记录](logs/2026-10-22-P3-flags-enabled.md)。
 
 上游现有能力及尚需实测的关键差异：
 - [腾讯 openclaw-weixin 协议](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)定义二维码生成与状态轮询，确认后可包含 `ilink_user_id`、`ilink_bot_id`、`bot_token`；还可能有微信端验证码、重复绑定、超时与区域重定向。
