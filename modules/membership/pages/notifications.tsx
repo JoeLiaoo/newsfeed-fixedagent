@@ -4,54 +4,75 @@ import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
 import { Card,CardContent,CardHeader,CardTitle } from "@aihot/web/components/member-ui/card";
 import { Checkbox } from "@aihot/web/components/member-ui/checkbox";
-import { copyText } from "@aihot/web/lib/clipboard";
 
 type Settings={news_enabled:boolean;gp_enabled:boolean;paused_until:string|null;binding_version:number};
 type Binding={status:string;recipient_suffix:string;bound_at:string};
-type Challenge={expires_at:string;claimed:boolean};
 type History={kind:"news"|"gp";date:string;status:string;part_index:number;attempts:number;error_code:string|null};
-type Data={settings:Settings;binding:Binding|null;challenge:Challenge|null;history:History[]};
+type Scan={status:string;qrUrl:string;expiresAt?:string};
+type Channel={channel_state:string;last_inbound_at:string|null};
+type Data={settings:Settings;binding:Binding|null;history:History[];bindingAvailable:boolean;channel:Channel|null;scan:Scan|null};
 const endpoint="/api/v1/membership/";
 
 export default function NotificationsPage(){
-  const [data,setData]=useState<Data|null>(null),[message,setMessage]=useState(""),[code,setCode]=useState(""),[busy,setBusy]=useState(false);
+  const [data,setData]=useState<Data|null>(null),[message,setMessage]=useState(""),[busy,setBusy]=useState(false);
+  const [scan,setScan]=useState<Scan|null>(null),[verifyCode,setVerifyCode]=useState("");
   const [news,setNews]=useState(true),[gp,setGp]=useState(true),[paused,setPaused]=useState(false);
   const reload=useCallback(async(syncSettings=true)=>{
     const response=await fetch(endpoint+"notifications");
     if(!response.ok){setMessage("需要登录后查看通知设置。");return;}
     const result=await response.json() as Data;
     setData(result);
+    setScan(previous=>result.binding?.status==="active"?null:result.scan??previous);
     if(syncSettings){setNews(result.settings.news_enabled);setGp(result.settings.gp_enabled);setPaused(!!result.settings.paused_until&&new Date(result.settings.paused_until)>new Date());}
-    if(!result.challenge)setCode("");
   },[]);
   useEffect(()=>{void reload().catch(()=>setMessage("加载失败，请刷新。"));},[reload]);
   useEffect(()=>{
-    const challenge=data?.challenge;
-    if(!challenge)return;
-    const refresh=()=>{if(document.visibilityState==="visible")void reload(false).catch(()=>setMessage("刷新绑定状态失败，请稍后重试。"));};
-    window.addEventListener("focus",refresh);
-    document.addEventListener("visibilitychange",refresh);
-    const interval=!challenge.claimed?window.setInterval(refresh,2000):undefined;
-    const remaining=Date.parse(challenge.expires_at)-Date.now();
-    const expiry=window.setTimeout(refresh,Math.max(0,remaining)+100);
-    return()=>{
-      window.removeEventListener("focus",refresh);
-      document.removeEventListener("visibilitychange",refresh);
-      if(interval!==undefined)window.clearInterval(interval);
-      window.clearTimeout(expiry);
+    if(!scan || ["expired","bound","binded_redirect","verify_code_blocked"].includes(scan.status))return;
+    let active=true;
+    const tick=async()=>{
+      if(document.visibilityState==="hidden")return;
+      try{
+        const response=await fetch(endpoint+"weixin/status",{cache:"no-store"});
+        const result=await response.json() as Scan&{error?:string};
+        if(!active)return;
+        if(response.ok){
+          if(result.status==="bound"){setScan(null);setMessage("微信已绑定。");await reload();}
+          else if(result.status==="idle"||result.status==="expired"){setScan(null);setMessage("二维码已过期，请重新生成。");}
+          else setScan(old=>old?{...old,status:result.status}:old);
+        }
+      }catch{ /* temporary channel error: next poll will retry */ }
     };
-  },[data?.challenge?.expires_at,data?.challenge?.claimed,reload]);
-  async function copyCode(){
-    try{await copyText(code);setMessage("绑定码已复制。");}
-    catch{setMessage("复制失败，请长按绑定码并手动复制。");}
+    void tick();
+    const interval=window.setInterval(()=>void tick(),3500);
+    return()=>{active=false;window.clearInterval(interval);};
+  },[scan?.qrUrl,scan?.status,reload]);
+  async function startScan(){
+    setBusy(true);setMessage("");
+    try{
+      const response=await fetch(endpoint+"weixin/start",{method:"POST",headers:{"content-type":"application/json"}});
+      const result=await response.json() as Scan&{error?:string};
+      if(response.ok&&result.qrUrl){setScan(result);setMessage("");}
+      else setMessage(result.error==="scan_in_progress"?"二维码尚未过期，稍后可重试。":"暂时无法生成二维码。");
+    }catch{setMessage("网络异常，请重试。");}finally{setBusy(false);}
+  }
+  async function submitVerification(){
+    setBusy(true);
+    try{
+      const response=await fetch(endpoint+"weixin/verify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({verifyCode})});
+      const result=await response.json() as Scan&{error?:string};
+      if(!response.ok){setMessage("微信安全验证未通过。");return;}
+      setVerifyCode("");
+      if(result.status==="bound"){setScan(null);await reload();setMessage("微信已绑定。");}
+      else setScan(old=>old?{...old,status:result.status}:old);
+    }catch{setMessage("网络异常，请重试。");}finally{setBusy(false);}
   }
   async function request(path:string,body?:Record<string,unknown>,method="POST"){
     setBusy(true);setMessage("");
     try{
       const response=await fetch(endpoint+path,{method,headers:{"content-type":"application/json"},body:body?JSON.stringify(body):undefined});
-      const result=await response.json() as {error?:string;code?:string};
-      if(!response.ok){setMessage(result.error==="binding_in_progress"?"绑定码仍有效，请完成或到期后重试。":result.error==="not_claimed"?"机器人尚未收到绑定码。":"请求失败："+(result.error??"未知错误"));return;}
-      if(result.code){setCode(result.code);setMessage("绑定码已生成。");}else{setCode("");setMessage("已保存。");}
+      const result=await response.json() as {error?:string};
+      if(!response.ok){setMessage("请求失败："+(result.error??"未知错误"));return;}
+      setMessage("已保存。");
       await reload(true);
     }catch{setMessage("网络异常，请重试。");}finally{setBusy(false);}
   }
@@ -63,19 +84,25 @@ export default function NotificationsPage(){
         <Badge variant={data?.binding?.status==="active"?"success":"secondary"}>{data?.binding?.status==="active"?"已绑定":data?.binding?.status==="requires_rebind"?"需要重新绑定":"未绑定"}</Badge>
         {data?.binding&&<span className="text-sm text-ink-3">收件人尾号 {data.binding.recipient_suffix}</span>}
       </div>
-      {code&&<div className="rounded-control border border-line-soft bg-bg-sunk p-4">
-        <p className="mb-1 text-sm text-ink-3">向平台指定的微信机器人私聊发送此码（10 分钟有效）</p>
-        <div className="flex items-center gap-3"><code className="break-all font-mono text-lg font-semibold">{code}</code>
-        <Button size="sm" variant="outline" onClick={()=>void copyCode()}>复制</Button></div>
+      {data?.binding?.status!=="active"&&<div className="grid gap-3">
+        {scan?.qrUrl?<div className="grid gap-2">
+          <iframe title="微信扫码绑定" className="h-64 w-64 rounded-control border border-line-soft bg-white" src={scan.qrUrl} referrerPolicy="no-referrer" sandbox="allow-scripts allow-same-origin" />
+          <a href={scan.qrUrl} target="_blank" rel="noopener noreferrer" className="text-sm underline">打开微信官方二维码</a>
+          <p className="text-sm text-ink-3">{scan.status==="scaned"?"微信已扫码，请在手机上确认。":scan.status==="need_verifycode"?"微信要求额外安全验证。":"请用个人微信扫码，确认后网页自动完成绑定。"}</p>
+          {scan.status==="need_verifycode"&&<div className="flex gap-2">
+            <input value={verifyCode} onChange={e=>setVerifyCode(e.target.value)} placeholder="微信要求的验证码" className="min-w-0 rounded-control border border-line px-3 py-2" inputMode="numeric" maxLength={8} />
+            <Button disabled={busy||!/^[0-9]{4,8}$/.test(verifyCode)} onClick={()=>void submitVerification()}>验证</Button>
+          </div>}
+        </div>:<Button disabled={busy||!data?.bindingAvailable} onClick={()=>void startScan()} className="justify-self-start">扫码绑定微信</Button>}
+        {!data?.bindingAvailable&&<p className="text-sm text-ink-3">管理员尚未启用 iLink 扫码接入。</p>}
       </div>}
-      {data?.challenge?.claimed&&<p className="text-sm">机器人已收到绑定码，请确认。</p>}
       <div className="flex flex-wrap gap-2">
-        <Button disabled={busy||!!data?.challenge} variant="outline" onClick={()=>void request("weixin/start")}>生成绑定码</Button>
-        <Button disabled={busy||!data?.challenge?.claimed} onClick={()=>void request("weixin/confirm")}>确认绑定</Button>
+        {data?.channel?.channel_state==="needs_interaction"&&<p className="text-sm text-ink-3">需要先在微信向机器人发一条消息，才能继续接收推送。</p>}
         {data?.binding&&<Button disabled={busy} variant="outline" onClick={()=>void request("weixin/unbind")}>解绑</Button>}
       </div>
     </CardContent></Card>
     <Card className="mb-5"><CardHeader><CardTitle>订阅设置</CardTitle></CardHeader><CardContent className="grid gap-4">
+      <p className="text-sm text-ink-3">新账号默认开启资讯日报和 GP 投资动向推送；你可以分别取消订阅或暂停全部通知。</p>
       <label className="flex items-center gap-3"><Checkbox checked={news} onCheckedChange={value=>setNews(value===true)}/>个人资讯日报</label>
       <label className="flex items-center gap-3"><Checkbox checked={gp} onCheckedChange={value=>setGp(value===true)}/>GP 新增投资动向</label>
       <label className="flex items-center gap-3"><Checkbox checked={paused} onCheckedChange={value=>setPaused(value===true)}/>暂停全部通知</label>

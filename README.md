@@ -36,10 +36,10 @@ npm run typecheck
 
 | 阶段 | 代码状态 | 业务／上线状态 |
 |---|---|---|
-| P0 | 材料、接口矩阵与上游基线已整理；DeepSeek／新华财经完成单次隔离抽测 | Hermes 网关单账号已连接；微信双用户跨日试投仍待验收 |
+| P0 | 材料、接口矩阵与上游基线已整理；DeepSeek／新华财经完成单次隔离抽测 | P0-03 微信试投按用户决定并入 P3-04；P0 其他业务核验仍待完成 |
 | P1 | 账号、兴趣、资讯与个人日报已实现 | 需真实员工账号和信源覆盖验证 |
 | P2 | 专家导入、任务、新华财经适配底稿已实现 | 仅一层直接投资；完整规则和真实报告质量仍待联调 |
-| P3 | GP 监测与微信管线由 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 引入；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并了全仓审查整改及通知分片、并发投递修复 | Hermes/iLink 单账号网关已部署；平台 bridge、真实业务链路和双用户跨日投递仍未验收，所有 P3 功能开关默认关闭 |
+| P3 | GP 监测与微信管线由 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 引入；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并了全仓审查整改及通知分片、并发投递修复 | 旧版 Hermes bridge 曾部署；PR #15 已实现每用户独立 iLink 扫码绑定、加密凭据、推送与会话恢复代码并通过模拟检查；新版本尚未部署，双用户真实跨日投递仍待验收。普通聊天单独授权；所有 P3 功能开关保持关闭 |
 | P4 | 新平台已部署并接管 HTTPS 入口；Hermes 网关已运行；旧版归档已完成 | 新平台备份恢复、旧组件处置和员工试运行仍待验收 |
 
 生产运行与功能激活是两个独立关口。不要因为 P3 代码已合并，就打开 `P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED`，详见 [P3 运维与验收手册](docs/P3-OPERATIONS.md)。
@@ -64,6 +64,7 @@ node scripts/check-doc-links.ts
 - [可视化进度汇报](docs/PROGRESS-REPORT.md)
 - [P2 首个专家适配矩阵](docs/P2-EXPERT-ADAPTER.md)
 - [P3 GP 与微信联调](docs/P3-OPERATIONS.md)
+- [微信扫码绑定设计与部署后验收](docs/P3-ILINK-QR-DESIGN.md)
 - [P0-03/P0-04 外部验收手册](docs/P0-03-04-OPERATIONS.md)
 - [P0 资料盘点与外部阻碍](docs/P0-STATUS.md)
 - [AIHOT 上游版本、许可证和适配记录](docs/UPSTREAM.md)

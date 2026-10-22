@@ -2,7 +2,7 @@
 
 ## 当前状态与启用权限
 
-截至 2026-10-22，P3 基础管线经 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并，审查整改和通知分片／并发投递修复经 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并；PR #6 的[质量及 PostgreSQL 17 集成 CI](https://github.com/JoeLiaoo/newsfeed-fixedagent/actions/runs/39697739947) 成功。Hermes Weixin/iLink 独立网关现已部署到火山云并连接单个 bot 身份；私聊使用配对审批、群聊关闭。实际新华财经 MCP、DeepSeek 持续业务链路、平台网页绑定 bridge 及两名用户跨日送达仍未验收，P3-01～P3-04 **仍保持未完成**。部署证据见[Hermes 网关日志](logs/2026-10-22-P4-hermes-gateway.md)。
+截至 2026-10-22，P3 基础管线经 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并，审查整改和通知分片／并发投递修复经 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并；PR #6 的[质量及 PostgreSQL 17 集成 CI](https://github.com/JoeLiaoo/newsfeed-fixedagent/actions/runs/39697739947) 成功。Hermes Weixin/iLink 独立网关和平台网页绑定 bridge 已部署到火山云；私聊使用配对审批、群聊关闭。bridge 已通过本机端口与鉴权冒烟检查，实际新华财经 MCP、DeepSeek 持续业务链路、员工微信绑定及两名用户跨日送达仍未验收，P3-01～P3-04 **仍保持未完成**。部署证据见[bridge 日志](logs/2026-10-22-P3-wechat-flow.md)。
 
 部署包含代码和迁移 **不等于允许激活**。未取得供应商接口及数据展示/转发授权、完成业务核对、微信 sidecar 联调和两名用户连续三天试投前，三个 `P3_*_ENABLED` 必须保持 `false`。部署与试运行还受 P4 的新平台备份和恢复运维要求约束；旧版 `ai-work-mvp` 已归档留存，不要求旧版恢复演练。
 
@@ -12,24 +12,22 @@
 
 三个功能开关默认关闭：`P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED`。逐项确认外部联调后再开启，避免未核验的数据触发通知。模型 `MODEL_CALLS_ENABLED=true` 时可建议四大产业细分赛道，结果仅供管理员复核；不允许战略配售标签参与 GP 匹配。
 
-## Hermes 桥接层合同（需在目标版本实现）
+## 员工扫码绑定与聊天
 
-Hermes [官方 Weixin/iLink 适配器](https://github.com/NousResearch/hermes-agent/blob/ebc9960b9d42e11e35ddbb6f0918cc163f739eb1/website/docs/user-guide/messaging/weixin.md)已经支持扫码、长轮询、私聊和定向主动发送；[cron 定向目标](https://github.com/NousResearch/hermes-agent/blob/ebc9960b9d42e11e35ddbb6f0918cc163f739eb1/website/docs/developer-guide/cron-internals.md)可写为 `weixin:<wxid>`。P0 渠道试用可直接使用这些原生能力，不以本节桥接层为前置条件。本节的 bridge 只负责把本平台的网页用户、偏好和持久化 outbox 接到 Hermes；它不是另一套微信协议网关，也不要求额外购买云服务器。
+**2026-10-22 方案决策：** 不使用企业微信或公司审批流程，允许员工在 iLink 会话窗口失效后主动向自己的 bot 发消息恢复推送。选择 [每用户独立 iLink 扫码登录设计](P3-ILINK-QR-DESIGN.md) 为 PR #15 的后续目标：登录网站 → 短期二维码 → 微信扫码确认 → 网站自动绑定。员工不需要网页绑定码或点击二次确认。每个人是否使用独立 bot 是实现细节，当前 PoC 先验证每人一组可用的 iLink bot 身份。
 
-Hermes 端只启动一个 Weixin/iLink 网关，并在收到用户给机器人私聊的绑定码时，从真实渠道事件提取真实收件人 ID 和机器人账号 ID；不得信任网页登录传入的收件人。平台负责业务用户、偏好与消息 outbox，Hermes 只负责渠道收发。
+**代码功能已实现，真实渠道验收未执行。** 本 PR 分支实现个人短时 iLink 扫码授权、可信身份自动绑定、每用户独立加密凭据与长轮询上下文、按人定向推送及互动后恢复，UI 自动刷新。新版本尚未部署到火山云，现有部署仍为历史手动绑定码版本。两个员工的真实扫码及跨日送达根据用户决定改为**合并部署后**验收；P3-04 未勾选，三个 P3 运行开关继续默认关闭。普通 Hermes Agent 多 Bot 对话尚未接入新推送通道（旧 Hermes 网关保留），与推送授权分离。
 
-**入站确认**：用户先在 `/settings/notifications` 获取 10 分钟有效的随机绑定码，私聊机器人发送。可信的 Hermes 适配器请求：
+上游现有能力及尚需实测的关键差异：
+- [腾讯 openclaw-weixin 协议](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)定义二维码生成与状态轮询，确认后可包含 `ilink_user_id`、`ilink_bot_id`、`bot_token`；还可能有微信端验证码、重复绑定、超时与区域重定向。
+- 当前 [Hermes iLink 文档](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/messaging/weixin.md)仅说明单账号网关配置；多 profile、多 bot token 同时轮询、逐用户主动发送，需原型验证。腾讯 OpenClaw 插件的多账号特性不等于 Hermes 已实现。
+- 用户接受主动消息窗口失效后在微信向 bot 发一条消息恢复，但对 24 小时/10 条的流行说法只能视作第三方经验，不能当作官方承诺。需根据真实渠道响应，区分「需要互动」与「需要重新扫码」。
 
-- URL：`POST /api/v1/membership/bridge/claim`
-- JSON：`{"code":"绑定码","recipientId":"网关收件人 ID","channelAccountId":"机器人账号 ID"}`
-- Headers：`x-p3-timestamp` 为 Unix 毫秒；`x-p3-nonce` 为至少 16 位的一次性随机串；`x-p3-signature` 为十六进制小写 HMAC-SHA256。
-- 待签名字符串由 timestamp、nonce、code、recipientId、channelAccountId 按顺序用真实换行符连接，密钥为双方配置的 `P3_BINDING_HMAC_SECRET`（至少 32 字符）。
+绑定资格仅赋予网站 `active` 用户；每个扫码会话短时、一次性并与有效网页登录会话关联。iLink 确认结果由服务器直接读取，`bot_token` 加密存放，不得返回浏览器或写入日志。普通聊天权限由 Hermes pairing/allowlist 独立控制；扫码和推送订阅不提升其权限。解绑、退订须立即撤销后续投递授权；新账号资讯与 GP 开关默认开启，不覆盖用户已有选择。
 
-服务端校验签名、时间漂移、nonce 重放、绑定码和过期状态；只存绑定码哈希。网页用户再点击确认绑定。一个微信收件人不能同时绑定多个网页账号。
+出站已有平台 outbox 的版本、权限重验、幂等与 `accepted` 语义，原则上继续复用；但当前插件仅有全局 `_adapter`，**不支持路由不同 Bot**；新账号已改由按 Bot Token 隔离的 iLink worker 发送，并有双用户模拟测试，尚需真实微信验收。原有 `/api/v1/membership/bridge/claim`、`/weixin/confirm` 手动验证码协议已弃用；`/weixin/start` 现在创建仅属于当前已批准网站会话的**iLink 专属二维码**，`/weixin/status` 经腾讯状态回执自动绑定。新用户独立 iLink 出站由 worker 处理，不复用旧 Hermes 单例 `_adapter`；旧 `/deliver` 仅供兼容历史帐号的受控测试。
 
-**出站发送**：平台 worker 通过固定地址 `P3_HERMES_BRIDGE_URL` 向部署在 ai-work 的适配 sidecar 发送 HTTPS 请求（或同主机 loopback HTTP），并使用 `P3_HERMES_BRIDGE_TOKEN` 作为 Bearer 授权。body 为 `{"recipientId":"...","channelAccountId":"...","text":"...","idempotencyKey":"outbox-id"}`，HTTP header `x-idempotency-key` 同步携带该 ID。bridge 必须持久化此幂等键、调用真正的 Hermes Weixin 发送接口，并在渠道已受理时返回 2xx JSON `{"accepted":true,"messageId":"渠道消息 ID"}`。当会话过期，返回 410；确认的渠道限流返回 429。平台仅把 `accepted` 当作接口受理，不代表已送达。超时或模糊故障转 `unknown`，不盲目重发。
-
-**注意：** 上述是平台定义的 sidecar 对接协议，不代表 Hermes 官方已经提供同名 HTTP API。先核对锁定版本已有的消息发送、入站事件和状态接口；若仍需 sidecar，只编写本平台所需的薄适配层并复用 Hermes 原生 Weixin 适配器，不另行实现 iLink 协议。真实网页绑定和微信投递仍须联调。
+原始部署与回退记录仍见[历史部署日志](logs/2026-10-22-P3-wechat-flow.md)，其流程描述是历史状态，不作为现行产品方案。部署／迁移验证、PoC 和真实双员工验收均按新设计文档执行。
 
 ## 日历与调度
 
@@ -41,7 +39,7 @@ Hermes 端只启动一个 Weixin/iLink 网关，并在收到用户给机器人�
 
 1. 真实新华财经：主体唯一 ID 核实、完整分页/上限及数据授权；至少一组已知 GP 关系快照复查。
 2. 真实 DeepSeek：四类细分赛道准确率、低证据时空分类、费用、限流及人工修订。
-3. 同意参与的两个真实微信用户：扫码建会话、双向绑定、独立偏好和内容、解绑即时失效；至少连续 3 天跨日主动投递，包含普通日和可核验的休息日。
+3. 两个经管理员批准注册的平台账号：分别扫描网页专属二维码，无网页验证码或确认操作，由 iLink 登录回执自动绑定到正确的收件人；若微信端要求额外验证应如实展示。扫码绑定不得绕过 Hermes pairing；收信身份、各自默认订阅、跨日窗口与互动恢复须实测。选择不同兴趣后只收到各自匹配内容；退订/解绑即时生效。至少连续 3 天跨日主动投递，包含普通日和可核验的休息日。
 4. 渠道故障：401/410、429、超时、accepted 与未知回执；检查是否会重复投递或越权读取。
 5. P3 联调前确认不触碰旧版归档及服务器其他服务；旧版本无备份恢复前置要求。新平台正式运行仍按 P4 完成自身备份恢复方案。
 
@@ -65,7 +63,7 @@ P3 的数据表、服务端接口和后台管线可以与主分支共同发布�
 1. **准备环境：** 先取得服务器所有人的备份与恢复确认，执行只读盘点；核对数据库迁移 `0116`–`0151`、用户权限、加密传输、后台登录、日志脱敏，以及 `.env` 中三个开关仍是 `false`。不要将任何密钥、绑定码、真实用户的原始响应贴入 PR 或公开日志。
 2. **核准 GP：** 执行 `npm run member:seed-gp`（在迁移之后）；管理员进入 `/settings/admin-gps`，逐一核对 9 个候选角色、唯一 ID 和证据，并仅对真实 GP 设为 `active`。身份产生快照后即冻结，纠错需创建新主体并重新建立基线。检查完整/不完整快照及不可变证据，确认首次完整快照均为 `baseline`。
 3. **核准事件：** 校验投资关系真实发生日期、独立 HTTPS 来源与赛道；`observed → verified` 必须由管理员完成。重复调整不会生成新的首次核准事件；`baseline`、`retracted` 不能升级为新增。AI 分类是建议，不是事实证明。本系统当前仅跟踪首次发现的 GP→企业关系，不跟踪同一家企业每一轮追加融资。
-4. **联调微信：** 在取得个人同意及官方渠道授权后，实现并锁定 Hermes/iLink sidecar；确认绑定码 HMAC、nonce、收件人身份与桥接幂等键。分别由两个测试用户绑定、选择不同兴趣、开启独立订阅，跨普通日和休息日连续三天核对定向性及撤销权限。**`accepted` 只表示桥接侧已受理，不能作为微信实际送达证据。**
+4. **联调微信：** 在取得个人同意及渠道使用条件核对后，先依照 [独立 iLink 扫码设计](P3-ILINK-QR-DESIGN.md)完成双用户 PoC，核对可信扫码身份、不同 bot 收发、互动恢复、退订与解绑。旧 HMAC 绑定码流程不得重新启用。**`accepted` 只表示桥接侧已受理，不能作为微信实际送达证据。**
 5. **分阶段激活：** 服务商主体及快照验收后，才考虑打开 `P3_GP_SYNC_ENABLED`；人工核准与内容核验后再试运行 `P3_NOTIFICATIONS_ENABLED` 生成 outbox；只有真实 sidecar 的幂等协议和两个用户收件人验证完成，才考虑打开 `P3_DELIVERY_ENABLED`。每阶段先检查数据库记录和健康状态，再进入下一阶段。
 6. **故障与回退：** 任一环节出现错收件人、重复发送、未授权数据、异常大量新增或不明送达结果，应立刻关停 `P3_DELIVERY_ENABLED`，必要时同步关闭另外两个开关；保留审计、outbox 与快照供复核，不盲目重发 `unknown`，也不删除数据库表。收件会话失效（410 / `requires_rebind`）走重新绑定；限流（429）按受控重试检查。
 

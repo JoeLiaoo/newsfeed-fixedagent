@@ -4,6 +4,7 @@ import { listedCondition } from "@aihot/backend/publication/scope";
 import { beijingDate, beijingTime } from "@aihot/contracts/time";
 import { dueNotificationKinds, offDay } from "../gp/core.ts";
 import { getDailyDigest, type DigestItem } from "./digest.ts";
+import {decryptSecret,ilinkConfigured,ilinkErrorKind,sendIlinkText} from "./ilink.ts";
 
 const sha256=(value:string)=>createHash("sha256").update(value).digest("hex");
 const flags=(name:string)=>new Set((process.env[name]??"").split(",").map(x=>x.trim()).filter(Boolean));
@@ -148,9 +149,10 @@ function bridgeConfig() {
   const raw=process.env.P3_HERMES_BRIDGE_URL;
   if(!raw||!token) return null;
   const url=new URL(raw);
-  // Allow a TLS bridge or a loopback sidecar only. Never accept URLs from request payloads.
+  // The Hermes gateway runs on the Docker host. host.docker.internal is supplied
+  // only to the worker by Compose; the bridge separately checks its bearer token.
   if(!((url.protocol==="https:"&&url.username===""&&url.password==="")||
-    (url.protocol==="http:"&&["127.0.0.1","localhost","::1"].includes(url.hostname)))) throw new Error("invalid_hermes_bridge_url");
+    (url.protocol==="http:"&&["127.0.0.1","localhost","::1","host.docker.internal"].includes(url.hostname)))) throw new Error("invalid_hermes_bridge_url");
   return {url,token};
 }
 
@@ -217,7 +219,7 @@ type DispatchOptions={revalidate?:(job:OutboxRow)=>Promise<string|null>;post?:ty
 export async function dispatchOutbox({revalidate=revalidatePayload,post=fetch}:DispatchOptions={}) {
   if(process.env.P3_DELIVERY_ENABLED!=="true") return {disabled:true};
   const config=bridgeConfig();
-  if(!config) return {disabled:true,reason:"bridge_not_configured"};
+  if(!config&&!ilinkConfigured()) return {disabled:true,reason:"bridge_not_configured"};
   // Old unsent digests must not suddenly flood a recovered channel.
   await sql`UPDATE member_notification_outbox SET status='cancelled',error_code='stale_outbox' WHERE status IN ('pending','failed') AND created_at<now()-interval '2 days'`;
   // A crashed 'sending' row is ambiguous. Never blindly replay it.
@@ -244,7 +246,9 @@ export async function dispatchOutbox({revalidate=revalidatePayload,post=fetch}:D
       // Mutating notification settings and bindings takes this same lock. Holding it through the
       // bridge request gives the final authorization check and delivery a single ordering point.
       await tx`SELECT pg_advisory_xact_lock(hashtext(${job.user_id}))`;
-      const [recipient]=await tx<(Binding & {binding_version:number;subscription_version:number;enabled:boolean;outbox_status:string;outbox_binding_version:number;outbox_subscription_version:number})[]>`SELECT b.recipient_id,b.channel_account_id,
+      const [recipient]=await tx<(Binding & {binding_version:number;subscription_version:number;enabled:boolean;outbox_status:string;outbox_binding_version:number;outbox_subscription_version:number;
+        channel_state:string|null;token_ciphertext:string|null;api_url:string|null;context_ciphertext:string|null})[]>`SELECT b.recipient_id,b.channel_account_id,
+        a.channel_state,a.token_ciphertext,a.api_url,a.context_ciphertext,
         COALESCE(s.binding_version,1) AS binding_version,
         CASE WHEN ${job.kind}='news' THEN COALESCE(s.news_version,1) ELSE COALESCE(s.gp_version,1) END AS subscription_version,
         COALESCE(u.status='active' AND b.status='active' AND (s.paused_until IS NULL OR s.paused_until<=now())
@@ -252,6 +256,7 @@ export async function dispatchOutbox({revalidate=revalidatePayload,post=fetch}:D
         o.status AS outbox_status,o.binding_version AS outbox_binding_version,o.subscription_version AS outbox_subscription_version
         FROM member_notification_outbox o JOIN member_users u ON u.id=o.user_id
         LEFT JOIN member_weixin_bindings b ON b.user_id=u.id LEFT JOIN member_notification_settings s ON s.user_id=u.id
+        LEFT JOIN member_ilink_accounts a ON a.user_id=u.id AND a.recipient_id=b.recipient_id AND a.channel_account_id=b.channel_account_id
         WHERE o.id=${job.id} FOR UPDATE OF o`;
       if(!recipient||recipient.outbox_status!=="sending"||!recipient.enabled||
         recipient.binding_version!==job.binding_version||recipient.subscription_version!==job.subscription_version||
@@ -260,12 +265,42 @@ export async function dispatchOutbox({revalidate=revalidatePayload,post=fetch}:D
         return false;
       }
       try{
-        const response=await post(config.url,{
-          method:"POST",redirect:"error",signal:AbortSignal.timeout(15000),
-          headers:{"content-type":"application/json",authorization:"Bearer "+config.token,"x-idempotency-key":job.id},
-          body:JSON.stringify({recipientId:recipient.recipient_id,channelAccountId:recipient.channel_account_id,text:payload,idempotencyKey:job.id}),
-        });
-        if(response.status===410){
+        let response:Response;
+        if(recipient.token_ciphertext){
+          if(!ilinkConfigured())throw new Error("ilink_key_not_configured");
+          if(recipient.channel_state==="requires_rebind"){
+            response=new Response(JSON.stringify({error:"channel_expired"}),{status:410});
+          }else if(recipient.channel_state==="needs_interaction"||!recipient.context_ciphertext){
+            response=new Response(JSON.stringify({error:"needs_interaction"}),{status:412});
+          }else{
+            try{
+              const result=await sendIlinkText({
+                botId:recipient.channel_account_id,recipientId:recipient.recipient_id,
+                token:decryptSecret(recipient.token_ciphertext),base:recipient.api_url!,
+                contextToken:decryptSecret(recipient.context_ciphertext),
+              },payload,job.id);
+              response=new Response(JSON.stringify(result),{status:200,headers:{"content-type":"application/json"}});
+            }catch(error){
+              const kind=ilinkErrorKind(error);
+              response=new Response(JSON.stringify({error:kind}),{status:kind==="requires_rebind"?410:
+                kind==="needs_interaction"?412:kind==="rate_limited"?429:503});
+            }
+          }
+        }else if(config){
+          response=await post(config.url,{
+            method:"POST",redirect:"error",signal:AbortSignal.timeout(15000),
+            headers:{"content-type":"application/json",authorization:"Bearer "+config.token,"x-idempotency-key":job.id},
+            body:JSON.stringify({recipientId:recipient.recipient_id,channelAccountId:recipient.channel_account_id,text:payload,idempotencyKey:job.id}),
+          });
+        }else throw new Error("bridge_not_configured");
+        if(response.status===412){
+          await tx`UPDATE member_ilink_accounts SET channel_state='needs_interaction',updated_at=now()
+            WHERE user_id=${job.user_id}`;
+          await tx`UPDATE member_notification_outbox SET status='failed',lease_expires_at=NULL,
+            next_attempt_at='2099-01-01'::timestamptz,error_code='needs_interaction' WHERE id=${job.id}`;
+        }else if(response.status===410){
+          await tx`UPDATE member_ilink_accounts SET channel_state='requires_rebind',updated_at=now()
+            WHERE user_id=${job.user_id}`;
           await tx`UPDATE member_weixin_bindings SET status='requires_rebind' WHERE user_id=${job.user_id}`;
           await tx`UPDATE member_notification_outbox SET status='requires_rebind',lease_expires_at=NULL,error_code='channel_expired' WHERE id=${job.id}`;
           await tx`DELETE FROM member_notification_seen WHERE outbox_id=${job.id}`;
@@ -291,7 +326,6 @@ export async function dispatchOutbox({revalidate=revalidatePayload,post=fetch}:D
 }
 
 export async function cleanupP3Data() {
-  await sql`DELETE FROM member_bridge_nonces WHERE created_at<now()-interval '1 day'`;
-  await sql`DELETE FROM member_weixin_challenges WHERE expires_at<now()-interval '1 day'`;
-  return {p3BridgeNoncesPruned:true};
+  // Legacy hand-entered binding challenge tables are removed by migration.
+  return {legacyWeixinBindingDisabled:true};
 }

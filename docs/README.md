@@ -3,14 +3,16 @@
 ## 从这里开始
 
 - [项目 README](../README.md)：本地启动、各阶段代码与上线状态。
-- [产品需求基线](PLAN.md)：v0.65；需求讨论与确认范围，不代表功能已验收。
+- [产品需求基线](PLAN.md)：v0.68；需求讨论与确认范围，不代表功能已验收。
 - [实施状态](IMPLEMENTATION.md)：P0–P4 唯一任务勾选来源，按对应验收条件完成后才标记 `[x]`。
 - [项目进度汇报](PROGRESS-REPORT.md)：按实施计划展示阶段勾选和后续验收关口；比例不是产品完成率。
 - [P0 DeepSeek／新华财经配置与字段矩阵](P0-DATA-MATRIX.md)：服务端凭据边界、接口静态 schema、GP 标准事件时间语义和真实联调缺口。
 - [P0 上游基线、接口边界与施工顺序](P0-05-BASELINE.md)：锁定 AIHOT/Hermes 版本与许可，说明产品接口合同、代码目录和迁移顺序。
-- [P0-03/P0-04 外部验收手册](P0-03-04-OPERATIONS.md)：微信双用户跨日试投和 `ai-work` 只读盘点步骤；[PR #10](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/10) 已合并（`2cc14c3`），真实验收仍待完成。
+- [P0-03/P0-04 外部验收手册](P0-03-04-OPERATIONS.md)：P0-03 已按用户决定不单独试投，扫码绑定、聊天及定向推送并入 P3-04；保留 `ai-work` 盘点记录。
+- [P3 iLink 扫码协议、身份隔离及部署后验收](P3-ILINK-QR-DESIGN.md)：PR #15 的代码实现范围、安全边界与双员工真实验收；仅适用于订阅通知，不等同于 Hermes Agent 多 Bot 聊天。
 - [贡献与仓库治理](../CONTRIBUTING.md) / [Agent 开发约定](../AGENTS.md)：分支、PR、设计系统、日志、保密与验证规则。
 - [全仓架构与实现审查（2026-10-22）](REPO-REVIEW-2026-10-22.md)：基于 `13a89a5` 的风险、复现证据及建议演进顺序。
+- [PR #15 文档与仓库治理检查](logs/2026-10-22-pr15-docs-governance.md)：多 Bot 凭据隔离、发布闸门、代码 CI 与部署后双用户真机验收的职责划分。
 - [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 及通知投递复审的实现、验证和剩余边界；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 已合并。
 - [文档治理更新记录](logs/2026-10-22-repo-docs-governance.md)：文档状态、索引去重及合并后同步规则；[PR #7](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/7) 已合并（`409a2a7`）。
 
@@ -18,14 +20,14 @@
 
 | 阶段 | 说明 | 状态依据 |
 |---|---|---|
-| P0 | [材料、凭据与外部阻碍](P0-STATUS.md) | 服务器范围已按用户决定明确；微信双用户试投、供应商持续性及 GP 主体核对待完成 |
+| P0 | [材料、凭据与外部阻碍](P0-STATUS.md) | P0-03 微信试投已转入 P3-04；供应商持续性及 GP 主体核对待完成 |
 | P1 | [实施状态](IMPLEMENTATION.md#p1--账号与资讯) | 代码完成，待真实员工试用 |
 | P2 | [专家适配矩阵](P2-EXPERT-ADAPTER.md) | 一层直接投资适配版，真实 MCP／模型尚未联调 |
-| P3 | [GP 监测与微信运维手册](P3-OPERATIONS.md) | Hermes/iLink 网关已部署并连接单个 bot；平台 bridge、员工双用户跨日验收未完成，三项运行开关保持关闭 |
+| P3 | [GP 监测与微信运维手册](P3-OPERATIONS.md) | 旧绑定桥接已部署但被否决；已实现每用户 iLink 扫码授权及双用户模拟投递，真实双用户与跨日验收将在合并部署后进行，三项运行开关保持关闭 |
 | P4 | [部署与试运行任务](IMPLEMENTATION.md#p4--部署与试运行) | 新平台 HTTPS 入口已切换，旧版本归档已完成，Hermes 网关已运行；新平台运维、旧组件处置和员工试用待完成 |
 | 上游 | [AIHOT 来源、许可证与适配](UPSTREAM.md) | 保留来源归属及边界 |
 
-**注意：** P3 合并的是可供联调的代码链路；Hermes/iLink 单账号网关已部署并连接，但不代表新华财经和 DeepSeek 的持续业务调用、网页绑定或微信双用户跨日投递已验收。P3-01～P3-04 的任务仍保持未完成，详情以实施状态表为准。
+**注意：** PR #15 已停用旧静态联系人二维码及手动绑定码流程，已改为每个员工的 iLink 专属扫码授权（[设计与验证计划](P3-ILINK-QR-DESIGN.md)）。当前扫码自动绑定已经实现代码但尚未部署；已部署的旧版 bridge 只经过服务连通和未授权请求检查，真实微信绑定与双用户投递尚未验收。绑定/推送权限与普通私聊权限分开，后者需 Hermes 管理员批准。P0-03 不再单独执行相关渠道试投；P3-01～P3-04 的任务仍保持未完成，详情以实施状态表为准。
 
 ## 实施日志
 
@@ -40,6 +42,7 @@
 - [P1 员工信源入口改进](logs/2026-10-22-P1-04-source-entry.md)：在主导航与关注赛道页增加员工添加公开信源的直达入口。
 - [P2 专家](logs/2026-10-21-P2-expert.md)
 - [P3 实施、Review 整改与剩余阻碍](logs/2026-10-22-P3-implementation.md)
+- [P3 微信扫码入口与验收范围调整](logs/2026-10-22-P3-wechat-flow.md)
 - [全仓架构与实现审查日志](logs/2026-10-22-repo-review.md)
 - [全仓审查问题修复日志](logs/2026-10-22-repo-review-remediation.md)
 - [文档治理更新日志](logs/2026-10-22-repo-docs-governance.md)

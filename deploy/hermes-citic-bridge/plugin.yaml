@@ -1,0 +1,4 @@
+name: citic-weixin-bridge
+version: 1.0.0
+description: Bind approved platform members and deliver their notifications through the live Weixin adapter.
+kind: backend
