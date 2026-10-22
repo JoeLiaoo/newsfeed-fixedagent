@@ -21,14 +21,11 @@ _adapter = None
 _server_task = None
 
 
-def _settings():
-    secret = os.getenv("CITIC_P3_BINDING_HMAC_SECRET", "")
+def _bridge_token():
     token = os.getenv("CITIC_P3_BRIDGE_TOKEN", "")
-    api = os.getenv("CITIC_P3_API_URL", "http://127.0.0.1:3000/api/v1/membership/bridge/claim")
-    if len(secret) < 32 or len(token) < 32 or not api.startswith("http://127.0.0.1:"):
-        raise RuntimeError("CITIC bridge credentials or local API URL not configured")
-    return secret, token, api
-
+    if len(token) < 32:
+        raise RuntimeError("CITIC bridge token not configured")
+    return token
 
 def _db():
     path = Path(os.getenv("CITIC_P3_BRIDGE_DB", "/opt/hermes-agent/home/bridge-outbox.sqlite3"))
@@ -40,7 +37,7 @@ def _db():
 
 
 async def _deliver(request):
-    _, token, _ = _settings()
+    token = _bridge_token()
     authorization = request.headers.get("Authorization", "")
     if not hmac.compare_digest(authorization, "Bearer " + token):
         return web.json_response({"error": "unauthorized"}, status=401)
@@ -87,7 +84,7 @@ async def _deliver(request):
 
 
 async def _serve():
-    _settings()
+    _bridge_token()
     app = web.Application(client_max_size=8192)
     app.router.add_post("/deliver", _deliver)
     runner = web.AppRunner(app)
@@ -105,5 +102,5 @@ def _connected(_native, adapter):
 
 
 def register(ctx):
-    _settings()
+    _bridge_token()
     ctx.register_platform_handler("weixin", _connected)
