@@ -114,7 +114,7 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
         const [active]=await tx`SELECT id FROM member_users WHERE id=${user.id} AND status='active'`;
         const [current]=await tx`SELECT session_hash,expires_at FROM member_ilink_logins WHERE user_id=${user.id} FOR UPDATE`;
         if(!still||!active||!current||current.session_hash!==hash||new Date(current.expires_at).getTime()<=Date.now())return "invalid_session";
-        const [collision]=await tx`SELECT user_id FROM member_weixin_bindings WHERE
+        const collision=await tx`SELECT user_id FROM member_weixin_bindings WHERE
            (recipient_id=${result.userId} AND channel_account_id=${result.botId} OR channel_account_id=${result.botId})
            AND user_id<>${user.id}`;
         if(collision.length)return "identity_already_bound";
