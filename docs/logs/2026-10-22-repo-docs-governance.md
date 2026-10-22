@@ -9,6 +9,7 @@
 - 修改 `README.md`、`docs/README.md`、`docs/IMPLEMENTATION.md`、`docs/P3-OPERATIONS.md`、`docs/REPO-REVIEW-2026-10-22.md`、`docs/UPSTREAM.md`、日志模板、PR #6 整改日志、`CONTRIBUTING.md` 与 `AGENTS.md`。
 - 修复文档索引里重复的整改日志入口，并将 PR #6 的状态和合并提交同步到入口、实施计划与审查报告。
 - 补充合并后更新日志和索引的治理步骤，避免文档保留已过时的 PR 状态；明确代码合并不能替代 P3/P4 外部验收。
+- 在 `AGENTS.md` 增加合并前门槛：完成适用的 Docs 与仓库治理核对、记录无需文档变更的理由，并通过文档链接检查后再合并。
 - 未更改产品需求、P0–P4 任务勾选、运行开关或外部验收状态。
 
 ## 最小验证
