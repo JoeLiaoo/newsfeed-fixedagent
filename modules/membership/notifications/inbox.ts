@@ -25,11 +25,11 @@ export async function pollMemberIlinkInboxes() {
           botId:row.channel_account_id,recipientId:row.recipient_id,token:decryptSecret(row.token_ciphertext),
           base:row.api_url,cursor:row.cursor_ciphertext?decryptSecret(row.cursor_ciphertext):null,
         });
-        if(result.hadInbound){
+        if(result.hadInbound && result.contextToken){
           recovered++;
           await tx`UPDATE member_ilink_accounts SET
             cursor_ciphertext=${result.cursor?encryptSecret(result.cursor):null},
-            context_ciphertext=${result.contextToken?encryptSecret(result.contextToken):null},
+            context_ciphertext=${encryptSecret(result.contextToken)},
             channel_state='active',last_inbound_at=now(),updated_at=now()
             WHERE user_id=${row.user_id}`;
           // Only formerly blocked, recent messages are eligible; outbox expiry is enforced by dispatcher.
