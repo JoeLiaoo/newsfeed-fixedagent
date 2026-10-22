@@ -2,7 +2,7 @@
 
 - 任务：按 [2026-10-22 全仓审查](../REPO-REVIEW-2026-10-22.md) 修复 R01–R14，并开 PR。
 - 基线：`origin/main` / `13a89a5ae6008a95773e148114aec2b6dffd162e`；分支 `codex/fix-repo-review-2026-10-22`。
-- 交付：[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6)，Open，尚未合并。
+- 交付：[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6)，已合并至 `main`；合并提交 `2c98e535465ec3bfad3f132a01b8b731f43ee7fb`，修复 head `6c74473ddbf3f4ea07ca7a8bf39d8dd5bf07c8f4`。
 
 ## 修复对应
 
@@ -41,4 +41,4 @@
 - 解绑、重新绑定和退订更新会取消 `sending` 状态的消息并释放来源预占。发送器在重验后再次检查任务、用户、绑定及订阅版本；发送期间持有与这些变更共用的用户事务锁，避免状态变化与 Hermes 投递交叉。
 - 新增长资讯与混合资讯从生成、重验到 mock Hermes 投递的回归，以及分别在重验阻塞期间退订、解绑的并发回归。
 - 跟进验证：类型检查通过；独立测试 22 项通过；通知、P3、访问边界、专家任务及架构 PostgreSQL 集成测试 22 项通过（架构 18 项，其他 4 项）；迁移安全检查及 110 个 Markdown 本地链接检查通过。
-- PR #6 仍保持 Open；尚未合并。真实 Hermes 投递仍待部署环境验收。
+- PR #6 已合并。真实 Hermes 投递仍待部署环境验收；合并不改变 P3-01～P3-04 的验收状态，也不启用任何运行开关。

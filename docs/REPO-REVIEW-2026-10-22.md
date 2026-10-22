@@ -266,4 +266,4 @@ node --import ./tests/standalone.ts --test --test-skip-pattern='every table and 
 
 ## 八、R01–R14 修复跟踪
 
-本报告列出的 R01–R14 已在[修复记录](logs/2026-10-22-repo-review-remediation.md)对应实现和回归覆盖，修复提交在 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6)。以上修复没有把报告中的长期架构建议 A–F 标记为已完成，也不改变 P0–P4 的验收状态。
+本报告列出的 R01–R14 已在[修复记录](logs/2026-10-22-repo-review-remediation.md)对应实现和回归覆盖，并已随 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并至 `main`（合并提交 `2c98e53`）。PR #6 合并前还修复了通知长消息分片和退订／解绑竞态，详见同一日志。以上修复没有把报告中的长期架构建议 A–F 标记为已完成，也不改变 P0–P4 的验收状态。

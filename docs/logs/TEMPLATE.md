@@ -1,7 +1,7 @@
 # <日期与任务 ID> 工作日志
 
 - Agent：
-- 对应任务：`docs/IMPLEMENTATION.md` 中的 <ID>
+- 对应任务：`docs/IMPLEMENTATION.md` 中的 <ID>；若为维护工作，写明“维护任务（不对应 P0–P4）”
 - 完成状态：完成／部分完成／受阻
 
 ## 本次改动
