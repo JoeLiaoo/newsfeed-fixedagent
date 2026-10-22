@@ -1,8 +1,8 @@
 """Hermes gateway plugin for the CITIC member notification bridge.
 
 Runs inside the gateway process so outbound sends reuse the live iLink adapter and
-its context token store. Binding codes are consumed before the DM pairing gate;
-ordinary messages still require Hermes administrator approval.
+its context token store. Legacy manual-code binding is disabled until the
+per-member iLink QR login flow is implemented and tested.
 """
 from __future__ import annotations
 
@@ -11,16 +11,12 @@ import hashlib
 import hmac
 import json
 import os
-import re
-import secrets
 import sqlite3
-import time
 from contextlib import closing
 from pathlib import Path
 
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import web
 
-_CODE = re.compile(r"^[A-F0-9]{24}$")
 _adapter = None
 _server_task = None
 
@@ -32,34 +28,6 @@ def _settings():
     if len(secret) < 32 or len(token) < 32 or not api.startswith("http://127.0.0.1:"):
         raise RuntimeError("CITIC bridge credentials or local API URL not configured")
     return secret, token, api
-
-
-async def _binding_code(*, event, **_kwargs):
-    source = getattr(event, "source", None)
-    if getattr(getattr(source, "platform", None), "value", None) != "weixin" or getattr(source, "chat_type", None) != "dm":
-        return None
-    code = str(getattr(event, "text", "") or "").strip().upper()
-    if not _CODE.fullmatch(code):
-        return None
-    recipient = str(getattr(source, "user_id", "") or "").strip()
-    adapter = _adapter
-    if not recipient or adapter is None or not getattr(adapter, "_running", False):
-        return {"action": "skip", "reason": "binding_bridge_unavailable"}
-    secret, _, url = _settings()
-    account = str(getattr(adapter, "_account_id", "") or "")
-    stamp, nonce = str(int(time.time() * 1000)), secrets.token_hex(20)
-    signed = "\n".join((stamp, nonce, code, recipient, account))
-    signature = hmac.new(secret.encode(), signed.encode(), hashlib.sha256).hexdigest()
-    try:
-        async with ClientSession(timeout=ClientTimeout(total=8)) as session:
-            async with session.post(url, json={"code": code, "recipientId": recipient, "channelAccountId": account}, headers={
-                "x-p3-timestamp": stamp, "x-p3-nonce": nonce, "x-p3-signature": signature,
-            }) as response:
-                await response.read()
-    except Exception:
-        pass
-    # A challenge is never passed to the agent or the pairing code path.
-    return {"action": "skip", "reason": "binding_challenge"}
 
 
 def _db():
@@ -138,5 +106,4 @@ def _connected(_native, adapter):
 
 def register(ctx):
     _settings()
-    ctx.register_hook("pre_gateway_dispatch", _binding_code)
     ctx.register_platform_handler("weixin", _connected)
