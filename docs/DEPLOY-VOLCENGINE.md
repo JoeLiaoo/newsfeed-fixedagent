@@ -10,7 +10,7 @@
 - [~] HTTPS 入口：现场有 Let's Encrypt IP 证书（SAN 匹配 `115.190.114.65`，有效期至 2026-10-26 UTC），Nginx 在 80/443 监听。用户确认后已把活动站点上游切换至新平台 `127.0.0.1:3000`；公网 `/api/health` 与 `/login` 返回 200。证书续期与合规核对仍待办。
 - [ ] 核对安全组及备案/合规要求；若继续使用 IP 访问，记录无自有域名的限制。
 - [~] 常见应用根目录和 root 家目录未发现 `.config/`；旧应用服务使用受限权限的系统环境文件。新平台凭据存放位置及读取用户待核实，不覆盖现有文件。
-- [~] DeepSeek 与新华财经 MCP 已完成一次隔离抽测；信源采集、对象存储与 Hermes/iLink 尚未验证。真实凭据不写入日志。
+- [~] DeepSeek 与新华财经 MCP 已完成一次隔离抽测；Hermes Weixin/iLink 独立网关已部署并完成单账号扫码连接；平台 bridge、员工双用户试投、信源持续采集与对象存储仍待验收。真实凭据不写入日志。
 
 ### 已观测到的实例状态（2026-10-22，只读）
 
@@ -30,9 +30,16 @@
 - 切换前 Nginx 配置检查通过；现场 IP 证书 SAN 匹配该 IP，至 2026-10-26 UTC 到期。用户确认将 IP 入口交给新平台后，已备份 Nginx 配置和新平台 `.env`，将站点 `proxy_pass` 更新为 `127.0.0.1:3000`，设置 `SITE_URL=https://115.190.114.65`，通过 `nginx -t` 后重载。公网 `/api/health` 和 `/login` 分别返回 HTTP 200。备份位置、验证和回退步骤见[现场复核与切换日志](logs/2026-10-22-P4-field-refresh.md)。Workbench 容器、旧应用、主机 PostgreSQL 及 Docker 卷未停止或删除。
 - 已在同机创建 `/opt/archive/ai-work-old-archive-20261022`，包含旧应用发布/配置与 runtime 元数据、运维脚本/unit/timer、历史备份、host `ai_workbench` 逻辑转储、WeKnora 两个容器数据库逻辑转储、非 PostgreSQL 持久卷副本及当前/历史 Compose 镜像；11 个归档载荷文件 SHA-256 校验全部通过。目录为 `0700`、文件为 `0600`。用户确认旧版本留档即可，无需该版本异地备份或恢复演练；旧容器和源文件未停止或删除。旧服务 unit 仍 enabled/inactive，相关备份/恢复和证书续期 timer 保持启用。见[归档日志](logs/2026-10-22-P4-old-app-archive.md)。
 
+### Hermes Weixin/iLink 独立网关（2026-10-22）
+
+- 已在同一火山云实例安装锁定版本 Hermes Agent（上游提交 `ebc9960b9d42e11e35ddbb6f0918cc163f739eb1`），目录 `/opt/hermes-agent`；通过 `hermes-agent-gateway.service` 以独立 `hermes` 系统用户运行，配置和凭据文件权限为 `0600`。
+- 微信扫码登录完成，Weixin 适配器已连接；网关通过 iLink 长轮询工作，没有新开公网端口。私聊策略为 `pairing`，群聊策略为 `disabled`。DeepSeek Flash 已配置为 Hermes 默认模型。
+- 初次扫码得到的会话在启动时已过期；重新扫码生成有效会话后，网关日志确认 Weixin 连接成功，服务保持 `active/running`，未再观察到会话过期报错。
+- 此项只证明单个 iLink bot 身份能在服务器连上渠道，不代表两名员工收发、跨日主动投递、网页账号绑定或平台 bridge 已验收。P3 三项运行开关仍保持关闭。
+
 ## 部署拓扑基线
 
-- 使用仓库 `docker-compose.yml`：`web`、`api`、`worker`、PostgreSQL；Hermes sidecar 依照 P3 运维合同单独核验。
+- 使用仓库 `docker-compose.yml`：`web`、`api`、`worker`、PostgreSQL；Hermes Weixin/iLink 网关作为独立 systemd 服务运行。网页平台 bridge 仍须依照 P3 运维合同实现并联调。
 - 保留系统 Nginx 作为公网 HTTPS 入口；新应用初期仅监听 `127.0.0.1:3000`，不启用 Compose 的 Caddy profile，避免和系统 Nginx争用 80/443。
 - 数据库只在 Compose 内网提供服务；不要给 PostgreSQL 或 API 增加公网端口映射。
 - 保留 Docker 命名卷、旧镜像和旧配置，直到新版本验证完成且回退窗口关闭。
