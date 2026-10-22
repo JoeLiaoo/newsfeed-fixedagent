@@ -14,8 +14,8 @@ export async function pollMemberIlinkInboxes() {
     JOIN member_users u ON u.id=a.user_id AND u.status='active'
     ORDER BY a.updated_at LIMIT 20`;
   let checked=0,recovered=0;
-  for(const account of accounts){
-    await sql.begin(async tx=>{
+  for(let start=0;start<accounts.length;start+=5){
+    await Promise.all(accounts.slice(start,start+5).map(async account=>sql.begin(async tx=>{
       const [row]=await tx<AccountRow[]>`SELECT a.user_id,a.recipient_id,a.channel_account_id,a.token_ciphertext,a.api_url,a.cursor_ciphertext
         FROM member_ilink_accounts a WHERE a.user_id=${account.user_id} FOR UPDATE SKIP LOCKED`;
       if(!row)return;
@@ -44,7 +44,7 @@ export async function pollMemberIlinkInboxes() {
           await tx`UPDATE member_ilink_accounts SET channel_state='requires_rebind',updated_at=now() WHERE user_id=${row.user_id}`;
         // No raw API response or account credentials in logs.
       }
-    });
+    })));
   }
   return {checked,recovered};
 }
