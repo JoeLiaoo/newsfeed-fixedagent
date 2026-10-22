@@ -5,6 +5,7 @@
 - [项目 README](../README.md)：本地启动、各阶段代码与上线状态。
 - [产品需求基线](PLAN.md)：v0.65；需求讨论与确认范围，不代表功能已验收。
 - [实施状态](IMPLEMENTATION.md)：P0–P4 唯一任务勾选来源，按对应验收条件完成后才标记 `[x]`。
+- [P0 DeepSeek／新华财经配置与字段矩阵](P0-DATA-MATRIX.md)：服务端凭据边界、接口静态 schema、GP 标准事件时间语义和真实联调缺口。
 - [贡献与仓库治理](../CONTRIBUTING.md) / [Agent 开发约定](../AGENTS.md)：分支、PR、设计系统、日志、保密与验证规则。
 - [全仓架构与实现审查（2026-10-22）](REPO-REVIEW-2026-10-22.md)：基于 `13a89a5` 的风险、复现证据及建议演进顺序。
 - [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 及通知投递复审的实现、验证和剩余边界；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 已合并。
@@ -29,6 +30,7 @@
 
 - [仓库治理初版](logs/2026-10-21-repo-governance.md)；[2026-10-22 治理与文档同步](logs/2026-10-22-repository-governance.md)
 - [P0 建立约定](logs/2026-10-21-P0-00.md)；[P0 预核与访问阻碍](logs/2026-10-21-P0-03-04-precheck.md)；[P0 凭据相关记录](logs/2026-10-21-P0-credentials.md)；[P0 云环境记录](logs/2026-10-21-P0-cloud-credentials.md)
+- [P0-01/P0-02 配置与数据字段对照](logs/2026-10-22-P0-01-02.md)
 - [P1 平台](logs/2026-10-21-P1-platform.md)；[PR #1 Review](logs/2026-10-21-PR1-review.md)；[P1/P2 UI](logs/2026-10-21-P1-P2-ui.md)
 - [P2 专家](logs/2026-10-21-P2-expert.md)
 - [P3 实施、Review 整改与剩余阻碍](logs/2026-10-22-P3-implementation.md)

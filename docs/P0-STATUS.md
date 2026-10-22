@@ -1,7 +1,7 @@
 # P0 材料与可行性记录
 
-日期：2026-10-21（Asia/Shanghai）
-状态：已完成本地材料盘点；当前开发先用 DeepSeek API 与新华财经 MCP，外部接口和个人微信投递尚未实测，用户参与实际试用。
+初次盘点：2026-10-21（Asia/Shanghai）；本次更新：2026-10-22
+状态：已完成本地材料、服务端配置读取和接口静态字段对照；当前开发先用 DeepSeek API 与新华财经 MCP，外部接口和个人微信投递尚未实测，用户参与实际试用。详见 [P0 配置与数据字段矩阵](P0-DATA-MATRIX.md)。
 
 用户已告知 Codex 云端环境变量和 GitHub Actions 仓库级 secrets 均配置了 `DEEPSEEK_API_KEY`、`XINHUA_MCP_API_KEY`，上线服务器的凭据也已放在 `.config/`；上述可用性及服务器具体路径尚未核验。
 
@@ -17,7 +17,8 @@
 ## 新华财经文档的静态核对
 
 - 企业基础信息服务 `zjs_company` 列出 29 个工具，其中 `fuzzy_search_company_list`、`get_company_profile`、`get_company_shareholder`、`get_company_change`、`get_direct_investment` 和 `get_company_annual_report_investment_info` 与 GP 新增投资识别相关。
-- `get_direct_investment` 文档给出被投企业 ID/名称、投资方名称、持股比例、认缴额、认缴日期、数据日期和入库／更新时间。文档未把入库时间定义为投资事件发生日期，不能据此直接宣称“当日新增投资”。是否能用每日快照差分稳定识别真实新增投资，须用接口返回及已知案例核对。
+- `get_direct_investment` PDF 给出被投企业 ID/名称、投资方名称、持股比例、认缴/实缴字段、认缴日 `shoud_date`、实缴日 `capi_date`、数据日期 `dates`、插入时间 `insert_time` 和更新时间 `update_time`。这些时间语义不同；PDF 没有给出独立投资发生日，也未列该工具的 `limit/offset` 或分页完成字段。
+- 静态 schema 与当前代码有待实测确认的差异：`get_company_profile` PDF 未列代码传入的 `query_type=company_id`；`get_direct_investment` PDF 未列分页参数及 `total/has_more` 元数据；代码当前也未把 `dates` 映射到 `data_date`。真实 `listTools` schema 和一组脱敏响应确认前，不能声称 GP 同步分页完整或实体 ID 查询已被服务商支持。
 - 当前四份文档未列出独立的“股权融资事件”工具，也未说明融资轮次或融资金额的完整字段。正式数据源仍按 `docs/PLAN.md` 的采购和授权核验结果决定。
 - `.config/` 下两个密钥文件的内容是原始密钥文本，不是 JSON 对象；实现配置读取时应按原始文本读取并去除首尾空白，不能因为扩展名为 `.json` 就调用 JSON 解析。
 
@@ -31,7 +32,7 @@
 ## P0 待完成的验证
 
 - [ ] 用户验证 DeepSeek 凭据可用，并记录可用模型、费用或调用限制；不记录密钥值。
-- [ ] 用户验证新华财经试用凭据及相关工具可调用，保存脱敏后的字段样例、覆盖范围和数据更新时间。
+- [ ] 用户验证新华财经试用凭据及相关工具可调用；获取 `get_company_profile` 与 `get_direct_investment` 的真实工具 schema 和脱敏字段样例，核实身份查询与分页完整性。
 - [ ] 用至少两个真实员工账号验证个人微信自行绑定、主动投递和跨日送达；记录渠道限制及失败情况（当前预核与阻塞条件见 [日志](logs/2026-10-21-P0-03-04-precheck.md)）。
 - [ ] 在首个专家适配版中列明悟道 MCP 缺失所造成的规则差异；悟道接入与授权留作后续候选，不阻断当前用新华财经和 DeepSeek 开发。
 - [ ] 核对首个专家引用的 10／11／12 专门 skill 是否可提供，缺失时在试运行界面明确显示依赖状态。
