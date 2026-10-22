@@ -3,6 +3,8 @@
 需求基线日期：2026-10-21（Asia/Shanghai） · 状态核对：2026-10-22
 依据：`docs/PLAN.md` v0.65；当前开发先用 DeepSeek API 与新华财经 MCP。
 
+阶段勾选的阅读视图见[项目进度汇报](PROGRESS-REPORT.md)；本文件仍是任务状态的唯一依据。
+
 ## 执行规则
 
 - 按依赖逐项推进。每个完成任务必须有 `docs/logs/` 中的日志，并在下表勾选及填写日志链接；阻碍和部分完成只记日志，不勾选。
@@ -17,8 +19,8 @@
 | [x] | P0-00 | 建立根目录开发说明、Agent 规则、分步骤计划和日志模板；记录当前开发数据源 | [2026-10-21-P0-00](logs/2026-10-21-P0-00.md) |
 | [x] | P0-01 | 整理 DeepSeek 与新华财经的服务端配置读取、权限边界和脱敏样例；不记录密钥值 | [配置与权限矩阵](P0-DATA-MATRIX.md#p0-01服务端配置读取与权限边界)、[工作日志](logs/2026-10-22-P0-01-02.md) |
 | [x] | P0-02 | 对照新华财经工具与 GP 事件字段、首个专家规则，形成支持／缺失矩阵和时间口径 | [静态字段与能力矩阵](P0-DATA-MATRIX.md)、[工作日志](logs/2026-10-22-P0-01-02.md) |
-| [ ] | P0-03 | 制定个人微信双用户绑定、主动投递、跨日送达的最小试用步骤；记录用户反馈与限制 | [试用手册](P0-03-04-OPERATIONS.md#p0-03双用户绑定主动投递与跨日送达)、[本轮记录](logs/2026-10-22-P0-03-04.md)；等待两名用户在隔离环境完成真实试投 |
-| [ ] | P0-04 | 只读盘点 `ai-work` 实例及旧应用边界，记录资源、其他服务和部署约束，不清理数据 | [盘点手册](P0-03-04-OPERATIONS.md#p0-04ai-work-只读资源与边界盘点)、[只读复核记录](logs/2026-10-22-P4-field-refresh.md)；旧站点上游和所有者、卷/数据库依赖仍需负责人核实 |
+| [ ] | P0-03 | 制定个人微信双用户绑定、主动投递、跨日送达的最小试用步骤；记录用户反馈与限制 | [试用手册](P0-03-04-OPERATIONS.md#p0-03双用户绑定主动投递与跨日送达)、[本轮记录](logs/2026-10-22-P0-03-04.md)、[Hermes 单账号接入记录](logs/2026-10-22-P4-hermes-gateway.md)；等待两名用户在隔离环境完成真实试投 |
+| [x] | P0-04 | 只读盘点 `ai-work` 实例及部署约束，并记录服务器资源使用边界 | [盘点手册](P0-03-04-OPERATIONS.md#p0-04ai-work-只读资源与边界盘点)、[只读复核记录](logs/2026-10-22-P4-field-refresh.md)；按用户决定，服务器整体供新平台使用，旧应用保持不动；P0-04 不要求逐项确认旧应用资源归属或执行清理 |
 | [x] | P0-05 | 锁定 AIHOT 与 Hermes 基线、许可证和接口契约，给出 P1–P3 的代码目录及迁移顺序 | [基线与施工顺序](P0-05-BASELINE.md)、[工作日志](logs/2026-10-22-P0-05.md) |
 
 P0 出口：数据源能返回所需基本字段或缺口有明确降级；用户微信试用结果已记录；实例边界清楚。未达到时允许开展与外部接入无关的 P1 本地工作，但不声称 P0 通过。
@@ -59,9 +61,9 @@ P2 已交付专家导入、依赖状态、持久化队列、实体确认、任�
 | [ ] | P3-01 | 将 `reference/母基金已投子基金管理人.md` 转为候选 GP 清单，核对规范名称、别名、管理人／GP／基金身份后由管理员维护 | [代码施工（待外部验收）](logs/2026-10-22-P3-implementation.md) |
 | [ ] | P3-02 | 基于新华财经数据建立对外投资快照、差分、去重和证据记录；区分发现日期、数据入库日期与实际投资日期 | [代码施工（待外部验收）](logs/2026-10-22-P3-implementation.md) |
 | [ ] | P3-03 | 用 DeepSeek 将被投企业归入四类产业的细分赛道，支持管理员修正和一事一用户只推一次；战略配售不参与 GP 匹配 | [代码施工（待外部验收）](logs/2026-10-22-P3-implementation.md) |
-| [ ] | P3-04 | 员工自行绑定或解绑个人微信；新闻及 GP 动向按已定时间分别投递，空内容、重试和失效状态可追踪 | [代码施工（待外部验收）](logs/2026-10-22-P3-implementation.md) |
+| [ ] | P3-04 | 员工自行绑定或解绑个人微信；新闻及 GP 动向按已定时间分别投递，空内容、重试和失效状态可追踪 | [代码施工（待外部验收）](logs/2026-10-22-P3-implementation.md)、[Hermes 网关已部署，bridge 与员工试投待验收](logs/2026-10-22-P4-hermes-gateway.md) |
 
-P3 的 GP 管理、快照证据、AI 分类审核、微信绑定与持久化 outbox **已在 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并至 `main`**（合并提交 `3048ef48`）；全仓审查整改及通知分片、退订／解绑并发修复 **已在 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并**（合并提交 `2c98e53`）。针对性 Review 整改及质量／PostgreSQL 集成 CI 已通过，但 **代码合并不是产品验收**：真实新华财经 MCP、DeepSeek、Hermes/iLink sidecar 和两名微信用户跨日送达均未核验，P3-01～P3-04 仍保持 `[ ]`。运行开关 `P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED` 均默认关闭。详见 [实施与整改日志](logs/2026-10-22-P3-implementation.md)、[PR #6 整改日志](logs/2026-10-22-repo-review-remediation.md) 与 [联调和上线闸门](P3-OPERATIONS.md)。
+P3 的 GP 管理、快照证据、AI 分类审核、微信绑定与持久化 outbox **已在 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并至 `main`**（合并提交 `3048ef48`）；全仓审查整改及通知分片、退订／解绑并发修复 **已在 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并**（合并提交 `2c98e53`）。针对性 Review 整改及质量／PostgreSQL 集成 CI 已通过。Hermes Weixin/iLink 单账号网关已部署并连接，但 **代码合并和单账号渠道连接都不是产品验收**：真实新华财经 MCP 与 DeepSeek 业务链路、平台绑定 bridge 和两名微信用户跨日送达仍待核验，P3-01～P3-04 仍保持 `[ ]`。运行开关 `P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED` 均默认关闭。详见 [实施与整改日志](logs/2026-10-22-P3-implementation.md)、[Hermes 网关部署日志](logs/2026-10-22-P4-hermes-gateway.md)、[PR #6 整改日志](logs/2026-10-22-repo-review-remediation.md) 与 [联调和上线闸门](P3-OPERATIONS.md)。
 
 P3 出口：用户实际验证两个账号、两类定向消息及跨日送达；数据源无法证明的投资事件不推送为确定事实。
 
@@ -70,7 +72,7 @@ P3 出口：用户实际验证两个账号、两类定向消息及跨日送达�
 | 状态 | ID | 工作及完成标准 | 日志 |
 |---|---|---|---|
 | [x] | P4-01 | 完成旧版 `ai-work-mvp` 及关联资源的归档清单和校验 | [只读复核记录](logs/2026-10-22-P4-field-refresh.md)、[火山云旧应用归档](logs/2026-10-22-P4-old-app-archive.md)；用户确认旧版本归档留存即可，不要求异地备份或恢复演练 |
-| [ ] | P4-02 | 保留操作系统及其他服务，在原实例部署新平台及 HTTPS；核对 `.config/` 凭据读取权限；明确仍运行的旧组件退役范围和共享资源影响 | [隔离部署日志](logs/2026-10-22-P4-volcengine-deploy.md)、[公网入口切换记录](logs/2026-10-22-P4-field-refresh.md)、[旧应用归档记录](logs/2026-10-22-P4-old-app-archive.md)；新平台已接管该 IP 的 HTTPS；旧发布目录与 WeKnora 容器/卷仍保留，旧组件退役处置待办 |
+| [ ] | P4-02 | 保留操作系统及其他服务，在原实例部署新平台及 HTTPS；核对 `.config/` 凭据读取权限；明确仍运行的旧组件退役范围和共享资源影响 | [隔离部署日志](logs/2026-10-22-P4-volcengine-deploy.md)、[公网入口切换记录](logs/2026-10-22-P4-field-refresh.md)、[Hermes 网关部署日志](logs/2026-10-22-P4-hermes-gateway.md)、[旧应用归档记录](logs/2026-10-22-P4-old-app-archive.md)；新平台已接管该 IP 的 HTTPS、Hermes 网关已连接 Weixin；旧发布目录与 WeKnora 容器/卷仍保留，旧组件退役处置待办 |
 | [ ] | P4-03 | 完成新平台监控、费用记录、备份恢复验证、操作说明和回退路径；不在日志中记录凭据 | — |
 | [ ] | P4-04 | 组织员工试用，记录关键链路通过、缺口和试运行状态；上线结论与遗留项写入最终日志 | [现场复核记录](logs/2026-10-22-P4-field-refresh.md)、[资讯不可用现场修复](logs/2026-10-22-P4-04-news-availability.md)；管理员登录已由用户确认、两名员工已注册；员工本人仍需复核关注赛道、日报与热点状态，并完成两个账号的数据隔离试用 |
 

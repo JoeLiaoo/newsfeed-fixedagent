@@ -2,7 +2,7 @@
 
 ## 当前状态与启用权限
 
-截至 2026-10-22，P3 基础管线经 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并，审查整改和通知分片／并发投递修复经 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并；PR #6 的[质量及 PostgreSQL 17 集成 CI](https://github.com/JoeLiaoo/newsfeed-fixedagent/actions/runs/39697739947) 成功。以上只验证代码与测试环境：实际新华财经 MCP、DeepSeek、Hermes/iLink 渠道尚未联调，P3-01～P3-04 **仍未达到业务验收**。
+截至 2026-10-22，P3 基础管线经 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并，审查整改和通知分片／并发投递修复经 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并；PR #6 的[质量及 PostgreSQL 17 集成 CI](https://github.com/JoeLiaoo/newsfeed-fixedagent/actions/runs/39697739947) 成功。Hermes Weixin/iLink 独立网关现已部署到火山云并连接单个 bot 身份；私聊使用配对审批、群聊关闭。实际新华财经 MCP、DeepSeek 持续业务链路、平台网页绑定 bridge 及两名用户跨日送达仍未验收，P3-01～P3-04 **仍保持未完成**。部署证据见[Hermes 网关日志](logs/2026-10-22-P4-hermes-gateway.md)。
 
 部署包含代码和迁移 **不等于允许激活**。未取得供应商接口及数据展示/转发授权、完成业务核对、微信 sidecar 联调和两名用户连续三天试投前，三个 `P3_*_ENABLED` 必须保持 `false`。部署与试运行还受 P4 的新平台备份和恢复运维要求约束；旧版 `ai-work-mvp` 已归档留存，不要求旧版恢复演练。
 
