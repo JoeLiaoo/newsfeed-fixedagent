@@ -29,7 +29,10 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
     const [binding]=await sql`SELECT status,RIGHT(recipient_id,4) AS recipient_suffix,bound_at FROM member_weixin_bindings WHERE user_id=${user.id}`;
     const history=await sql`SELECT kind,local_date::text AS date,status,part_index,attempts,error_code,accepted_at FROM member_notification_outbox WHERE user_id=${user.id} ORDER BY created_at DESC,part_index DESC LIMIT 60`;
     const [channel]=await sql`SELECT channel_state,last_inbound_at FROM member_ilink_accounts WHERE user_id=${user.id}`;
-    return {settings,binding:binding??null,history,bindingAvailable:ilinkConfigured(),channel:channel??null};
+    const [scan]=await sql<{session_hash:string;qr_url:string;status:string;expires_at:Date}[]>`SELECT session_hash,qr_url,status,expires_at
+      FROM member_ilink_logins WHERE user_id=${user.id} AND expires_at>now()`;
+    return {settings,binding:binding??null,history,bindingAvailable:ilinkConfigured(),channel:channel??null,
+      scan:scan?.session_hash===sessionHash(req)?{status:scan.status,qrUrl:scan.qr_url,expiresAt:scan.expires_at}:null};
   });
   app.put("/api/v1/membership/notifications",async(req,reply)=>{
     const user=await member(req,reply);if(!user)return;
