@@ -44,7 +44,7 @@
 - [全仓审查问题修复日志](logs/2026-10-22-repo-review-remediation.md)
 - [文档治理更新日志](logs/2026-10-22-repo-docs-governance.md)
 - [进度汇报文档同步日志](logs/2026-10-22-progress-report-docs.md)
-- [Hermes Weixin/iLink 网关部署日志](logs/2026-10-22-P4-hermes-gateway.md)
+- [Hermes Weixin/iLink 网关部署日志](logs/2026-10-22-P4-hermes-gateway.md)；[PR #13](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/13) 已合并（merge commit `0e3d3345929396fc60f92bdf3f0e856724b989e8`）。
 
 状态表记录任务验收，日志记录代码、验证证据和未完成事项；如有冲突，以明确的验收标准为准并立即修正文档。
 
