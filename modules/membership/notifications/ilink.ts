@@ -57,7 +57,7 @@ export async function ilinkRequest(base:string,path:string,options:{
   const raw=await response.text();
   if(raw.length>512_000)throw new Error("ilink_response_too_large");
   const value=obj(JSON.parse(raw));
-  if(typeof value.ret==="number"&&value.ret!==0)throw Object.assign(new Error("ilink_ret_"+value.ret),{ret:value.ret,errcode:value.errcode});
+  if(typeof value.ret==="number"&&value.ret!==0)throw Object.assign(new Error("ilink_ret_"+value.ret+"_"+str(value.errmsg,128)),{ret:value.ret,errcode:value.errcode});
   return value;
 }
 export async function createIlinkQr(fetcher?:typeof fetch){
@@ -97,7 +97,7 @@ export async function sendIlinkText(account:IlinkAccount,text:string,id:string,f
 }
 export async function pollIlinkInbox(account:IlinkAccount,fetcher?:typeof fetch){
   const response=await ilinkRequest(account.base,"/ilink/bot/getupdates",{
-    token:account.token,fetcher,timeoutMs:12500,
+    token:account.token,fetcher,timeoutMs:39000,
     payload:{get_updates_buf:account.cursor??"",base_info:baseInfo},
   });
   const messages=Array.isArray(response.msgs)?response.msgs.map(obj):[];
