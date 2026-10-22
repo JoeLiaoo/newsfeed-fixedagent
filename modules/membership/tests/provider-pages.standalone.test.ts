@@ -51,3 +51,25 @@ test("provider inventory pages require stable identity and internally consistent
   });
   assert.equal(truncated.reason,"page_limit");
 });
+
+test("provider pagination follows explicit next offsets and uses record IDs before investee IDs",async()=>{
+  assert.equal(investmentRowIdentity({record_id:"record-1",company_id:"investee-1"}),"record_id:record-1");
+  const offsets:number[]=[];
+  const result=await collectProviderPages({
+    pageSize:50,maxPages:10,identity:investmentRowIdentity,
+    fetchPage:async(offset)=>{
+      offsets.push(offset);
+      return offset===0
+        ? {rows:[{record_id:"record-1",company_id:"investee-1"}],total:null,hasMore:true,nextOffset:7}
+        : {rows:[{record_id:"record-2",company_id:"investee-2"}],total:null,hasMore:false,nextOffset:null};
+    },
+  });
+  assert.deepEqual(offsets,[0,7]);
+  assert.equal(result.complete,true);
+
+  const invalid=await collectProviderPages({
+    pageSize:50,maxPages:10,identity:investmentRowIdentity,
+    fetchPage:async()=>({rows:[{record_id:"record-1"}],total:null,hasMore:true,nextOffset:0}),
+  });
+  assert.equal(invalid.reason,"invalid_next_offset");
+});

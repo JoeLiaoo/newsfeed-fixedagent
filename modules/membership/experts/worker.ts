@@ -46,8 +46,11 @@ async function companyCandidates(name: string) {
 
 export async function investmentEvidence(call: XinhuaCall, query: string, queryType: string) {
   const inventory = await collectProviderPages<Record<string, unknown>>({
-    pageSize: 100, maxPages: 10, identity: investmentRowIdentity,
-    fetchPage: async (offset, limit) => parseInvestmentPage(await call("get_direct_investment", { query, query_type: queryType, limit, offset })),
+    pageSize: 50, maxPages: 10, identity: investmentRowIdentity,
+    fetchPage: async (offset, limit) => parseInvestmentPage(await call("get_direct_investment", {
+      query, query_type: queryType, limit, offset,
+      time: { start: "1900-01-01", end: null, missing_policy: "include_missing_last" },
+    })),
   });
   const capped = inventory.rows.slice(0, 500);
   return {

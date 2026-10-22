@@ -13,25 +13,35 @@ test("confirmed entity identity rejects same-name company with another unique ID
   assert.deepEqual(verifySelectedEntity({ ...selected, creditCode: "91310000ABCDEF1234" }, { company_name: "同名企业", credit_code: "91310000ABCDEF1234" }), { ok: true });
 });
 
-test("mock Xinhua profile lookup follows the selected ID and only falls back to an exact credit code", async () => {
+test("mock Xinhua profile lookup uses schema-supported selectors and verifies the selected entity", async () => {
   const selected = { id: "company-A", name: "同名企业", status: null, creditCode: null, address: null, startDate: null };
-  const requests: Array<{ query: string; query_type: string }> = [];
+  const requests: Array<Record<string, unknown>> = [];
   const profile = await querySelectedCompanyProfile(async (_tool, args) => {
-    requests.push(args as { query: string; query_type: string });
+    requests.push(args);
     return { company_id: "company-A", company_name: "同名企业" };
   }, selected);
-  assert.deepEqual(requests, [{ query: "company-A", query_type: "company_id" }]);
-  assert.equal(profile.query, "company-A");
-  await assert.rejects(querySelectedCompanyProfile(async () => { throw new Error("ID lookup unsupported"); }, selected), /xinhua_identity_unverified/);
+  assert.equal(requests[0]?.query, "同名企业");
+  assert.equal(requests[0]?.query_type, "company_name");
+  assert.equal(profile.query, "同名企业");
   const withCode = { ...selected, creditCode: "91310000ABCDEF1234" };
-  const fallbackCalls: string[] = [];
-  const fallback = await querySelectedCompanyProfile(async (_tool, args) => {
-    fallbackCalls.push(String(args.query));
-    if (args.query_type === "company_id") throw new Error("unsupported");
-    return { company_name: "同名企业", credit_code: "91310000ABCDEF1234" };
+  const codeCalls: Array<Record<string, unknown>> = [];
+  const byCode = await querySelectedCompanyProfile(async (_tool, args) => {
+    codeCalls.push(args);
+    return { company_id: "company-A", company_name: "同名企业", credit_code: withCode.creditCode };
   }, withCode);
-  assert.deepEqual(fallbackCalls, ["company-A", "91310000ABCDEF1234"]);
-  assert.equal(fallback.queryType, "credit_code");
+  assert.equal(codeCalls.length, 1);
+  assert.equal(codeCalls[0]?.query, withCode.creditCode);
+  assert.equal(codeCalls[0]?.query_type, "credit_code");
+  assert.equal(byCode.queryType, "credit_code");
+
+  const fallbackCalls: Array<Record<string, unknown>> = [];
+  const fallback = await querySelectedCompanyProfile(async (_tool, args) => {
+    fallbackCalls.push(args);
+    if (args.query_type === "credit_code") return { not_found: true };
+    return { company_id: "company-A", company_name: "同名企业", credit_code: "91310000ABCDEF1234" };
+  }, withCode);
+  assert.deepEqual(fallbackCalls.map(call => call.query_type), ["credit_code", "company_name"]);
+  assert.equal(fallback.queryType, "company_name");
 });
 
 test("investment parsing preserves numeric fields, top-level arrays, nested pages and completeness metadata", () => {
@@ -39,9 +49,19 @@ test("investment parsing preserves numeric fields, top-level arrays, nested page
   assert.equal(page.rows.length, 1);
   assert.equal(page.total, 3);
   assert.equal(page.hasMore, true);
+  const livePage = parseInvestmentPage({
+    direct_investment_info: [{ record_id: "provider-row-1", company_id: "investee-1", dates: "2025-12-31" }],
+    pagination: { limit: 50, offset: 0, count: 1, has_more: true, next_offset: 1 },
+  });
+  assert.equal(livePage.total, null, "pagination.count is this page's count, not the inventory total");
+  assert.equal(livePage.hasMore, true);
+  assert.equal(livePage.nextOffset, 1);
+  assert.equal(parseInvestmentPage({ direct_investment_info: [{ record_id: "r1" }], pagination: { count: 1, has_more: true, next_offset: "bad" } }).nextOffset, Number.NaN);
   const [row] = mapInvestmentEvidence(page.rows, "测试工具");
   assert.equal(row?.pct, "12.5");
   assert.equal(row?.subscribed, "3000");
+  const normalized = mapInvestmentEvidence([{ company_name: "公司", dates: "2025-12-31", update_time: "2026-01-02" }], "测试工具")[0];
+  assert.equal(normalized?.date, null, "provider data dates are not investment event dates");
   assert.equal(parseInvestmentPage([{ company_name: "A" }, { company_name: "B" }]).rows.length, 2);
 });
 
@@ -50,15 +70,15 @@ test("mock Xinhua pagination reports all pages and flags a provider that repeats
   const complete = await investmentEvidence(async (_tool, args) => {
     const offset = Number(args.offset);
     offsets.push(offset);
-    const size = offset === 0 ? 100 : 20;
-    return { data: { items: Array.from({ length: size }, (_, index) => ({ company_id: `company-${offset + index}`, company_name: `被投企业${offset + index}`, stock_percent: 15 })) }, total_count: 120, has_more: offset === 0 };
+    const size = offset === 0 ? 50 : 20;
+    return { direct_investment_info: Array.from({ length: size }, (_, index) => ({ record_id: `record-${offset + index}`, company_id: `company-${offset + index}`, company_name: `被投企业${offset + index}`, stock_percent: 15 })), pagination: { count: size, has_more: offset === 0, next_offset: offset === 0 ? 50 : null } };
   }, "selected-company", "company_id");
-  assert.deepEqual(offsets, [0, 100]);
-  assert.equal(complete.rows.length, 120);
-  assert.equal(complete.total, 120);
-  assert.equal(complete.fetched, 120);
+  assert.deepEqual(offsets, [0, 50]);
+  assert.equal(complete.rows.length, 70);
+  assert.equal(complete.total, null, "page count metadata is not a total inventory count");
+  assert.equal(complete.fetched, 70);
   assert.equal(complete.partial, false);
-  const repeated = await investmentEvidence(async () => ({ data: { items: Array.from({ length: 100 }, (_, index) => ({ company_id: `same-${index}`, company_name: `被投企业${index}` })) } }), "selected-company", "company_id");
+  const repeated = await investmentEvidence(async () => ({ data: { items: Array.from({ length: 50 }, (_, index) => ({ record_id: `same-${index}`, company_id: `company-${index}`, company_name: `被投企业${index}` })) }, pagination: { count: 50, has_more: true, next_offset: 50 } }), "selected-company", "company_id");
   assert.equal(repeated.partial, true);
 });
 

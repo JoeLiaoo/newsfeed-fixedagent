@@ -1,0 +1,37 @@
+# Compose override for an isolated Volcengine release behind host Nginx.
+# Supply RELEASE_ID from the checked out commit. Keep credentials outside this tree.
+services:
+  setup:
+    image: citic-newsfeed:${RELEASE_ID:?set RELEASE_ID to the release commit}
+    build:
+      context: .
+      dockerfile: Dockerfile.volcengine
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+    volumes:
+      - /opt/citic-newsfeed/shared/credentials:/run/credentials:ro
+  api:
+    image: citic-newsfeed:${RELEASE_ID:?set RELEASE_ID to the release commit}
+    build:
+      context: .
+      dockerfile: Dockerfile.volcengine
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+    volumes:
+      - /opt/citic-newsfeed/shared/credentials:/run/credentials:ro
+  worker:
+    image: citic-newsfeed:${RELEASE_ID:?set RELEASE_ID to the release commit}
+    build:
+      context: .
+      dockerfile: Dockerfile.volcengine
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+    volumes:
+      - /opt/citic-newsfeed/shared/credentials:/run/credentials:ro
+  web:
+    image: citic-newsfeed:${RELEASE_ID:?set RELEASE_ID to the release commit}
+    build:
+      context: .
+      dockerfile: Dockerfile.volcengine
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}

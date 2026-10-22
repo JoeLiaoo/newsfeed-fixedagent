@@ -2,7 +2,7 @@
 
 ## 范围与证据等级
 
-本矩阵对照仓库当前代码、`docs/PLAN.md` v0.65、随仓库提供的新华财经企业基础信息 MCP PDF，以及 `reference/SKILL.md`。这是**静态材料和代码对照**：本次没有读取凭据、调用 DeepSeek 或新华财经 MCP，也没有验证真实账号返回的 `listTools` schema。PDF 未列出的能力均记为“未证实”，不能据代码传入参数推定服务商支持。
+本矩阵对照仓库当前代码、`docs/PLAN.md` v0.65、随仓库提供的新华财经企业基础信息 MCP PDF、`reference/SKILL.md`，并纳入 2026-10-22 在隔离部署 API 容器内进行的实际连通抽测。实时工具 schema、样例结果和边界见[抽测日志](logs/2026-10-22-P0-live-providers.md)。密钥值及完整供应商响应均未记录。抽测覆盖单次模型调用、一个主体画像和一组单页投资结果，不代表持续服务、全部 GP 或跨页边界已验收。
 
 ## P0-01：服务端配置读取与权限边界
 
@@ -11,8 +11,8 @@
 | 读取位置 | `packages/backend/src/config.ts` 的 `credential(group, name)` 仅由服务端代码调用。环境变量优先于分组 dotenv 文件；分组文件位于 `AIHOT_CREDENTIALS_DIR` 指定目录，默认名为 `models.env`、`collectors.env` 等。环境未提供对应值时，DeepSeek 和新华财经密钥还会回退读取仓库根目录 `.config/deepseek-api-key.json`、`.config/xinhua-mcp-key.json`。这两个文件按原始文本读取并 `trim`，不解析 JSON。 |
 | DeepSeek | 内置专家和 GP 赛道分类使用 `model: "default"`。该模型需要 `LLM_BASE_URL`、`LLM_MODEL` 及 `LLM_API_KEY` 或 `DEEPSEEK_API_KEY`；请求发送到 `${LLM_BASE_URL}/chat/completions`，密钥只放在后端出站 `Authorization: Bearer` 请求头。另有 `deepseek-flash` 具名预设，使用 `DEEPSEEK_BASE_URL` 和 `DEEPSEEK_API_KEY`，但专家代码当前明确选择 `default`。 |
 | 新华财经 | `XINHUA_MCP_API_KEY` 属于 `collectors` 凭据组。MCP URL 默认指向企业基础信息服务；可由 `XINHUA_MCP_COMPANY_URL` 覆盖，但代码只接受 HTTPS 且主机必须是 `mcp.cnfic.com.cn`，并拒绝重定向。工具调用使用 Bearer token，只允许 `modules/membership/experts/catalog.ts` 中的固定工具集。 |
-| 启用闸门 | `MODEL_CALLS_ENABLED` 在应用配置加载时读取，代码默认 `false`；改值后需重启对应后端/worker。P3 GP 同步另受 `P3_GP_SYNC_ENABLED` 保护，默认关闭。配置密钥不等于已发出请求。 |
-| 启动检查 | 生产 API 启动检查会话、图片签名密钥及站点额外必需项；当前没有把 DeepSeek/Xinhua 设为启动必需项。因此缺少外部凭据不会自动阻止生产进程启动，调用阶段会返回未配置/服务商错误。 |
+| 启用闸门 | `MODEL_CALLS_ENABLED` 在应用配置加载时读取，代码默认 `false`；改值后需重启对应后端/worker。P3 GP 同步另受 `P3_GP_SYNC_ENABLED` 保护，默认关闭。2026-10-22 已在 API 容器用供应商密钥完成单次 DeepSeek 请求；此抽测未启用应用模型功能或 P3 开关。 |
+| 启动检查 | 生产 API 启动检查会话、图片签名密钥及站点额外必需项；当前没有把 DeepSeek/Xinhua 设为启动必需项。因此缺少外部凭据不会自动阻止生产进程启动，调用阶段会返回未配置/服务商错误。实际抽测只证明当前挂载凭据在抽测时可用。 |
 | 数据边界 | 凭据不下发浏览器。专家和 GP worker 将业务输入发往配置的模型或 MCP 服务；模型调用回执保存脱敏请求摘要/哈希、用量和供应商响应，专家响应按既有七天生命周期清理规则处理。供应商的数据处理、保留和展示/转发授权尚未核验。 |
 | CI 边界 | 当前 GitHub Actions 文档/质量工作流没有注入 `DEEPSEEK_API_KEY` 或 `XINHUA_MCP_API_KEY`；自动化使用 stub/mock，不能据此证明线上凭据可用。GitHub 仓库 Secret 也不会自动成为本地、云端任务或服务器进程的环境变量。 |
 
@@ -37,17 +37,17 @@ DEEPSEEK_API_KEY=<redacted>
 XINHUA_MCP_API_KEY=<redacted>
 ```
 
-如果沿用兼容文件，`.config/deepseek-api-key.json` 和 `.config/xinhua-mcp-key.json` 的文件内容是单行原始密钥文本，不是 JSON 对象。`.config/` 与 `.env` 已列入 `.gitignore`。部署时仍须核验 `AIHOT_CREDENTIALS_DIR` 的实际挂载路径、后端/worker 服务账号的只读权限和文件权限；本次没有连接服务器，也没有检查实际凭据文件。
+如果沿用兼容文件，`.config/deepseek-api-key.json` 和 `.config/xinhua-mcp-key.json` 的文件内容是单行原始密钥文本，不是 JSON 对象。`.config/` 与 `.env` 已列入 `.gitignore`。本次在服务器确认凭据挂载路径、API/worker 容器可读性与宿主机权限，并从 API 容器完成单次连通抽测；没有读取或输出凭据值。真实供应商授权范围仍待核验。
 
 ## 新华财经工具与实际代码
 
-以下工具 schema 来自随仓库的 `zjs_company` PDF。表中的“代码行为”只描述本仓库当前调用，不代表服务商实时 schema 已验证。
+静态能力列来自随仓库的 `zjs_company` PDF；实际 schema 列结合 2026-10-22 的授权账号 `listTools` 和调用结果。单次实测覆盖的主体、页数有限。
 
 | 工具 | PDF 所列能力/字段 | 当前代码行为 | 对照结论 |
 |---|---|---|---|
 | `fuzzy_search_company_list` | 关键词检索；`keyword`、`limit`、`offset`；候选 `company_id`、名称、状态、信用代码、地址、成立日期；结果有 `total` 和分页信息。 | `companyCandidates()` 传 `keyword/limit/offset`，最多取首 10 个候选交由员工选择；画像前保存候选 ID 和名称。 | 静态字段基本吻合；代码只取一页/10 项，候选不是全量名单。 |
-| `get_company_profile` | `query_type` 列为 `auto`、`credit_code`、`company_name`、`stock_code`、`stock_short_name`；画像含 `company_id`、`company_name`、`credit_code`、`company_status_name`、`start_date`、注册资本等。PDF 未列 `company_id` 查询类型。 | `querySelectedCompanyProfile()` 首先发送 `query_type="company_id"`；只有调用抛异常且候选有完整信用代码时才回退为 `credit_code`，然后校验返回 ID/信用代码/名称。 | **未证实/阻塞真实联调**：代码使用的 `company_id` 查询类型不在静态 schema 中；如果服务商以成功响应返回 `not_found` 而非抛错，当前回退也不会触发。需通过授权账号实际 `listTools` 与脱敏响应确认后再定映射。 |
-| `get_direct_investment` | 输入只列 `query`、`query_type`。返回 `direct_investment_info[]`，字段包括 `record_id`、被投企业 `company_id/company_name`、投资方 `stock_name/stock_type`、`stock_percent`、认缴/实缴金额及单位、认缴日 `shoud_date`、实缴日 `capi_date`、数据日期 `dates`、插入时间 `insert_time`、更新时间 `update_time`、删除标记 `is_del`。PDF 未列 `limit/offset`、`total` 或 `has_more`。 | 代码传 `query/query_type/limit/offset`；分页器要求稳定 ID 与明确完成信号，解析器寻找 `direct_investment_info`、total 和 has-more 字段。GP 归一化以被投企业 ID 为主要去重键；保存完整原始行。 | **未证实/阻塞完整同步验收**：PDF 没有证明分页参数和完成信号存在。若真实响应没有总量/分页完成元数据，当前分页器会保守地把结果记为不完整，不建立可用基线。代码的 `dataDate` 不读取 PDF 字段 `dates`；`record_id` 也未作为 canonical `provider_event_id` 或主要去重键。 |
+| `get_company_profile` | PDF 的 `query_type` 枚举为 `auto`、`credit_code`、`company_name`、`stock_code`、`stock_short_name`；不列 `company_id`。实测实时枚举相同；按信用代码查询返回匹配的主体 ID、名称和信用代码。 | `querySelectedCompanyProfile()` 使用支持的 `credit_code`，没有信用代码时使用候选的准确公司名称；校验返回主体身份。实测的唯一候选以信用代码查询通过。 | `company_id` 查询类型不受支持已确认；实现已改用受支持的查询方式。单次主体样例已通过，其他候选冲突和名称变化仍需逐项验收。 |
+| `get_direct_investment` | PDF 仅列 `query`、`query_type`，未列分页；实时 schema 支持 `limit`（最大 50）、`offset`，响应有 `has_more`、`next_offset`。样例字段包括 `record_id`、被投主体、投资方、比例、认缴/实缴、`shoud_date`、`capi_date`、`dates`、插入/更新时间及删除标记。 | 调用显式请求历史范围和缺失日期记录，每页最多 50。解析器把 `pagination.count` 解释为当前页行数，不当作总量；使用 `has_more`/`next_offset`。样例返回 13 行、`has_more=false`，13 行都有稳定 `record_id`。 | 实时 schema 与单页样例验证通过；跨页分页、超过 500 行的安全截断、多主体全量同步尚未实测。分页器遇到无效/不递进 offset 会显式标记不完整，避免误报成功。 |
 | `get_company_shareholder` | 当前股东列表，含股东名称/类型/比例、认缴/实缴金额与日期、数据日期等。 | 在允许列表中，但首个专家和 GP 同步当前不调用。 | 可作当前股权关系核查的候选证据；不能单独代替 GP 对外投资历史事件或关联方控制权规则。 |
 | `get_company_annual_report_investment_info` | 年报对外投资披露，含报告年度、`publish_date`、被投企业名称及证件号码、插入/更新时间。 | 在允许列表中，但当前首个专家/GP worker 不调用。 | 年报发布日期只代表披露时间；该工具未在静态文档中给出投资实际发生日期。可用于后续历史披露交叉核验，尚未实现。 |
 
@@ -66,7 +66,7 @@ XINHUA_MCP_API_KEY=<redacted>
 | 金额/币种/持股比例 | `should_capi`、`should_capi_value`、`should_capi_unit`、`real_capi*`、`stock_percent` | 原始行进入证据；代码不做单位/币种标准化。不得将认缴额当作融资额或已实缴额。 |
 | 投资发生日期 | PDF 的 `shoud_date`（认缴出资日期）、`capi_date`（实缴出资日期） | 两者均有各自法律/业务语义，不能自动等同投资发生日。PDF 没有清晰标示独立的投资事件发生日期；没有独立证据时保持未知。当前 P3 审核允许管理员录入 `approved_event_date` 和独立来源 URL。 |
 | 对外披露时间 | 年报工具的 `publish_date` | 仅适用于对应年报披露，不等于直接投资发生时间；直接投资接口未列通用披露时间。 |
-| 数据日期、供应商时间 | 直接投资 `dates`、`insert_time`、`update_time` | `dates` 是数据日期、`insert_time` 是插入时间、`update_time` 是更新时间。当前代码映射 `update_time`，但未映射 `dates`/`insert_time`；三者均不能替代投资发生日期。 |
+| 数据日期、供应商时间 | 直接投资 `dates`、`insert_time`、`update_time` | `dates` 是数据日期、`insert_time` 是插入时间、`update_time` 是更新时间。当前代码将 `dates` 映射为 `dataDate`，并单独保留原始行；三者均不能替代投资发生日期。 |
 | 平台发现时间 | 本地 snapshot capture / `first_seen_at` | 由平台记录，只能说明平台何时首次观察到关系；不能证明投资何时发生。首个完整快照中的记录被标作 baseline，后续首次出现为 observed。 |
 | 赛道、证据状态、修订 | DeepSeek 建议、管理员复核和独立来源 | 模型输出只是建议；需人工批准并保留审核状态/修订，不得把低证据模型分类作为投资事实。 |
 | 来源 URL | 独立事实来源与管理员审核字段 | 新华财经直接投资 schema 未列可供公众核验的原始 URL；服务商记录/快照不能自动满足独立来源 URL 要求。 |
