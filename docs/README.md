@@ -12,6 +12,7 @@
 - [P3 iLink 扫码协议、身份隔离及部署后验收](P3-ILINK-QR-DESIGN.md)：PR #15 的代码实现范围、安全边界与双员工真实验收；仅适用于订阅通知，不等同于 Hermes Agent 多 Bot 聊天。
 - [贡献与仓库治理](../CONTRIBUTING.md) / [Agent 开发约定](../AGENTS.md)：分支、PR、设计系统、日志、保密与验证规则。
 - [全仓架构与实现审查（2026-10-22）](REPO-REVIEW-2026-10-22.md)：基于 `13a89a5` 的风险、复现证据及建议演进顺序。
+- [PR #15 文档与仓库治理检查](logs/2026-10-22-pr15-docs-governance.md)：多 Bot 凭据隔离、发布闸门、代码 CI 与部署后双用户真机验收的职责划分。
 - [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 及通知投递复审的实现、验证和剩余边界；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 已合并。
 - [文档治理更新记录](logs/2026-10-22-repo-docs-governance.md)：文档状态、索引去重及合并后同步规则；[PR #7](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/7) 已合并（`409a2a7`）。
 
