@@ -17,6 +17,7 @@
 - [文档治理更新记录](logs/2026-10-22-repo-docs-governance.md)：文档状态、索引去重及合并后同步规则；[PR #7](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/7) 已合并（`409a2a7`）。
 - [P3 功能开关启用记录](logs/2026-10-22-P3-flags-enabled.md)：按用户指示在火山云启用扫码、GP 同步、通知生成与投递，并记录启用时的数据状态和验收缺口。
 - [P3 个人设置与扫码请求修复](logs/2026-10-22-P3-04-profile-qr-fix.md)：定位扫码请求被拒原因，记录个人设置入口和请求修复。
+- [P3 服务端确认扫码绑定](logs/2026-10-22-P3-04-server-side-binding.md)：扫码后服务器未记录绑定的现场原因，worker 自行确认扫码会话、页面可见性轮询、渠道失败状态与首条消息连接确认。
 
 ## 阶段文档
 

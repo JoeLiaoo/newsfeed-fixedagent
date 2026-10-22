@@ -1,6 +1,7 @@
 import {createHash} from "node:crypto";
 import type { FastifyInstance,FastifyReply,FastifyRequest } from "fastify";
 import {createIlinkQr,decryptSecret,encryptSecret,ilinkConfigured,pollIlinkQr,trustedIlinkBase} from "./ilink.ts";
+import { completeIlinkBinding } from "./binding.ts";
 import { sql } from "@aihot/backend/db";
 import type { MemberSession } from "../server.ts";
 
@@ -65,15 +66,16 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
     const user=await member(req,reply);if(!user)return;
     if(!ilinkConfigured())return reply.code(503).send({error:"ilink_not_configured"});
     const hash=sessionHash(req);if(!hash)return reply.code(401).send({error:"login_required"});
-    const [existing]=await sql`SELECT user_id FROM member_ilink_logins WHERE user_id=${user.id} AND expires_at>now()`;
-    if(existing)return reply.code(429).send({error:"scan_in_progress"});
+    // A live scan blocks a second one; a scan the channel failed on can be replaced.
+    const [existing]=await sql`SELECT user_id,status FROM member_ilink_logins WHERE user_id=${user.id} AND expires_at>now()`;
+    if(existing&&existing.status!=="error")return reply.code(429).send({error:"scan_in_progress"});
     let qr;
     try{qr=await createIlinkQr();}catch{return reply.code(503).send({error:"ilink_qr_unavailable"});}
     const created=await sql`INSERT INTO member_ilink_logins(user_id,session_hash,qr_secret,qr_url,status,api_url,expires_at)
       VALUES(${user.id},${hash},${encryptSecret(qr.code)},${qr.url},'wait',${trustedIlinkBase(undefined)},now()+interval '5 minutes')
       ON CONFLICT (user_id) DO UPDATE SET session_hash=EXCLUDED.session_hash,qr_secret=EXCLUDED.qr_secret,qr_url=EXCLUDED.qr_url,status='wait',
       api_url=EXCLUDED.api_url,expires_at=EXCLUDED.expires_at,last_polled_at=NULL
-      WHERE member_ilink_logins.expires_at<=now() RETURNING user_id`;
+      WHERE member_ilink_logins.expires_at<=now() OR member_ilink_logins.status='error' RETURNING user_id`;
     if(!created.length)return reply.code(429).send({error:"scan_in_progress"});
     return {status:"wait",qrUrl:qr.url,expiresInSeconds:300};
   });
@@ -83,22 +85,30 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
     const hash=sessionHash(req);
     const [login]=await sql<{session_hash:string;qr_secret:string;qr_url:string;api_url:string;status:string;expires_at:Date;last_polled_at:Date|null}[]>`SELECT session_hash,qr_secret,qr_url,api_url,status,expires_at,last_polled_at
       FROM member_ilink_logins WHERE user_id=${user.id}`;
-    if(!login)return {status:"idle"};
+    if(!login){
+      // The worker may have finished the scan while the page was hidden.
+      const [bound]=await sql`SELECT status FROM member_weixin_bindings WHERE user_id=${user.id}`;
+      return bound?.status==="active"?{status:"bound"}:{status:"idle"};
+    }
     if(login.session_hash!==hash||!hash)return reply.code(403).send({error:"scan_session_mismatch"});
     if(login.expires_at.getTime()<Date.now()) {
       await sql`DELETE FROM member_ilink_logins WHERE user_id=${user.id} AND session_hash=${hash}`;
       return {status:"expired"};
     }
     if(login.last_polled_at && Date.now()-login.last_polled_at.getTime()<2500)
-      return {status:login.status,qrUrl:login.qr_url};
+      return login.status==="error"?reply.code(502).send({status:"error",error:"ilink_status_unavailable"}):{status:login.status,qrUrl:login.qr_url};
     const [leased]=await sql`UPDATE member_ilink_logins SET last_polled_at=now()
       WHERE user_id=${user.id} AND session_hash=${hash}
         AND (last_polled_at IS NULL OR last_polled_at<now()-interval '2.5 seconds')
       RETURNING user_id`;
-    if(!leased)return {status:login.status,qrUrl:login.qr_url};
+    if(!leased)return login.status==="error"?reply.code(502).send({status:"error",error:"ilink_status_unavailable"}):{status:login.status,qrUrl:login.qr_url};
     let result;
     try{result=await pollIlinkQr(decryptSecret(login.qr_secret),login.api_url,verification);}
-    catch{return {status:"wait",qrUrl:login.qr_url};}
+    catch{
+      // The channel failed. Say so instead of pretending the scan is still waiting.
+      await sql`UPDATE member_ilink_logins SET status='error' WHERE user_id=${user.id} AND session_hash=${hash}`;
+      return reply.code(502).send({status:"error",error:"ilink_status_unavailable"});
+    }
     if(result.status==="scaned_but_redirect") {
       try{
         const redirect=trustedIlinkBase("https://"+result.redirectHost);
@@ -108,34 +118,10 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
     }
     if(result.status==="confirmed") {
       if(!result.botToken||!result.botId||!result.userId)return reply.code(502).send({error:"incomplete_ilink_identity"});
-      const outcome=await sql.begin(async tx=>{
-        await tx`SELECT pg_advisory_xact_lock(hashtext(${user.id}))`;
-        const [still]=await tx`SELECT user_id FROM member_sessions WHERE token_hash=${hash} AND user_id=${user.id} AND expires_at>now()`;
-        const [active]=await tx`SELECT id FROM member_users WHERE id=${user.id} AND status='active'`;
-        const [current]=await tx`SELECT session_hash,expires_at FROM member_ilink_logins WHERE user_id=${user.id} FOR UPDATE`;
-        if(!still||!active||!current||current.session_hash!==hash||new Date(current.expires_at).getTime()<=Date.now())return "invalid_session";
-        const collision=await tx`SELECT user_id FROM member_weixin_bindings WHERE
-           (recipient_id=${result.userId} AND channel_account_id=${result.botId} OR channel_account_id=${result.botId})
-           AND user_id<>${user.id}`;
-        if(collision.length)return "identity_already_bound";
-        await tx`INSERT INTO member_notification_settings(user_id) VALUES(${user.id}) ON CONFLICT DO NOTHING`;
-        await tx`UPDATE member_notification_settings SET binding_version=binding_version+1,updated_at=now() WHERE user_id=${user.id}`;
-        await tx`INSERT INTO member_ilink_accounts(user_id,recipient_id,channel_account_id,token_ciphertext,api_url,channel_state)
-          VALUES(${user.id},${result.userId},${result.botId},${encryptSecret(result.botToken)},${result.base},'needs_interaction')
-          ON CONFLICT(user_id) DO UPDATE SET recipient_id=EXCLUDED.recipient_id,channel_account_id=EXCLUDED.channel_account_id,
-          token_ciphertext=EXCLUDED.token_ciphertext,api_url=EXCLUDED.api_url,channel_state='needs_interaction',
-          context_ciphertext=NULL,cursor_ciphertext=NULL,last_inbound_at=NULL,updated_at=now()`;
-        await tx`INSERT INTO member_weixin_bindings(user_id,recipient_id,channel_account_id)
-          VALUES(${user.id},${result.userId},${result.botId})
-          ON CONFLICT(user_id) DO UPDATE SET recipient_id=EXCLUDED.recipient_id,channel_account_id=EXCLUDED.channel_account_id,status='active',bound_at=now()`;
-        const cancelled=await tx<{id:string}[]>`UPDATE member_notification_outbox
-          SET status='cancelled',error_code='binding_changed',lease_expires_at=NULL
-          WHERE user_id=${user.id} AND status IN('pending','failed','sending') RETURNING id`;
-        if(cancelled.length)await tx`DELETE FROM member_notification_seen WHERE outbox_id=ANY(${tx.array(cancelled.map(x=>x.id))}::text[])`;
-        await tx`DELETE FROM member_ilink_logins WHERE user_id=${user.id}`;
-        return "ok";
-      });
-      return outcome==="ok"?{status:"bound"}:reply.code(409).send({error:outcome});
+      const outcome=await completeIlinkBinding(user.id,hash,{
+        recipientId:result.userId,channelAccountId:result.botId,botToken:result.botToken,base:result.base});
+      if(outcome==="bound"||outcome==="already_bound")return {status:"bound"};
+      return reply.code(409).send({error:outcome});
     }
     if(result.status==="expired"||result.status==="verify_code_blocked"||result.status==="binded_redirect"){
       await sql`DELETE FROM member_ilink_logins WHERE user_id=${user.id} AND session_hash=${hash}`;

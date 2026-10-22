@@ -9,7 +9,8 @@
     "./gp-queue": "./gp/queue.ts",
     "./gp-sync": "./gp/sync.ts",
     "./notifications-outbox": "./notifications/outbox.ts",
-    "./notifications-inbox": "./notifications/inbox.ts"
+    "./notifications-inbox": "./notifications/inbox.ts",
+    "./notifications-scan": "./notifications/scan.ts"
   },
   "dependencies": {
     "@aihot/backend": "*",
