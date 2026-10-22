@@ -110,7 +110,7 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
       if(!result.botToken||!result.botId||!result.userId)return reply.code(502).send({error:"incomplete_ilink_identity"});
       const outcome=await sql.begin(async tx=>{
         await tx`SELECT pg_advisory_xact_lock(hashtext(${user.id}))`;
-        const [still]=await tx`SELECT id FROM member_sessions WHERE token_hash=${hash} AND user_id=${user.id} AND expires_at>now()`;
+        const [still]=await tx`SELECT user_id FROM member_sessions WHERE token_hash=${hash} AND user_id=${user.id} AND expires_at>now()`;
         const [active]=await tx`SELECT id FROM member_users WHERE id=${user.id} AND status='active'`;
         const [current]=await tx`SELECT session_hash,expires_at FROM member_ilink_logins WHERE user_id=${user.id} FOR UPDATE`;
         if(!still||!active||!current||current.session_hash!==hash||new Date(current.expires_at).getTime()<=Date.now())return "invalid_session";
