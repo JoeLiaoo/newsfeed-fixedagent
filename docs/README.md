@@ -9,6 +9,7 @@
 - [P0 DeepSeek／新华财经配置与字段矩阵](P0-DATA-MATRIX.md)：服务端凭据边界、接口静态 schema、GP 标准事件时间语义和真实联调缺口。
 - [P0 上游基线、接口边界与施工顺序](P0-05-BASELINE.md)：锁定 AIHOT/Hermes 版本与许可，说明产品接口合同、代码目录和迁移顺序。
 - [P0-03/P0-04 外部验收手册](P0-03-04-OPERATIONS.md)：P0-03 已按用户决定不单独试投，扫码绑定、聊天及定向推送并入 P3-04；保留 `ai-work` 盘点记录。
+- [P3 iLink 扫码协议、身份隔离及部署后验收](P3-ILINK-QR-DESIGN.md)：PR #15 的代码实现范围、安全边界与双员工真实验收；仅适用于订阅通知，不等同于 Hermes Agent 多 Bot 聊天。
 - [贡献与仓库治理](../CONTRIBUTING.md) / [Agent 开发约定](../AGENTS.md)：分支、PR、设计系统、日志、保密与验证规则。
 - [全仓架构与实现审查（2026-10-22）](REPO-REVIEW-2026-10-22.md)：基于 `13a89a5` 的风险、复现证据及建议演进顺序。
 - [2026-10-22 审查问题修复记录](logs/2026-10-22-repo-review-remediation.md)：R01–R14 及通知投递复审的实现、验证和剩余边界；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 已合并。
