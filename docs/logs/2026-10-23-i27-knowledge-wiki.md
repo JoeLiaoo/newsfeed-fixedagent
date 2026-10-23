@@ -89,3 +89,10 @@
   - 两名真实员工共用同一共享库、真实中文 PDF 的抽取效果、页面质量与引用跳转未验证。
 
 不要在日志中写入密钥、未脱敏接口响应或用户私人材料。任务只有达到实施计划的完成标准时才能打勾。
+
+
+## PR 实际状态（2026-10-24）
+
+- [PR #34](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/34) 已经二次复审修复并合并，实际 merge `9e8b0846ef5b80e2398b3a0fbc69218027c20b65`，最终代码 head `f007b4d48612951deb66a27c02529d66a153360a`。
+- 最终 quality、postgres-integration、links 全部通过；核心纯函数 17/17，PostgreSQL 集成 25/25。补充修复与真实回归边界见 [复审日志](2026-10-24-P5-pr34-review.md)。
+- 未部署生产；真实 DeepSeek/中文材料效果和 P5-02～P5-04 真实员工验收仍待进行，原未勾选状态保持。
