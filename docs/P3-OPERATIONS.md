@@ -2,21 +2,21 @@
 
 ## 当前状态与启用权限
 
-截至 2026-10-22，P3 基础管线经 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并，审查整改和通知分片／并发投递修复经 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并；PR #6 的[质量及 PostgreSQL 17 集成 CI](https://github.com/JoeLiaoo/newsfeed-fixedagent/actions/runs/39697739947) 成功。Hermes Weixin/iLink 独立网关和平台网页绑定 bridge 已部署到火山云；私聊使用配对审批、群聊关闭。bridge 已通过本机端口与鉴权冒烟检查，实际新华财经 MCP、DeepSeek 持续业务链路、员工微信绑定及两名用户跨日送达仍未验收，P3-01～P3-04 **仍保持未完成**。部署证据见[bridge 日志](logs/2026-10-22-P3-wechat-flow.md)。
+P3 基础管线经 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并，审查整改和通知分片／并发投递修复经 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并；PR #6 的[质量及 PostgreSQL 17 集成 CI](https://github.com/JoeLiaoo/newsfeed-fixedagent/actions/runs/39697739947) 成功。Hermes Weixin/iLink 独立网关、网页绑定 bridge 和 PR #22 扫码交互已部署到火山云。2026-10-23 两个绑定账号各有一条连通性测试通知由 iLink 接受（`accepted=2`），用户已确认两台手机均收到；跨日推送、失效恢复、新华财经与 DeepSeek 持续业务链路及 GP 数据验收仍未完成，P3-01～P3-04 保持未完成。详情见[bridge 日志](logs/2026-10-22-P3-wechat-flow.md)、[PR #22 部署记录](logs/2026-10-23-P4-pr22-deployment.md)、[双用户抽测日志](logs/2026-10-23-P3-04-live-push-smoke.md)及[收件确认记录](logs/2026-10-23-P3-04-handset-receipt.md)。
 
-部署包含代码和迁移 **不等于允许激活**。未取得供应商接口及数据展示/转发授权、完成业务核对、微信 sidecar 联调和两名用户连续三天试投前，三个 `P3_*_ENABLED` 必须保持 `false`。部署与试运行还受 P4 的新平台备份和恢复运维要求约束；旧版 `ai-work-mvp` 已归档留存，不要求旧版恢复演练。
+部署包含代码和迁移不等于业务验收完成。生产四项 P3 开关已按用户指示启用；开关状态不替代供应商数据核验、用户侧收件确认、连续三天试投与跨日恢复验收。部署与试运行还受 P4 的新平台备份和恢复运维要求约束；旧版 `ai-work-mvp` 已归档留存，不要求旧版恢复演练。
 
 ## 安全启动
 
 运行 npm run member:seed-gp（在数据库迁移后）导入候选。初始 9 个候选主体来自 `reference/母基金已投子基金管理人.md`，均为 `candidate`，不自动认定基金管理人等于直接投资 GP。在 `/settings/admin-gps` 确认主体名称、唯一实体 ID、GP/管理人/基金角色及公开证据后，才允许启用监测。首次完整快照作为历史基线；以后新增的投资关系标为 `observed`，不能凭新华财经入库日期或更新时间判定为“当日投资”。管理员提供**独立事实证据 URL + 真实事件日期 + 赛道**后，才可标记为 `verified`，进入每日 GP 汇总。
 
-三个功能开关默认关闭：`P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED`。逐项确认外部联调后再开启，避免未核验的数据触发通知。模型 `MODEL_CALLS_ENABLED=true` 时可建议四大产业细分赛道，结果仅供管理员复核；不允许战略配售标签参与 GP 匹配。
+这三个开关在新环境默认关闭：`P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED`；当前生产实例按用户指示开启。开启状态不代表 GP 内容已核验或定向送达已验收。模型 `MODEL_CALLS_ENABLED=true` 时可建议四大产业细分赛道，结果仅供管理员复核；不允许战略配售标签参与 GP 匹配。
 
 ## 员工扫码绑定与聊天
 
 **2026-10-22 方案决策：** 不使用企业微信或公司审批流程，允许员工在 iLink 会话窗口失效后主动向自己的 bot 发消息恢复推送。选择 [每用户独立 iLink 扫码登录设计](P3-ILINK-QR-DESIGN.md) 为 PR #15 的后续目标：登录网站 → 短期二维码 → 微信扫码确认 → 网站自动绑定。员工不需要网页绑定码或点击二次确认。每个人是否使用独立 bot 是实现细节，当前 PoC 先验证每人一组可用的 iLink bot 身份。
 
-**功能开关已按用户指示启用，真实渠道验收未执行。** [PR #15](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/15)（merge `acef3866367d`）实现个人短时 iLink 扫码授权、可信身份自动绑定、每用户独立加密凭据与长轮询上下文、按人定向推送及互动后恢复，UI 自动刷新。该代码已随 `main` 提交 `5031e2c04dec382263d05b38484b0cfaabeaa15b` 发布到火山云；迁移 `0152`–`0155` 已应用。2026-10-22 已配置受保护的 `P3_ILINK_CREDENTIAL_KEY`，并在 API 与 worker 启用 `P3_ILINK_BINDING_ENABLED`、`P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED`。启用时有 3 个 active 平台账号、0 个 active 微信绑定、0 个 iLink 账号、0 条通知 outbox、0 个 GP watchlist/active GP，因此未发生实际微信投递或 GP 同步；扫码入口现向 active 账号开放。双用户真实扫码、数据源联调、微信送达与跨日试验仍待执行，P3-04 未勾选。普通 Hermes Agent 多 Bot 对话尚未接入新推送通道（旧 Hermes 网关保留），与推送授权分离。部署细节见[最新发布记录](logs/2026-10-22-P4-latest-deployment.md)及[开关启用记录](logs/2026-10-22-P3-flags-enabled.md)。
+**历史状态（2026-10-22）：** [PR #15](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/15)（merge `acef3866367d`）实现个人短时 iLink 扫码授权、可信身份自动绑定、每用户独立加密凭据与长轮询上下文、按人定向推送及互动后恢复。该代码已随 `main` 提交 `5031e2c04dec382263d05b38484b0cfaabeaa15b` 发布，迁移 `0152`–`0155` 已应用。2026-10-22 按用户指示启用扫码、GP 同步、通知生成与投递四项开关；当日有 3 个 active 平台账号、0 个微信绑定与 0 个 iLink 账号。**最新状态（2026-10-23）：** PR #22 已发布；两个绑定账号各一条测试通知由 iLink 接受，用户确认两台手机均收到。跨日投递、互动窗口失效与恢复仍待确认。普通 Hermes Agent 多 Bot 对话尚未接入新推送通道（旧 Hermes 网关保留），与推送授权分离。部署细节见[PR #22 发布记录](logs/2026-10-23-P4-pr22-deployment.md)、[双用户抽测记录](logs/2026-10-23-P3-04-live-push-smoke.md)、[收件确认记录](logs/2026-10-23-P3-04-handset-receipt.md)及[开关启用记录](logs/2026-10-22-P3-flags-enabled.md)。
 
 上游现有能力及尚需实测的关键差异：
 - [腾讯 openclaw-weixin 协议](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)定义二维码生成与状态轮询，确认后可包含 `ilink_user_id`、`ilink_bot_id`、`bot_token`；还可能有微信端验证码、重复绑定、超时与区域重定向。
