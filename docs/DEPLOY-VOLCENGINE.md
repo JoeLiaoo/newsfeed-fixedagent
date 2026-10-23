@@ -73,6 +73,12 @@
 - 启用时有 3 个 active 平台账号、0 个 active 微信绑定、0 个 iLink 账号、0 条通知 outbox、0 个 GP watchlist/active GP。扫码入口现已开放给 active 账号，但尚无已绑定收件人、待投递通知或 GP 监测对象，因此此次没有触发实际微信投递或 GP 同步。开关启用不代表业务验收完成；双用户真机扫码、数据源联调和实际送达仍待验证。
 - 数据库备份仅完成格式/目录可读检查，不等同于恢复验证。回退应用镜像前须评估 `0152`/`0153` 移除旧表后的兼容性；不要直接恢复旧版应用或回滚数据库。
 
+### PR #19 合并后发布（2026-10-23）
+
+- [PR #19](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/19) 已合并，`main` 合并提交 `a2d67e9a36e2980b55f51a3d1a3c6e231fb89a17` 已部署到火山云。此版本把个人设置子页的返回入口、绑定页标题和微信官方二维码跳转更新到生产。
+- 发布前保存 `.env.before-release-a2d67e9-20261023` 和 `backups/db-before-a2d67e9-20261023.dump`，数据库转储目录检查通过；未执行完整恢复演练。构建时因 Docker Hub 元数据请求停滞，在服务器发布目录内将 Dockerfile 的 Node 基础镜像地址指向已有的国内镜像缓存；该调整没有修改仓库源码。
+- 迁移/种子步骤报告数据库已是最新、26 个信源已存在。web、API、worker 均运行 `citic-newsfeed:a2d67e9a36e2980b55f51a3d1a3c6e231fb89a17`；本机和公网 `/api/health` 均返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 HTTP 200。API 和 worker 四个 P3 开关仍为 `true`，密钥格式检查通过。真实微信扫码与绑定后的投递仍待用户验收；见[部署记录](logs/2026-10-23-P4-pr19-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。

@@ -1,4 +1,6 @@
 import { useCallback,useEffect,useState } from "react";
+import { Link } from "react-router";
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
@@ -61,7 +63,7 @@ export default function NotificationsPage(){
     try{
       const response=await fetch(endpoint+"weixin/start",{method:"POST"});
       const result=await response.json() as Scan&{error?:string};
-      if(response.ok&&result.qrUrl){setScan(result);setMessage("");setScanError("");}
+      if(response.ok&&result.qrUrl){setScan(result);setMessage("");setScanError("");window.location.assign(result.qrUrl);}
       else setMessage(result.error==="scan_in_progress"?"二维码尚未过期，稍后可重试。":"暂时无法生成二维码。");
     }catch{setMessage("网络异常，请重试。");}finally{setBusy(false);}
   }
@@ -70,6 +72,7 @@ export default function NotificationsPage(){
     try{
       const response=await fetch(endpoint+"weixin/verify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({verifyCode})});
       const result=await response.json() as Scan&{error?:string};
+      if(result.error==="scan_replaced")return;
       if(!response.ok){setMessage("微信安全验证未通过。");return;}
       setVerifyCode("");
       if(result.status==="bound"){setScan(null);await reload();setMessage("微信已绑定。");}
@@ -87,7 +90,8 @@ export default function NotificationsPage(){
     }catch{setMessage("网络异常，请重试。");}finally{setBusy(false);}
   }
   return <main className="mx-auto w-full max-w-3xl px-5 py-8">
-    <h1 className="mb-6 text-2xl font-semibold">微信通知</h1>
+    <Button asChild variant="outline" className="mb-5"><Link to="/settings/profile"><ArrowLeft aria-hidden="true" />返回个人设置</Link></Button>
+    <h1 className="mb-6 text-2xl font-semibold">绑定微信</h1>
     {message&&<Alert role="status" className="mb-4">{message}</Alert>}
     <Card className="mb-5"><CardHeader><CardTitle>绑定个人微信</CardTitle></CardHeader><CardContent className="grid gap-3">
       <div className="flex items-center gap-2">
@@ -96,8 +100,7 @@ export default function NotificationsPage(){
       </div>
       {data?.binding?.status!=="active"&&<div className="grid gap-3">
         {scan?.qrUrl?<div className="grid gap-2">
-          <iframe title="微信扫码绑定" className="h-64 w-64 rounded-control border border-line-soft bg-white" src={scan.qrUrl} referrerPolicy="no-referrer" sandbox="allow-scripts allow-same-origin" />
-          <a href={scan.qrUrl} target="_blank" rel="noopener noreferrer" className="text-sm underline">打开微信官方二维码</a>
+          <Button asChild className="justify-self-start"><a href={scan.qrUrl}><ExternalLink aria-hidden="true" />打开微信官方二维码</a></Button>
           <p className="text-sm text-ink-3">{scanStatusText(scan.status)}</p>
           {scan.status==="need_verifycode"&&<div className="flex gap-2">
             <input value={verifyCode} onChange={e=>setVerifyCode(e.target.value)} placeholder="微信要求的验证码" className="min-w-0 rounded-control border border-line px-3 py-2" inputMode="numeric" maxLength={8} />

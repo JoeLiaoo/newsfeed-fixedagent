@@ -83,6 +83,7 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
     const user=await member(req,reply);if(!user)return;
     if(!ilinkConfigured())return reply.code(503).send({error:"ilink_not_configured"});
     const hash=sessionHash(req);
+    const replaced=()=>reply.code(409).send({error:"scan_replaced"});
     const [login]=await sql<{session_hash:string;qr_secret:string;qr_url:string;api_url:string;status:string;expires_at:Date;last_polled_at:Date|null}[]>`SELECT session_hash,qr_secret,qr_url,api_url,status,expires_at,last_polled_at
       FROM member_ilink_logins WHERE user_id=${user.id}`;
     if(!login){
@@ -92,42 +93,65 @@ export function registerNotificationRoutes(app:FastifyInstance,auth:Auth) {
     }
     if(login.session_hash!==hash||!hash)return reply.code(403).send({error:"scan_session_mismatch"});
     if(login.expires_at.getTime()<Date.now()) {
-      await sql`DELETE FROM member_ilink_logins WHERE user_id=${user.id} AND session_hash=${hash}`;
+      const removed=await sql`DELETE FROM member_ilink_logins WHERE user_id=${user.id} AND session_hash=${hash}
+        AND qr_secret=${login.qr_secret} RETURNING user_id`;
+      if(!removed.length)return replaced();
       return {status:"expired"};
     }
-    if(login.last_polled_at && Date.now()-login.last_polled_at.getTime()<2500)
-      return login.status==="error"?reply.code(502).send({status:"error",error:"ilink_status_unavailable"}):{status:login.status,qrUrl:login.qr_url};
+    if(login.last_polled_at && Date.now()-login.last_polled_at.getTime()<2500){
+      const [current]=await sql<{qr_secret:string;status:string;qr_url:string}[]>`SELECT qr_secret,status,qr_url FROM member_ilink_logins WHERE user_id=${user.id}`;
+      if(current?.qr_secret!==login.qr_secret)return replaced();
+      return current.status==="error"?reply.code(502).send({status:"error",error:"ilink_status_unavailable"}):{status:current.status,qrUrl:current.qr_url};
+    }
     const [leased]=await sql`UPDATE member_ilink_logins SET last_polled_at=now()
-      WHERE user_id=${user.id} AND session_hash=${hash}
+      WHERE user_id=${user.id} AND session_hash=${hash} AND qr_secret=${login.qr_secret}
         AND (last_polled_at IS NULL OR last_polled_at<now()-interval '2.5 seconds')
       RETURNING user_id`;
-    if(!leased)return login.status==="error"?reply.code(502).send({status:"error",error:"ilink_status_unavailable"}):{status:login.status,qrUrl:login.qr_url};
+    if(!leased){
+      const [current]=await sql<{qr_secret:string;status:string;qr_url:string}[]>`SELECT qr_secret,status,qr_url FROM member_ilink_logins WHERE user_id=${user.id}`;
+      if(current?.qr_secret!==login.qr_secret)return replaced();
+      return current.status==="error"?reply.code(502).send({status:"error",error:"ilink_status_unavailable"}):{status:current.status,qrUrl:current.qr_url};
+    }
     let result;
     try{result=await pollIlinkQr(decryptSecret(login.qr_secret),login.api_url,verification);}
     catch{
       // The channel failed. Say so instead of pretending the scan is still waiting.
-      await sql`UPDATE member_ilink_logins SET status='error' WHERE user_id=${user.id} AND session_hash=${hash}`;
+      const changed=await sql`UPDATE member_ilink_logins SET status='error'
+        WHERE user_id=${user.id} AND session_hash=${hash} AND qr_secret=${login.qr_secret} RETURNING user_id`;
+      if(!changed.length)return replaced();
       return reply.code(502).send({status:"error",error:"ilink_status_unavailable"});
     }
+    const [current]=await sql<{qr_secret:string}[]>`SELECT qr_secret FROM member_ilink_logins WHERE user_id=${user.id}`;
+    if(current?.qr_secret!==login.qr_secret)return replaced();
     if(result.status==="scaned_but_redirect") {
       try{
         const redirect=trustedIlinkBase("https://"+result.redirectHost);
-        await sql`UPDATE member_ilink_logins SET api_url=${redirect},status='wait' WHERE user_id=${user.id} AND session_hash=${hash}`;
+        const changed=await sql`UPDATE member_ilink_logins SET api_url=${redirect},status='wait'
+          WHERE user_id=${user.id} AND session_hash=${hash} AND qr_secret=${login.qr_secret} RETURNING user_id`;
+        if(!changed.length)return replaced();
       }catch{ return reply.code(502).send({error:"invalid_channel_redirect"}); }
       return {status:"wait",qrUrl:login.qr_url};
     }
     if(result.status==="confirmed") {
       if(!result.botToken||!result.botId||!result.userId)return reply.code(502).send({error:"incomplete_ilink_identity"});
-      const outcome=await completeIlinkBinding(user.id,hash,{
+      const outcome=await completeIlinkBinding(user.id,hash,login.qr_secret,{
         recipientId:result.userId,channelAccountId:result.botId,botToken:result.botToken,base:result.base});
       if(outcome==="bound"||outcome==="already_bound")return {status:"bound"};
+      if(outcome==="invalid_session"){
+        const [after]=await sql<{qr_secret:string}[]>`SELECT qr_secret FROM member_ilink_logins WHERE user_id=${user.id}`;
+        if(after?.qr_secret!==login.qr_secret)return replaced();
+      }
       return reply.code(409).send({error:outcome});
     }
     if(result.status==="expired"||result.status==="verify_code_blocked"||result.status==="binded_redirect"){
-      await sql`DELETE FROM member_ilink_logins WHERE user_id=${user.id} AND session_hash=${hash}`;
+      const removed=await sql`DELETE FROM member_ilink_logins WHERE user_id=${user.id} AND session_hash=${hash}
+        AND qr_secret=${login.qr_secret} RETURNING user_id`;
+      if(!removed.length)return replaced();
       return {status:result.status};
     }
-    await sql`UPDATE member_ilink_logins SET status=${result.status} WHERE user_id=${user.id} AND session_hash=${hash}`;
+    const changed=await sql`UPDATE member_ilink_logins SET status=${result.status}
+      WHERE user_id=${user.id} AND session_hash=${hash} AND qr_secret=${login.qr_secret} RETURNING user_id`;
+    if(!changed.length)return replaced();
     return {status:result.status,qrUrl:login.qr_url};
   }
   app.get("/api/v1/membership/weixin/status",async(req,reply)=>scanStatus(req,reply));

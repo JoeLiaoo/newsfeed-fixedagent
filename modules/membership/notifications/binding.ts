@@ -11,18 +11,21 @@ export type BindingOutcome="bound"|"already_bound"|"invalid_session"|"identity_a
  * transaction, so a second confirmation of the same scan reports the existing binding instead of
  * creating a second one. The web session that started the scan must still be valid.
  */
-export async function completeIlinkBinding(userId:string,sessionHash:string,identity:IlinkIdentity):Promise<BindingOutcome>{
+export async function completeIlinkBinding(userId:string,sessionHash:string,scanSecret:string,identity:IlinkIdentity):Promise<BindingOutcome>{
   return sql.begin(async tx=>{
     await tx`SELECT pg_advisory_xact_lock(hashtext(${userId}))`;
     const [still]=await tx`SELECT user_id FROM member_sessions WHERE token_hash=${sessionHash} AND user_id=${userId} AND expires_at>now()`;
     const [active]=await tx`SELECT id FROM member_users WHERE id=${userId} AND status='active'`;
-    const [current]=await tx<{session_hash:string;expires_at:Date}[]>`SELECT session_hash,expires_at FROM member_ilink_logins WHERE user_id=${userId} FOR UPDATE`;
-    if(!current||current.session_hash!==sessionHash||new Date(current.expires_at).getTime()<=Date.now()){
-      // The scan row is gone: either a concurrent confirmation wrote the binding, or the session ended.
+    const [current]=await tx<{session_hash:string;qr_secret:string;expires_at:Date}[]>`SELECT session_hash,qr_secret,expires_at FROM member_ilink_logins WHERE user_id=${userId} FOR UPDATE`;
+    if(!current){
+      // The scan row is gone: a concurrent confirmation may already have consumed it.
       const [bound]=await tx<{recipient_id:string;channel_account_id:string}[]>`SELECT recipient_id,channel_account_id FROM member_weixin_bindings WHERE user_id=${userId}`;
       if(bound&&bound.recipient_id===identity.recipientId&&bound.channel_account_id===identity.channelAccountId)return "already_bound";
       return "invalid_session";
     }
+    // AES-GCM gives each QR a fresh ciphertext. The same web session may replace a failed QR,
+    // so session_hash alone cannot identify the scan whose channel response just arrived.
+    if(current.session_hash!==sessionHash||current.qr_secret!==scanSecret||new Date(current.expires_at).getTime()<=Date.now())return "invalid_session";
     if(!still||!active)return "invalid_session";
     // One iLink user and one bot belong to one platform account; a second owner is never overwritten.
     const collision=await tx`SELECT user_id FROM member_weixin_bindings
