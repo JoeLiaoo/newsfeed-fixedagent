@@ -57,11 +57,11 @@
   - 窄屏下底部「我的」标签在 `/knowledge` 与 `/knowledge/bases/<id>` 上均点亮。
   - 控制台唯一的 404 是 `/favicon.ico`（改动前即有）。
 
-## 未验证
+## 实现阶段的未验证记录（最终 CI 见文末）
 
 - **PostgreSQL 场景测试未在本机执行**：本机没有可用的 PostgreSQL 或 Docker，`npm test` 与新增的 `knowledge-bases.test.ts` 只能由 CI 的临时数据库跑；改动后的 SQL（`base_id` 过滤、`UPDATE … FROM` 取 `base_id`、库内 `target_key`／slug 前缀）只经过人工核对与类型检查，未在本机跑过真实数据库。
 - **多库的真实材料与真实模型调用未试跑**：编译器在多库下写出重复 slug、跨库引用等情形尚无真实材料可验证。
-- **未合并、未发布**：按指示不在本 issue 部署火山云；生产迁移（5 条）与新页面在上线前需按发布流程执行。
+- **已合并、未发布**：按指示不在本 issue 部署火山云；生产迁移（5 条）与新页面在上线前需按发布流程执行。
 - 未做读屏软件的实际朗读核对，只核对了 `aria-current`、标题层级与可聚焦顺序。
 
 ## 风险与下一步
@@ -79,5 +79,11 @@
 - 首轮意见：[PR 评论](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/38#issuecomment-6371815269)，审阅版本 `341ec58`。提交者在意见之后提交 `d6b231d`，将两处数组比较改为内容比较，进入第二轮复审。
 - 复审仍发现合法原始 slug 加知识库前缀后超过问答引用的 80 字符上限。按已授权流程直接修复：保持 Builder 原始 slug 上限 80，发布后的引用标识上限为 128，并要求模型原样复制完整标识；保留共享库旧地址，不截断或重写页面名。
 - 数据库多库场景改用 70 字符原始 slug，实际经过上传、构建、发布、answers 路由以及引用校验；同时验证共享库旧地址。独立回归覆盖 80 字符原始名加库前缀及碰撞后缀后的 105 字符引用。
-- 本地 knowledge-core 19/19、类型检查、Web 构建、306 个文档链接及 diff 空白检查均通过；最终 head CI 待完成后记录。数据库用例依赖 CI 临时 PostgreSQL，本环境未运行数据库。
-- PR 尚未合并；未部署生产、未执行生产迁移，真实员工与真实模型验收仍待完成。P5-02～P5-04 勾选不变。
+- 本地 knowledge-core 19/19、类型检查、Web 构建、306 个文档链接及 diff 空白检查均通过；最终 head `9484fed` 的 quality、postgres-integration 和 links CI 全通过，数据库 26/26。数据库用例依赖 CI 临时 PostgreSQL，本环境未运行数据库。
+- PR 已合并（`78c0fa322447c60349680017d870b0e3c72aaffc`）；未部署生产、未执行生产迁移，真实员工与真实模型验收仍待完成。P5-02～P5-04 勾选不变。
+
+## 合并确认
+
+- 已读取 GitHub 实际状态：PR #38 为 merged，合并提交 `78c0fa322447c60349680017d870b0e3c72aaffc`；最终审阅 head 为 `9484fed7778f1895f917fb9d5ad8a4f0ef242d02`。
+- [质量与数据库 CI](https://github.com/JoeLiaoo/newsfeed-fixedagent/actions/runs/40003196564) 和 [文档 CI](https://github.com/JoeLiaoo/newsfeed-fixedagent/actions/runs/40003196407) 全通过；26 项数据库测试包含长库内页面标识的完整问答路径。
+- 未部署、未执行生产迁移。真实模型效果与员工验收待执行，P5 状态不变。
