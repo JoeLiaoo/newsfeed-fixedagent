@@ -6,6 +6,7 @@ import { GP_QUEUE } from "@citic/membership/gp-queue";
 import { syncAllGps,classifyPendingGps } from "@citic/membership/gp-sync";
 import { generateDueNotifications,dispatchOutbox,cleanupP3Data } from "@citic/membership/notifications-outbox";
 import {pollMemberIlinkInboxes} from "@citic/membership/notifications-inbox";
+import {confirmPendingIlinkBindings} from "@citic/membership/notifications-scan";
 
 export const SERVER_MODULES: readonly ServerModule[] = [{
   name: "membership",
@@ -15,6 +16,8 @@ export const SERVER_MODULES: readonly ServerModule[] = [{
     {name: "membership.notifications-generate",cron:"0 9-23 * * *",missed:"once",run:generateDueNotifications,when:()=>process.env.P3_NOTIFICATIONS_ENABLED==="true"},
     {name: "membership.notifications-dispatch",cron:"*/5 * * * *",run:dispatchOutbox,when:()=>process.env.P3_DELIVERY_ENABLED==="true"},
     {name: "membership.ilink-inbound",cron:"* * * * *",run:pollMemberIlinkInboxes,when:()=>process.env.P3_ILINK_BINDING_ENABLED==="true"},
+    // The page may be hidden while the phone confirms the QR; the server finishes the scan itself.
+    {name: "membership.ilink-scan",cron:"* * * * *",run:confirmPendingIlinkBindings,when:()=>process.env.P3_ILINK_BINDING_ENABLED==="true"},
     { name: "membership.gp-sync", cron: "0 * * * *", when: () => process.env.P3_GP_SYNC_ENABLED === "true", run: syncAllGps },
     { name: "membership.gp-classify", cron: "*/5 * * * *", when: () => process.env.P3_GP_SYNC_ENABLED === "true" && process.env.MODEL_CALLS_ENABLED === "true", run: classifyPendingGps }, {
     name: "membership.expert-recover",
