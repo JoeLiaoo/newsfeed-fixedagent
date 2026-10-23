@@ -8,6 +8,27 @@ export class SourceCheckTimeout extends Error {
   constructor() { super("source_check_timeout"); this.name = "SourceCheckTimeout"; }
 }
 
+/** The whole employee check (site discovery, listing, article pages) gets one budget. */
+export const SOURCE_CHECK_TIMEOUT_MS = 40_000;
+
+/**
+ * The check's budget in milliseconds. The environment may shorten it (a test) or lengthen it (a slow
+ * site); without it the check gets 40 seconds.
+ */
+export function sourceCheckTimeoutMs(): number {
+  const raw = Number(process.env.MEMBER_SOURCE_CHECK_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : SOURCE_CHECK_TIMEOUT_MS;
+}
+
+/**
+ * A check that ran out of time saves nothing: the reason it stopped travels on, so the page says the
+ * check timed out instead of that the site refused.
+ */
+export function throwIfCheckAborted(signal: AbortSignal): void {
+  if (!signal.aborted) return;
+  throw signal.reason ?? new SourceCheckTimeout();
+}
+
 export type SourceCheckCode =
   | "source_unreachable"
   | "source_timeout"

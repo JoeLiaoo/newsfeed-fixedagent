@@ -170,7 +170,9 @@ function applyDetail(c: CollectionCandidate, got: Awaited<ReturnType<typeof fetc
  * unread, so the same page is not bought on every run and an archive does not use up the budget. A
  * spent provider budget defers the remaining pages; other failures are reported, not thrown, and a page
  * the site refuses is not read again under the same rules. Each run continues after the last attempted
- * identity, so a recoverable failure cannot keep taking the budget from all later entries.
+ * identity, so a recoverable failure cannot keep taking the budget from all later entries. The caller's
+ * own deadline (an employee check's budget) is not such a failure: it stops the reads it started and
+ * travels on, so the caller reports the timeout instead of pages it could not read.
  */
 export async function enrichDetails(candidates: CollectionCandidate[], source: SourceRow, known: Map<string, StoredDetail>,
   opts: { budget: number; after?: string; datedOut: DatedOut; admits: (c: Candidate) => boolean; signal?: AbortSignal }): Promise<DetailReads> {
@@ -180,6 +182,8 @@ export async function enrichDetails(candidates: CollectionCandidate[], source: S
   const start = candidates.findIndex(c => c.identityKey === opts.after) + 1;
   const ordered = [...candidates.slice(start), ...candidates.slice(0, start)];
   for (const c of ordered) {
+    // A check that ran out of time stops the reads it started: the next page is not read at all.
+    opts.signal?.throwIfAborted();
     const stored = known.get(c.identityKey!);
     if (stored && stored.source_id !== source.id) continue;
     const listingTitle = c.title;
@@ -202,6 +206,9 @@ export async function enrichDetails(candidates: CollectionCandidate[], source: S
         reads.listed.set(c.identityKey!, listed);
       } catch (error) {
         if (shutdownSignal.signal.aborted) throw error;
+        // The caller's deadline ended this read: the reason it stopped travels on, so a check that
+        // ran out of time is not reported as a page the site refused.
+        if (opts.signal?.aborted) throw opts.signal.reason ?? error;
         // A spent provider budget is not the source's failure.
         if (error instanceof BudgetExceededError) providerBudgetSpent = true;
         else reads.failures.push({ url: c.url, error: String(error instanceof Error ? error.message : error).slice(0, 300) });

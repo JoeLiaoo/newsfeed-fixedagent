@@ -10,7 +10,7 @@ import { getDailyDigest } from "./notifications/digest.ts";
 import { beijingDate } from "@aihot/contracts/time";
 import { listedCondition } from "@aihot/backend/publication/scope";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
-import { SourceCheckTimeout, sourceCheckFailure } from "./sources.ts";
+import { SourceCheckTimeout, sourceCheckFailure, sourceCheckTimeoutMs, throwIfCheckAborted } from "./sources.ts";
 import * as cheerio from "cheerio";
 import { PRESET_TAGS } from "./catalog.ts";
 
@@ -20,8 +20,6 @@ const maxAge = 14 * 24 * 60 * 60;
 const attempts = new Map<string, { count: number; until: number }>();
 const sourcePreviews = new Map<string, number[]>();
 const activeSourcePreviews = new Set<string>();
-/** The whole employee check (site discovery, listing, article pages) gets one budget. */
-const SOURCE_CHECK_TIMEOUT_MS = 40_000;
 /** Article pages one employee check reads; the stored source keeps its own budget for its own runs. */
 const SOURCE_PREVIEW_DETAIL_BUDGET = 3;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -271,8 +269,9 @@ export function registerMembership(app: FastifyInstance) {
     activeSourcePreviews.add(key);
     // One budget for the whole check (site discovery, listing, article pages): a check that runs out
     // of time stops the reads it started instead of leaving them running.
+    const budgetMs = sourceCheckTimeoutMs();
     const controller = new AbortController();
-    const deadline = setTimeout(() => controller.abort(new SourceCheckTimeout()), SOURCE_CHECK_TIMEOUT_MS);
+    const deadline = setTimeout(() => controller.abort(new SourceCheckTimeout()), budgetMs);
     deadline.unref?.();
     let previewRunning = false;
     try {
@@ -304,8 +303,11 @@ export function registerMembership(app: FastifyInstance) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const preview = await Promise.race([
         previewTask,
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new SourceCheckTimeout()), SOURCE_CHECK_TIMEOUT_MS + 5_000); }),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new SourceCheckTimeout()), budgetMs + 5_000); }),
       ]).finally(() => { if (timer) clearTimeout(timer); });
+      // A check that ran out of time saves nothing: the source is not created after the deadline, and
+      // the page is told the check timed out rather than that the site refused.
+      throwIfCheckAborted(controller.signal);
       if (!preview.count) return reply.code(422).send({ error: "source_no_articles" });
       (sourceConfig._aihot as Record<string, unknown>).previewCount = preview.count;
       const created = await createSource({ id, name: name.trim(), kind: sourceKind, config: sourceConfig, interval_minutes: 30, tags: ["员工提交"], site_fulltext: false, syndicate_fulltext: false }, `member:${user.id}`);
