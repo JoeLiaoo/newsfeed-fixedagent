@@ -1,6 +1,8 @@
 // The parts of the shared library that need no database: what a material is, what can be read out of
 // it, how a draft becomes a page, what the machine can check, and how a question finds its pages.
 import assert from "node:assert/strict";
+import { verifyAnswer } from "../knowledge/answer.ts";
+import { answerSchema } from "../knowledge/schema.ts";
 import { test } from "node:test";
 import { strToU8, zipSync } from "fflate";
 import { capExtraction, detectFormat, extractMaterial } from "../knowledge/extract.ts";
@@ -321,4 +323,26 @@ test("updating one material replaces only that material's contribution", () => {
   const merged = aggregateContributions([contributionOf({ versionId: "v1", documentId: "doc-1", page: updated }), second]);
   assert.deepEqual(merged.page.stances.map(stance => stance.analyst), ["张三", "王五"], "新材料只换掉自己的那一份");
   assert.equal(merged.page.stances.length, 2);
+});
+
+
+test("answer provenance rejects mixed or unbound citations and derives freshness from the evidence used", () => {
+  const pages = [{
+    slug: page.slug, title: page.title, pageType: page.pageType, targetName: page.targetName,
+    track: page.track, bodyMd: "published", coverage: { ...coverageOf(page), last_report: "2026-10-01" }, revisionId: "r1",
+    citations: [{ id: "old", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2024-01-01", anchor: null, sourceTitle: "old", versionId: "v-old" }],
+  }];
+  const citation = { label: "1", pageSlug: page.slug, citationId: "old" };
+  const valid = { answer: "历史观点[^1]", citations: [citation] };
+  const trusted = verifyAnswer(answerSchema.parse({ ...valid, coverage: { analysts: 200 } }), pages, new Date("2026-10-24T00:00:00Z"));
+  assert.equal(trusted.coverage.analysts, 1);
+  assert.equal(trusted.coverage.reports, 1);
+  assert.equal(trusted.freshness[0]?.tier, "stale", "a fresh page must not make an old cited report fresh");
+  for (const invalid of [
+    { answer: "valid[^1] unverified[^2]", citations: [citation, { ...citation, label: "2", citationId: "invented" }] },
+    { answer: "unbound[^2]", citations: [citation] },
+    { answer: "claim without marker", citations: [citation] },
+    { ...valid, citations: [citation, citation] },
+    { ...valid, citations: [{ ...citation, pageSlug: "not-routed" }] },
+  ]) assert.throws(() => verifyAnswer(invalid, pages), /knowledge_answer_unverified/);
 });

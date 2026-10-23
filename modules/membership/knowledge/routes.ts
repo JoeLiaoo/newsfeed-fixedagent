@@ -396,17 +396,14 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     if (!routed.length) return reply.code(404).send({ error: "knowledge_no_coverage", message: TASK_ERRORS.knowledge_no_coverage });
     let answer;
     try { answer = await answerQuestion(question, routed.map(entry => entry.page)); }
-    catch { return reply.code(502).send({ error: "knowledge_answer_failed", message: TASK_ERRORS.knowledge_answer_failed }); }
+    catch (error) {
+      const code = error instanceof Error && error.message === "knowledge_answer_unverified" ? "knowledge_answer_unverified" : "knowledge_answer_failed";
+      return reply.code(502).send({ error: code, message: TASK_ERRORS[code] });
+    }
     const citations = answer.citations;
     // An answer that rests on nothing the library can show is not an answer: it is refused.
     if (!citations.length) return reply.code(502).send({ error: "knowledge_answer_unverified", message: TASK_ERRORS.knowledge_answer_unverified });
-    const labels = new Set(citations.map(citation => citation.label));
-    // A footnote without a source is dropped rather than left pointing nowhere.
-    let bodyText = answer.answer
-      .split("\n")
-      .filter(line => !/^\[\^[^\]]+\]:/.test(line.trim()))
-      .join("\n")
-      .replace(/\[\^(\d+)\]/g, (whole, label: string) => labels.has(label) ? whole : "");
+    let bodyText = answer.answer;
     const usedPages = new Set(citations.map(citation => citation.pageSlug));
     for (const citation of citations) {
       const needle = `[^${citation.label}]`;
@@ -414,8 +411,26 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       bodyText = bodyText.replaceAll(needle, () => replacement);
     }
     const id = randomUUID();
-    await sql`INSERT INTO member_wiki_answers(id, question, answer_md, citations, coverage, freshness, pages, asked_by) VALUES (${id}, ${question}, ${bodyText}, ${sql.json(citations as never)}, ${sql.json(answer.coverage as never)}, ${sql.json(answer.freshness as never)}, ${sql.json([...usedPages])}, ${user.id})`;
-    await sql`INSERT INTO member_wiki_audit_events(id, actor_id, event_type, detail) VALUES (${randomUUID()}, ${user.id}, 'knowledge.answer.created', ${sql.json({ question: question.slice(0, 200), pages: [...usedPages] })})`;
+    // Model calls may outlive a withdrawal or a new publication. Lock the same documents before
+    // pages as publishing/withdrawal do, then verify the exact revisions before recording an answer.
+    const saved = await sql.begin(async tx => {
+      const versionIds = [...new Set(citations.map(citation => citation.versionId))];
+      const documents = await tx<{ id: string; status: string }[]>`
+        SELECT d.id, d.status FROM member_wiki_documents d
+        WHERE d.id IN (SELECT document_id FROM member_wiki_document_versions WHERE id IN ${tx(versionIds)})
+        ORDER BY d.id FOR SHARE`;
+      if (!documents.length || documents.some(document => document.status !== "active")) return false;
+      const current = await tx<{ slug: string; status: string }[]>`SELECT slug, status FROM member_wiki_pages WHERE slug IN ${tx([...usedPages])} ORDER BY slug FOR SHARE`;
+      if (current.length !== usedPages.size || current.some(page => page.status !== "published")) return false;
+      for (const entry of routed.filter(entry => usedPages.has(entry.page.slug))) {
+        const revisions = await tx<{ id: string }[]>`SELECT r.id FROM member_wiki_page_revisions r JOIN member_wiki_pages p ON p.id=r.page_id WHERE p.slug=${entry.page.slug} ORDER BY r.revision DESC LIMIT 1`;
+        if (revisions[0]?.id !== entry.page.revisionId) return false;
+      }
+      await tx`INSERT INTO member_wiki_answers(id, question, answer_md, citations, coverage, freshness, pages, asked_by) VALUES (${id}, ${question}, ${bodyText}, ${tx.json(citations as never)}, ${tx.json(answer.coverage as never)}, ${tx.json(answer.freshness as never)}, ${tx.json([...usedPages])}, ${user.id})`;
+      await tx`INSERT INTO member_wiki_audit_events(id, actor_id, event_type, detail) VALUES (${randomUUID()}, ${user.id}, 'knowledge.answer.created', ${tx.json({ question: question.slice(0, 200), pages: [...usedPages] })})`;
+      return true;
+    });
+    if (!saved) return reply.code(409).send({ error: "knowledge_answer_unverified", message: "知识页已更新或撤回，请重新提问。" });
     return {
       answer: { id, question, answerMd: bodyText, citations, coverage: answer.coverage, freshness: answer.freshness, pages: [...usedPages], references: routed.map(entry => ({ slug: entry.page.slug, score: entry.score })) },
     };

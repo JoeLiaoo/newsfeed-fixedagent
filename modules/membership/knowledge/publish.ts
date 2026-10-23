@@ -73,11 +73,16 @@ async function lockPage(tx: Tx, page: PageDraft, targetKey: string): Promise<{ i
   throw new Error("knowledge_page_slug_conflict");
 }
 
+/** Serialize all affected targets in one order, even before their page rows exist. */
+async function lockTargets(tx: Tx, keys: string[]): Promise<void> {
+  for (const key of [...new Set(keys)].sort()) {
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+  }
+}
+
 /** The material's own contribution: what this material says about the target, and nothing else. */
 async function writeContribution(tx: Tx, contribution: ContributionRow): Promise<void> {
   const stored = { page: contribution.page, sources: contribution.sources, attribution: contribution.attribution, materialTitle: contribution.materialTitle };
-  // A build that changed its mind about its pages leaves the pages it no longer holds behind.
-  await tx`UPDATE member_wiki_contributions SET status='superseded', updated_at=now() WHERE version_id = ${contribution.versionId} AND status='active'`;
   await tx`
     INSERT INTO member_wiki_contributions(id, target_key, slug, page_type, target_type, target_name, track, document_id, version_id, version_no, task_id, status, contribution)
     VALUES (${randomUUID()}, ${contribution.targetKey}, ${contribution.slug}, ${contribution.page.pageType}, ${contribution.page.targetType}, ${contribution.page.targetName}, ${contribution.page.track}, ${contribution.documentId}, ${contribution.versionId}, ${contribution.versionNo}, ${contribution.taskId}, 'active', ${tx.json(stored as never)})
@@ -156,10 +161,15 @@ export async function publishBuildPages(tx: Tx, args: {
   attribution: string | null;
   materialTitle: string | null;
 }): Promise<WrittenPage[]> {
-  const previous = await tx<{ target_key: string }[]>`SELECT DISTINCT target_key FROM member_wiki_contributions WHERE version_id = ${args.versionId} AND status = 'active'`;
+  // Remember every target of the previous published version before retiring it, including targets
+  // the new draft no longer contains. Retire once per build, never once per page.
+  const previous = await tx<{ target_key: string }[]>`SELECT DISTINCT target_key FROM member_wiki_contributions WHERE document_id = ${args.documentId} AND status = 'active'`;
+  const keys = [...new Set([...previous.map(row => row.target_key), ...args.draft.pages.map(targetKeyOf)])].sort();
+  await lockTargets(tx, keys);
+  await tx`UPDATE member_wiki_contributions SET status='superseded', updated_at=now() WHERE document_id = ${args.documentId} AND status='active'`;
   const written: WrittenPage[] = [];
   const touched = new Set<string>();
-  for (const page of args.draft.pages) {
+  for (const page of [...args.draft.pages].sort((a, b) => targetKeyOf(a).localeCompare(targetKeyOf(b)) || a.slug.localeCompare(b.slug))) {
     const targetKey = targetKeyOf(page);
     touched.add(targetKey);
     const pageRow = await lockPage(tx, page, targetKey);
@@ -199,8 +209,9 @@ export async function publishBuildPages(tx: Tx, args: {
  * again without it. A page that held nothing else goes down with it.
  */
 export async function withdrawDocumentPages(tx: Tx, documentId: string): Promise<{ withdrawn: string[]; rebuilt: string[] }> {
-  await tx`UPDATE member_wiki_contributions SET status='withdrawn', updated_at=now() WHERE document_id = ${documentId} AND status <> 'withdrawn'`;
   const targets = await tx<{ target_key: string }[]>`SELECT DISTINCT target_key FROM member_wiki_contributions WHERE document_id = ${documentId}`;
+  await lockTargets(tx, targets.map(row => row.target_key));
+  await tx`UPDATE member_wiki_contributions SET status='withdrawn', updated_at=now() WHERE document_id = ${documentId} AND status <> 'withdrawn'`;
   const withdrawn: string[] = [];
   const rebuilt: string[] = [];
   for (const target of targets) {

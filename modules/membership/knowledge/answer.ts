@@ -5,7 +5,7 @@
 import { chatJson } from "@aihot/backend/providers/llm";
 import { FRESHNESS_LABELS, freshnessTier, type FreshnessTier } from "./catalog.ts";
 import { ANSWER_SYSTEM } from "./prompts.ts";
-import { answerSchema } from "./schema.ts";
+import { answerSchema, type AnswerResult } from "./schema.ts";
 import { aggregateCoverage, type RoutableCitation, type RoutablePage } from "./routing.ts";
 import { isKnownDate, type Coverage } from "./render.ts";
 
@@ -116,17 +116,24 @@ export async function answerQuestion(question: string, pages: RoutablePage[], no
     temperature: 0.2,
     maxTokens: 4000,
   });
+  return verifyAnswer(answer.data, pages, now);
+}
+
+/** Reject unsupported footnotes as a whole; removing an angle marker must not preserve its claim. */
+export function verifyAnswer(answer: AnswerResult, pages: RoutablePage[], now = new Date()): TrustedAnswer {
+  const fail = () => { throw new Error("knowledge_answer_unverified"); };
+  const body = answer.answer.split("\n").filter(line => !/^\[\^[^\]]+\]:/.test(line.trim())).join("\n");
+  const usedLabels = new Set([...body.matchAll(/\[\^([^\]]+)\]/g)].map(match => match[1]!));
   const byId = new Map<string, { page: RoutablePage; citation: RoutableCitation }>();
   for (const page of pages) for (const citation of page.citations) byId.set(citation.id, { page, citation });
   const citations: TrustedCitation[] = [];
   const seen = new Set<string>();
-  for (const claim of answer.data.citations) {
+  for (const claim of answer.citations) {
     const found = byId.get(claim.citationId);
-    // A citation this turn never offered, or one the model put on another page, is not kept.
-    if (!found) continue;
-    if (claim.pageSlug && claim.pageSlug !== found.page.slug) continue;
-    if (seen.has(claim.citationId)) continue;
-    seen.add(claim.citationId);
+    // A citation this turn never offered, or assigned to another page, rejects the answer.
+    if (!found || claim.pageSlug !== found.page.slug || !/^\d+$/.test(claim.label) || seen.has(claim.label)) return fail();
+    seen.add(claim.label);
+    if (!usedLabels.has(claim.label)) continue;
     citations.push({
       label: claim.label,
       pageSlug: found.page.slug,
@@ -139,9 +146,11 @@ export async function answerQuestion(question: string, pages: RoutablePage[], no
       versionId: found.citation.versionId,
     });
   }
+  if (!citations.length || [...usedLabels].some(label => !seen.has(label))) return fail();
   const used = new Set(citations.map(citation => citation.pageSlug));
-  const freshness = pages
-    .filter(page => used.has(page.slug))
-    .map(page => ({ pageSlug: page.slug, tier: freshnessTier(page.coverage.last_report, now), lastReport: page.coverage.last_report }));
-  return { answer: answer.data.answer, citations, coverage: coverageOfCitations(citations), freshness };
+  const freshness = [...used].map(pageSlug => {
+    const coverage = coverageOfCitations(citations.filter(citation => citation.pageSlug === pageSlug));
+    return { pageSlug, tier: freshnessTier(coverage.last_report, now), lastReport: coverage.last_report };
+  });
+  return { answer: body, citations, coverage: coverageOfCitations(citations), freshness };
 }

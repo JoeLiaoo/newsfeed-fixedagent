@@ -1,6 +1,7 @@
 // The shared library under two employees and a visitor: who may see what, what an upload does to the
 // library, what a failed build leaves behind, and what an answer is allowed to rest on.
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { installModules } from "@aihot/backend/modules";
 import { closeDb, sql } from "@aihot/backend/db";
@@ -8,7 +9,7 @@ import { stopBossNow } from "@aihot/backend/jobs/queue";
 import { buildApp } from "../../../apps/api/src/app.ts";
 import { SERVER_MODULES } from "../../../site/modules/server.ts";
 import { stub, tag } from "../../../tests/setup.ts";
-import { runWikiTask } from "../knowledge/worker.ts";
+import { runWikiTask, recoverWikiTasks } from "../knowledge/worker.ts";
 
 const DRAFT = {
   pages: [{
@@ -71,7 +72,9 @@ const SECOND_DRAFT = {
 
 const AUDIT = { verdict: "pass_with_issues", corrections: [], findings: [{ level: "advisory", category: "coverage-mismatch", target: "view-company-example", message: "覆盖较薄", evidence: null }], notes: "" };
 
-const provider = await stub((_hit, req) => {
+let auditHook: (() => Promise<void>) | null = null;
+let answerHook: (() => Promise<void>) | null = null;
+const provider = await stub(async (_hit, req) => {
   const body = JSON.parse(req.body) as { messages: Array<{ role: string; content: string }> };
   const system = body.messages.find(message => message.role === "system")?.content ?? "";
   const user = body.messages.find(message => message.role === "user")?.content ?? "";
@@ -80,12 +83,20 @@ const provider = await stub((_hit, req) => {
     if (user.includes("另一券商")) return { choices: [{ message: { content: JSON.stringify(SECOND_DRAFT) } }] };
     return { choices: [{ message: { content: JSON.stringify(DRAFT) } }] };
   }
-  if (system.includes("Auditor")) return { choices: [{ message: { content: JSON.stringify(AUDIT) } }] };
+  if (system.includes("Auditor")) {
+    const hook = auditHook;
+    auditHook = null;
+    await hook?.();
+    return { choices: [{ message: { content: JSON.stringify(AUDIT) } }] };
+  }
+  const hook = answerHook;
+  answerHook = null;
+  await hook?.();
   // The answer may only cite the citations it was given, and it may not say who said it: the
   // library reads the attribution from its own record.
-  const payload = JSON.parse(user) as { availablePages: Array<{ slug: string; availableCitations: Array<{ citationId: string }> }> };
+  const payload = JSON.parse(user) as { availablePages: Array<{ slug: string; availableCitations: Array<{ citationId: string; analyst: string | null }> }> };
   const page = payload.availablePages[0];
-  const citation = page?.availableCitations[0];
+  const citation = page?.availableCitations.find(item => item.analyst === "张三") ?? page?.availableCitations[0];
   const citationId = user.includes("BADCITATION") ? "00000000-0000-0000-0000-000000000000" : citation?.citationId ?? "";
   return {
     choices: [{ message: { content: JSON.stringify({
@@ -208,6 +219,11 @@ test("the shared library is open to approved employees and closed to everyone el
   assert.equal(second2.versionNo, 2);
   assert.equal((await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages/view-company-example", headers: { cookie: cookies[1]!, ...common } })).statusCode, 200);
 
+  await runWikiTask(second2.taskId);
+  const replaced = await sql`SELECT version_id FROM member_wiki_contributions WHERE document_id=${uploaded.documentId} AND status='active'`;
+  assert.deepEqual(replaced.map(row => row.version_id), [second2.versionId], "the new version replaces this material's old contribution");
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_contributions WHERE document_id <> ${uploaded.documentId} AND status='active'`)[0]?.n, 3, "other materials survive the update");
+
   // A build whose model output is unusable fails, and leaves the published page alone.
   const broken = await app.inject({
     method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[0]!, ...common },
@@ -279,4 +295,83 @@ test("the shared library is open to approved employees and closed to everyone el
   assert.equal(gonePage.statusCode, 404, "下架的知识页对其他员工不再可读");
   const auditorPage = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages/view-company-example", headers: { cookie: cookies[0]!, ...common } });
   assert.equal(auditorPage.statusCode, 410, "上传者本人看得到它已下架");
+
+  // Ready checkpoints keep these tests independent of model wording and upload throttles. The
+  // actual worker, transactions, leases, routes and PostgreSQL rows still run normally.
+  const [owner] = await sql<{ id: string }[]>`SELECT id FROM member_users WHERE username=${accounts[0]!.username}`;
+  const basePage = structuredClone(DRAFT.pages[0]!);
+  const extraPage = { ...basePage, slug: "view-another-company", title: "另一公司", targetName: "另一公司" };
+  async function seed(pages: typeof DRAFT.pages, options: { documentId?: string; versionNo?: number; audit?: boolean } = {}) {
+    const documentId = options.documentId ?? randomUUID();
+    const versionId = randomUUID();
+    const taskId = randomUUID();
+    if (!options.documentId) await sql`INSERT INTO member_wiki_documents(id,uploader_id,title) VALUES (${documentId},${owner!.id},'checkpoint fixture')`;
+    await sql`INSERT INTO member_wiki_document_versions(id,document_id,version_no,uploader_id,file_name,media_type,format,byte_size,sha256,body,extracted_text,extraction_status)
+      VALUES (${versionId},${documentId},${options.versionNo ?? 1},${owner!.id},'checkpoint.md','text/markdown','markdown',7,${versionId},${Buffer.from('fixture')},'fixture','available')`;
+    const draft = { ...DRAFT, pages };
+    await sql`INSERT INTO member_wiki_tasks(id,document_id,version_id,uploader_id,draft,audit)
+      VALUES (${taskId},${documentId},${versionId},${owner!.id},${sql.json(draft)},${options.audit === false ? null : sql.json(AUDIT)})`;
+    return { documentId, versionId, taskId };
+  }
+  const multi = await seed([basePage, extraPage]);
+  await runWikiTask(multi.taskId);
+  const multiRows = await sql`SELECT * FROM member_wiki_contributions WHERE version_id=${multi.versionId} AND status='active'`;
+  assert.equal(multiRows.length, 2, "one material may contribute to several targets");
+  const updatedMulti = await seed([extraPage], { documentId: multi.documentId, versionNo: 2 });
+  await runWikiTask(updatedMulti.taskId);
+  const removedPage = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages/view-company-example", headers: { cookie: cookies[2]!, ...common } });
+  assert.equal(removedPage.statusCode, 404, "a removed target must not retain the old version's page");
+  const activeMulti = await sql`SELECT version_id, slug FROM member_wiki_contributions WHERE document_id=${multi.documentId} AND status='active'`;
+  assert.deepEqual(activeMulti.map(row => row.version_id), [updatedMulti.versionId]);
+  assert.equal((await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages/view-another-company", headers: { cookie: cookies[2]!, ...common } })).statusCode, 200);
+  const emptyVersion = await seed([], { documentId: multi.documentId, versionNo: 3 });
+  await runWikiTask(emptyVersion.taskId);
+  await sql`UPDATE member_wiki_tasks SET state='queued' WHERE id=${multi.taskId}`;
+  await runWikiTask(multi.taskId);
+  const stale = await sql`SELECT state,error_code FROM member_wiki_tasks WHERE id=${multi.taskId}`;
+  assert.equal(stale[0]?.error_code, "knowledge_publish_stale", "even an empty newer publication fences out the old worker");
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_contributions WHERE document_id=${multi.documentId} AND status='active'`)[0]?.n, 0);
+
+  const concurrentA = await seed([basePage, extraPage]);
+  const concurrentB = await seed([extraPage, basePage]);
+  await Promise.all([runWikiTask(concurrentA.taskId), runWikiTask(concurrentB.taskId)]);
+  const concurrentStates = await sql`SELECT state FROM member_wiki_tasks WHERE id IN (${concurrentA.taskId},${concurrentB.taskId})`;
+  assert.ok(concurrentStates.every(row => row.state === "succeeded"), "opposite draft order does not deadlock multi-target publication");
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_contributions WHERE document_id IN (${concurrentA.documentId},${concurrentB.documentId}) AND status='active'`)[0]?.n, 4);
+  await Promise.all([concurrentA, concurrentB].map(async entry => {
+    const response = await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/documents/${entry.documentId}/withdraw`, headers: { cookie: cookies[0]!, ...common } });
+    assert.equal(response.statusCode, 200);
+  }));
+
+  const cancelled = await seed([basePage], { audit: false });
+  auditHook = async () => {
+    const response = await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/documents/${cancelled.documentId}/withdraw`, headers: { cookie: cookies[0]!, ...common } });
+    assert.equal(response.statusCode, 200);
+  };
+  await runWikiTask(cancelled.taskId);
+  assert.equal((await sql`SELECT state FROM member_wiki_tasks WHERE id=${cancelled.taskId}`)[0]?.state, "cancelled");
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_contributions WHERE document_id=${cancelled.documentId}`)[0]?.n, 0, "an in-flight model result cannot revive a withdrawn document");
+
+  const recovered = await seed([basePage], { audit: false });
+  auditHook = async () => {
+    await sql`UPDATE member_wiki_tasks SET lease_expires_at=now()-interval '1 minute' WHERE id=${recovered.taskId}`;
+    const recovery = await recoverWikiTasks(async taskId => { assert.equal(taskId, recovered.taskId); });
+    assert.equal(recovery.recovered, 1);
+    await runWikiTask(recovered.taskId);
+  };
+  await runWikiTask(recovered.taskId);
+  assert.equal((await sql`SELECT state FROM member_wiki_tasks WHERE id=${recovered.taskId}`)[0]?.state, "succeeded");
+  const beforeDuplicate = await sql`SELECT count(*)::int AS n FROM member_wiki_page_revisions WHERE task_id=${recovered.taskId}`;
+  assert.equal(beforeDuplicate[0]?.n, 1, "the recovered worker publishes once; the old lease publishes nothing");
+  await runWikiTask(recovered.taskId);
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_page_revisions WHERE task_id=${recovered.taskId}`)[0]?.n, 1, "duplicate wakeups do not publish twice");
+
+  answerHook = async () => {
+    const response = await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/documents/${recovered.documentId}/withdraw`, headers: { cookie: cookies[0]!, ...common } });
+    assert.equal(response.statusCode, 200);
+  };
+  const staleAnswer = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { question: "某公司撤回期间怎么看？" } });
+  assert.equal(staleAnswer.statusCode, 409, "an answer cannot publish evidence withdrawn while the model was running");
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_answers WHERE question='某公司撤回期间怎么看？'`)[0]?.n, 0);
+
 });

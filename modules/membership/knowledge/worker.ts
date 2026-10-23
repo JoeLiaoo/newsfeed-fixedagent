@@ -162,10 +162,8 @@ async function publish(task: TaskRow, version: VersionRow, draft: CompiledDraft,
     if (!running.lease_expires_at || running.lease_expires_at.getTime() <= Date.now()) throw new Error("knowledge_lease_lost");
     // A newer version of this material was published already: this build is out of date and may not
     // take the page back to what it knows.
-    const newer = await tx<{ version_id: string }[]>`SELECT version_id FROM member_wiki_contributions WHERE document_id=${version.document_id} AND status='active' AND version_no > ${version.version_no} LIMIT 1`;
+    const newer = await tx<{ version_id: string }[]>`SELECT t.version_id FROM member_wiki_tasks t JOIN member_wiki_document_versions v ON v.id=t.version_id WHERE t.document_id=${version.document_id} AND t.state='succeeded' AND v.version_no > ${version.version_no} LIMIT 1`;
     if (newer[0]) throw new Error("knowledge_publish_stale");
-    // The older versions of this material step aside; the new one takes their place.
-    await tx`UPDATE member_wiki_contributions SET status='superseded', updated_at=now() WHERE document_id=${version.document_id} AND version_id <> ${version.id} AND status='active'`;
     const written = await publishBuildPages(tx, {
       taskId: task.id,
       versionId: version.id,
