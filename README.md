@@ -39,10 +39,10 @@ npm run typecheck
 | P0 | 材料、接口矩阵与上游基线已整理；DeepSeek／新华财经完成单次隔离抽测 | P0-03 微信试投按用户决定并入 P3-04；P0 其他业务核验仍待完成 |
 | P1 | 账号、兴趣、资讯与个人日报已实现 | 需真实员工账号和信源覆盖验证 |
 | P2 | 专家导入、任务、新华财经适配底稿已实现 | 仅一层直接投资；完整规则和真实报告质量仍待联调 |
-| P3 | GP 监测与微信管线由 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 引入；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并了全仓审查整改及通知分片、并发投递修复 | [PR #19](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/19) 已合并，应用版本 `a2d67e9` 已部署；四项 P3 开关已按用户指示启用。扫码请求修复与个人设置导航已发布，双用户真实扫码与跨日投递仍待验收。普通聊天单独授权 |
+| P3 | GP 监测与微信管线由 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 引入；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并了全仓审查整改及通知分片、并发投递修复 | [PR #22](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/22) 已部署（release `8a84319`），两用户各一条测试通知已获 iLink `accepted` 回执；手机端实际收件、跨日送达及 GP 业务仍待验收。四项开关按用户指示启用，普通聊天仍单独授权 |
 | P4 | 新平台已部署并接管 HTTPS 入口；Hermes 网关已运行；旧版归档已完成 | 新平台备份恢复、旧组件处置和员工试运行仍待验收 |
 
-生产四项 P3 开关已按用户指示启用；开关状态和实际业务验收分别记录，详见 [P3 运维与验收手册](docs/P3-OPERATIONS.md)。
+生产四项 P3 开关已按用户指示启用；双用户测试消息均被 iLink 接受，但未据此认定手机端送达或 P3 验收完成，详见 [P3 运维与验收手册](docs/P3-OPERATIONS.md)。
 扫码后由服务端确认绑定的修复已随 PR #18 合并（`4a8299f`），并随 [PR #19 发布](docs/logs/2026-10-23-P4-pr19-deployment.md)。二维码新标签页与互动状态框已随 [PR #22 部署](docs/logs/2026-10-23-P4-pr22-deployment.md)。
 
 ## 开发检查
