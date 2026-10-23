@@ -141,7 +141,7 @@ export interface RssRead {
   notModified: boolean;
 }
 
-export async function fetchRss(source: SourceRow, opts: { force?: boolean } = {}): Promise<RssRead> {
+export async function fetchRss(source: SourceRow, opts: { force?: boolean; signal?: AbortSignal } = {}): Promise<RssRead> {
   const url = String(source.config.feedUrl ?? "");
   if (!url) throw new FetchError("feedUrl missing");
   // Config changes can alter parsing/filtering even when the upstream bytes did not change.
@@ -151,10 +151,10 @@ export async function fetchRss(source: SourceRow, opts: { force?: boolean } = {}
   const headers: Record<string, string> = { ...plain };
   if (previous?.etag) headers["if-none-match"] = previous.etag;
   if (previous?.lastModified) headers["if-modified-since"] = previous.lastModified;
-  let res = await fetchListing(url, { headers, timeoutMs: 25_000 });
+  let res = await fetchListing(url, { headers, timeoutMs: 25_000, signal: opts.signal });
   // A redirect may have changed destinations, whose ETag namespace is unrelated to the old one.
   if (res.status === 304 && previous && res.url !== previous.responseUrl) {
-    res = await fetchListing(url, { headers: plain, timeoutMs: 25_000 });
+    res = await fetchListing(url, { headers: plain, timeoutMs: 25_000, signal: opts.signal });
   }
   const validator: RssValidator = {
     configHash, responseUrl: res.url,

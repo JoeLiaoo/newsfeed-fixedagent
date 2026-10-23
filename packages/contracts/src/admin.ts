@@ -148,6 +148,8 @@ export type AdminSourceCreated =
 export interface AdminSourcePreview {
   ms: number;
   count: number;
+  /** Article pages the preview could not read; the listing itself was read. */
+  detailFailures?: number;
   items: Array<{ title: string; url: string; publishedAt: Timestamp | null; excerpt: string }>;
 }
 

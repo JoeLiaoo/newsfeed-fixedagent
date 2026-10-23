@@ -13,6 +13,26 @@ function scopeLabel(scope: string | null) {
   return scope === "sitemap" ? "sitemap" : scope === "rss" ? "RSS/Atom" : "单个列表页";
 }
 
+/** Each failed stage has its own message; anything else is a failed check. */
+const ERROR_TEXT: Record<string, string> = {
+  invalid_source: "请填写信源名称、公开地址和来源类型。",
+  invalid_url: "地址格式无效，请填写完整的 http(s) 地址。",
+  invalid_origin: "请求来源无效，请刷新页面后重试。",
+  login_required: "请先登录后再添加信源。",
+  duplicate_source: "这个信源已经添加。",
+  source_preview_rate_limited: "来源检查次数或并发已达上限，请稍后再试。",
+  source_unreachable: "无法访问该地址，请确认地址公开可访问。",
+  source_timeout: "来源检查超时，请换一个响应更快的地址或稍后再试。",
+  source_not_parseable: "该地址不是可解析的 RSS、文章列表或 sitemap。",
+  source_no_articles: "该地址没有可解析的文章条目。",
+  source_not_found: "该地址没有内容，请核对地址。",
+  source_forbidden: "目标站点拒绝访问，请换一个公开可访问的地址。",
+  source_rate_limited: "目标站点暂时限流，请稍后重试。",
+  source_upstream_error: "目标站点返回错误，请稍后重试。",
+  source_article_pages_failed: "列表页可解析，但原文页都无法读取，请换一个可公开读取的地址。",
+  source_validation_failed: "来源检查失败，请稍后重试。",
+};
+
 function discoveryLabel(method: string | null) {
   return method === "robots_txt" ? "robots.txt" : method === "homepage_link" ? "首页链接" : method === "well_known" ? "常见地址探测" : method === "homepage_alternate" ? "RSS 自动发现" : "手动地址";
 }
@@ -38,14 +58,15 @@ export default function SourcesPage() {
     const form = new FormData(formElement);
     try {
       const response = await fetch("/api/v1/membership/sources", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: form.get("name"), sourceUrl: form.get("sourceUrl"), kind: form.get("kind") }) });
-      const data = await response.json() as { error?: string; source?: { scope: string; previewCount: number } };
+      const data = await response.json() as { error?: string; source?: { scope: string; previewCount: number; detailFailures?: number } };
       if (!response.ok) {
-        const text = data.error === "duplicate_source" ? "这个信源已经添加。" : data.error === "source_preview_rate_limited" ? "来源检查次数或并发已达上限，请稍后再试。" : "未能通过内容和可达性检查；请确认地址公开可访问且能解析到文章。";
-        setMessage(text); return;
+        setMessage(ERROR_TEXT[data.error ?? ""] ?? ERROR_TEXT.source_validation_failed!);
+        return;
       }
       formElement.reset();
       const scope = data.source?.scope === "sitemap" ? "sitemap 索引" : data.source?.scope === "rss" ? "RSS/Atom 条目" : "提交的单个列表页";
-      setMessage(`信源已加入共享采集池，预览发现 ${data.source?.previewCount ?? 0} 篇文章；实际采集范围：${scope}。`);
+      const unread = data.source?.detailFailures ?? 0;
+      setMessage(`信源已加入共享采集池，预览发现 ${data.source?.previewCount ?? 0} 篇文章；实际采集范围：${scope}。${unread ? `其中 ${unread} 篇原文页未能读取。` : ""}`);
       await load();
     } catch { setMessage("信源检查请求失败，请检查网络后重试。"); }
     finally { setBusy(false); }

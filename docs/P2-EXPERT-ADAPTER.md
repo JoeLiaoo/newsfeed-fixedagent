@@ -4,8 +4,8 @@
 
 | 原技能规则／能力 | 状态 | 当前适配与边界 |
 |---|---|---|
-| 实体检索并先锚定 ID | 部分支持，真实 schema 待核 | 员工先从名称候选中选择；代码向画像工具发送 `query_type=company_id` 并核验返回 ID、名称和信用代码。但提供的 PDF 未列 `company_id` 查询类型，且信用代码回退仅在首次调用抛错时触发；须用真实 `listTools`/脱敏响应确认，见 [P0 数据矩阵](P0-DATA-MATRIX.md)。 |
-| 主体工商画像 | 部分支持 | 读取 `get_company_profile` 返回的可用画像字段；缺字段显示“未提供”。 |
+| 实体检索并先锚定 ID | 部分支持，真实 schema 待核 | 员工先从名称候选中选择；代码向画像工具发送 `query_type=company_id` 并核验返回 ID、名称和信用代码。但提供的 PDF 未列 `company_id` 查询类型，且信用代码回退仅在首次调用抛错时触发；须用真实 `listTools`/脱敏响应确认，见 [P0 数据矩阵](P0-DATA-MATRIX.md)。2026-10-23 实测：候选检索返回体为 `{result:{total, results[]}}`，是名称子串匹配；原样名称无匹配时依次尝试去掉尾部括号与企业形式后的短名，命中即标记为近似候选供员工确认。错误分为“未匹配到主体”“返回行缺少主体 ID”“响应结构无法解析”三类，不再混为一类。 |
+| 主体工商画像 | 部分支持 | 读取 `get_company_profile` 返回的可用画像字段；缺字段显示“未提供”。2026-10-23 实测：该工具按 `time_field=start_date` 过滤，不传 `time` 时默认“滚动三年”窗口，成立早于窗口的主体返回 `not_found: true`；适配器改为传宽窗口（`start=1900-01-01`，缺失日期置后），与对外投资查询一致。 |
 | 直接投资记录、比例与认缴原始字段 | 部分支持，分页 schema 待核 | `get_direct_investment` 代码按 `limit/offset` 分页读取一层关系；PDF 未列这些参数或 `total/has_more` 完成信号。若真实工具也不提供明确完整性信号，当前分页器会拒绝将快照记为完整。原值不做单位换算；PDF 中的认缴日/实缴日不推断成投资发生日。 |
 | 投资、披露、数据和发现时间 | 缺少可证明的发生时间 | `shoud_date` 是认缴出资日期，`capi_date` 是实缴日期，`dates` 是数据日期，`insert_time`/`update_time` 是供应商插入/更新时间，年报 `publish_date` 是披露时间；彼此不可互换。真实投资发生日期由独立证据核验，缺失时保持未知。 |
 | 按控股／参股逐层穿透 | 缺失 | 目前不会递归查询，也不声称全量覆盖集团链条。 |
@@ -26,6 +26,7 @@
 - 用户上传的 SKILL.md 或 ZIP 只作为文本保存和展示，不执行脚本、模板、网页或包内程序。ZIP 根目录仅允许 `manifest.json` 与 `SKILL.md`；限制压缩体积、条目数量、解压声明大小及路径。
 - `SKILL.md` frontmatter 与 ZIP manifest 的 `tools`、`skills`/`dependencies.tools`、`dependencies.skills` 会结构化校验，拒绝无效格式、未知工具、未发布或自引用循环技能依赖；声明依赖会阻止运行。自定义专家明确标记为纯文本模式，只使用 DeepSeek，不向用户包开放 MCP、代码执行或文件系统权限。
 - MCP 工具采用服务端固定 allowlist，token 从 `XINHUA_MCP_API_KEY` 凭据组读取；远端地址固定在 `mcp.cnfic.com.cn` 的 HTTPS 主机范围。
+- 2026-10-23 实测的工具契约（结构信息，未落盘原始响应）：`fuzzy_search_company_list` 的参数为 `keyword`（必填）、`limit`（1–50）、`offset`，返回 `{result:{total, results[], pagination{limit,offset,count,has_more,next_offset}}}`，候选含 `company_id`、`company_name`、`company_status_name`、`credit_code`、`address`、`start_date`；`get_company_profile` 与 `get_direct_investment` 的 `time` 为可选对象，`time_field` 分别是 `start_date` 与 `capi_date`，不传则按滚动三年窗口过滤。
 - 员工材料目前是受长度限制的纯文本备注，不支持任意文件上传。任务文本、结果和产物隔离到所属用户；任务和产物均于创建后 7 天清理。
 - 每人最多同时有 2 个排队/运行/待选任务，每小时最多提交 10 个；客户端幂等键防止重复提交。单任务最多领取执行 3 次，每人每小时最多 6 次执行尝试；失败重试计入同一预算。任务用原子领取、5 分钟租约和 30 秒心跳保护，产物对每个任务唯一。
 - 真实新华财经账号、工具 schema 和 DeepSeek 实际配置仍需部署后端到端试用。试运行底稿不能替代正式尽调复核。

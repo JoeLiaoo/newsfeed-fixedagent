@@ -71,7 +71,7 @@ function absolute(href: string | undefined, base: string): string | null {
   }
 }
 
-async function fetchListingText(source: SourceRow): Promise<{ text: string; viaJina: boolean; base: string }> {
+async function fetchListingText(source: SourceRow, signal?: AbortSignal): Promise<{ text: string; viaJina: boolean; base: string }> {
   const url = String(source.config.url ?? "");
   if (!url) throw new FetchError("url missing");
   if (url.startsWith(JINA_PREFIX)) {
@@ -82,7 +82,7 @@ async function fetchListingText(source: SourceRow): Promise<{ text: string; viaJ
     const page = await jinaRead(target, { purpose: "source_listing", subject: `source:${source.id}`, cacheToleranceSeconds: source.config.cacheToleranceSeconds, format, perRead: true });
     return { text: page.markdown, viaJina: true, base: source.config.baseUrl ?? target };
   }
-  const res = requireOk(await fetchListing(url, { headers: { accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8", ...languageHeaders(source.config.acceptLanguage) }, timeoutMs: 25_000 }));
+  const res = requireOk(await fetchListing(url, { headers: { accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8", ...languageHeaders(source.config.acceptLanguage) }, timeoutMs: 25_000, signal }));
   const text = res.text();
   contentDocument(text);
   return { text, viaJina: false, base: source.config.baseUrl ?? res.url };
@@ -330,9 +330,9 @@ async function fromMimoHome(html: string, base: string, source: SourceRow): Prom
   throw new FetchError("mimo_home: no Blog list in the homepage's chunks");
 }
 
-export async function fetchWebList(source: SourceRow): Promise<Candidate[]> {
-  if (source.config.parseMode === "sitemap") return fetchSitemap(source);
-  const { text, viaJina, base } = await fetchListingText(source);
+export async function fetchWebList(source: SourceRow, opts: { signal?: AbortSignal } = {}): Promise<Candidate[]> {
+  if (source.config.parseMode === "sitemap") return fetchSitemap(source, opts.signal);
+  const { text, viaJina, base } = await fetchListingText(source, opts.signal);
   const mode = source.config.adapter === "mimo_home" ? "mimo_home" : source.config.parseMode ?? (viaJina ? "markdown" : "html");
   let out: Candidate[];
   if (mode === "mimo_home") out = await fromMimoHome(text, base, source);
@@ -350,7 +350,7 @@ function records(value: unknown): Array<Record<string, unknown>> {
 }
 
 /** Sitemap-backed sources discover public article URLs on each scheduled fetch, with bounded fan-out. */
-async function fetchSitemap(source: SourceRow): Promise<Candidate[]> {
+async function fetchSitemap(source: SourceRow, signal?: AbortSignal): Promise<Candidate[]> {
   const parser = new XMLParser({ ignoreAttributes: true, removeNSPrefix: true, trimValues: true });
   const visited = new Set<string>();
   const found = new Map<string, Candidate>();
@@ -358,7 +358,7 @@ async function fetchSitemap(source: SourceRow): Promise<Candidate[]> {
   async function read(url: string, depth: number): Promise<void> {
     if (visited.has(url) || visited.size >= 25 || found.size >= 2000) return;
     visited.add(url);
-    const response = requireOk(await fetchListing(url, { headers: { accept: "application/xml,text/xml;q=0.9,*/*;q=0.8", ...languageHeaders(source.config.acceptLanguage) }, timeoutMs: 25_000 }), "sitemap");
+    const response = requireOk(await fetchListing(url, { headers: { accept: "application/xml,text/xml;q=0.9,*/*;q=0.8", ...languageHeaders(source.config.acceptLanguage) }, timeoutMs: 25_000, signal }), "sitemap");
     let parsed: Record<string, unknown>;
     try { parsed = parser.parse(response.text()) as Record<string, unknown>; }
     catch { throw new FetchError("sitemap XML could not be parsed"); }
@@ -403,7 +403,7 @@ export interface DetailNeed {
  * text ("Published Time: …", "# Heading"), so that paid rendering is bought only when such a rule is
  * needed; selectors and page metadata read the page's own HTML.
  */
-export async function fetchDetail(url: string, source: SourceRow, need: DetailNeed): Promise<PublicationDate & { title: string | null; summary: string | null; body: ExtractedBody | null }> {
+export async function fetchDetail(url: string, source: SourceRow, need: DetailNeed, signal?: AbortSignal): Promise<PublicationDate & { title: string | null; summary: string | null; body: ExtractedBody | null }> {
   const d = source.config.detail ?? {};
   const offset = articleUtcOffset(source.config);
   const jinaListing = String(source.config.url ?? "").startsWith(JINA_PREFIX);
@@ -415,7 +415,7 @@ export async function fetchDetail(url: string, source: SourceRow, need: DetailNe
   if ((need.date && !dateInJina) || (need.title && !titleInJina) || need.summary) {
     // The rules read a page's head and byline. A page past the size limit (a long paper with inline
     // figures) is read up to it rather than failing on every run; a body cut there is not kept.
-    const res = requireOk(await guardedFetch(url, { headers: languageHeaders(source.config.acceptLanguage), timeoutMs: 20_000, truncate: true }), "detail");
+    const res = requireOk(await guardedFetch(url, { headers: languageHeaders(source.config.acceptLanguage), timeoutMs: 20_000, truncate: true, signal }), "detail");
     html = res.text();
     page = { document: contentDocument(html), url: res.url, whole: !res.truncated && /html/.test(res.headers.get("content-type") ?? "") };
   }

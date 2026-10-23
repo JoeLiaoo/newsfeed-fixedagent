@@ -173,7 +173,7 @@ function applyDetail(c: CollectionCandidate, got: Awaited<ReturnType<typeof fetc
  * identity, so a recoverable failure cannot keep taking the budget from all later entries.
  */
 export async function enrichDetails(candidates: CollectionCandidate[], source: SourceRow, known: Map<string, StoredDetail>,
-  opts: { budget: number; after?: string; datedOut: DatedOut; admits: (c: Candidate) => boolean }): Promise<DetailReads> {
+  opts: { budget: number; after?: string; datedOut: DatedOut; admits: (c: Candidate) => boolean; signal?: AbortSignal }): Promise<DetailReads> {
   const rules = detailRulesOf(source);
   const reads: DetailReads = { attempts: 0, pending: 0, failures: [], listed: new Map() };
   let providerBudgetSpent = false;
@@ -198,7 +198,7 @@ export async function enrichDetails(candidates: CollectionCandidate[], source: S
       reads.attempts += 1;
       reads.after = c.identityKey;
       try {
-        applyDetail(c, await fetchDetail(c.url, source, need), rules!);
+        applyDetail(c, await fetchDetail(c.url, source, need, opts.signal), rules!);
         reads.listed.set(c.identityKey!, listed);
       } catch (error) {
         if (shutdownSignal.signal.aborted) throw error;

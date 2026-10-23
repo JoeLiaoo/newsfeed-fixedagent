@@ -5,7 +5,7 @@ import { redactMembershipTaskResponses } from "@aihot/backend/providers/receipts
 import { sql, type Db } from "@aihot/backend/db";
 import { BUILTIN_EXPERT, EXPERT_SLUG, XINHUA_USED_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
 import { ExpertProviderError, withXinhua, type XinhuaCall } from "./xinhua.ts";
-import { findArrays, mapInvestmentEvidence, parseInvestmentPage, querySelectedCompanyProfile, textField, type EntityCandidate } from "./data.ts";
+import { candidateSearchOutcome, mapCompanyCandidates, mapInvestmentEvidence, parseInvestmentPage, querySelectedCompanyProfile, relaxedCompanyKeywords, textField, type EntityCandidate } from "./data.ts";
 import { collectProviderPages, investmentRowIdentity } from "../provider-pages.ts";
 
 type TaskRow = { id: string; user_id: string; expert_slug: string; input: Record<string, unknown>; selected_entity: Record<string, unknown> | null; execution_attempts: number };
@@ -18,7 +18,8 @@ function errorText(error: unknown) {
     xinhua_endpoint_invalid: "新华财经 MCP 地址配置无效，任务已停止。",
     xinhua_tool_unavailable: "当前新华财经账号未提供适配所需的工具，任务已停止。",
     xinhua_tool_failed: "新华财经查询失败；请稍后重试或确认实体信息。",
-    xinhua_no_candidates: "新华财经没有返回主体候选，请检查名称或稍后重试。",
+    xinhua_no_candidates: "新华财经未匹配到该名称的主体，请核对登记名称或改用更短的关键词。",
+    xinhua_entity_id_missing: "新华财经返回的主体缺少可核验的唯一标识，未生成报告。",
     xinhua_response_invalid: "新华财经返回内容无法解析，未生成报告。",
     xinhua_identity_unverified: "新华财经无法按已确认主体的唯一 ID 或完整信用代码核验身份，未生成报告。",
     xinhua_entity_mismatch: "新华财经返回的企业与已确认主体不一致，未生成报告。",
@@ -30,17 +31,26 @@ function errorText(error: unknown) {
 
 function markdownCell(value: string) { return value.replace(/[|\r\n\t]/g, " ").trim(); }
 
-async function companyCandidates(name: string) {
+/**
+ * The candidates the provider offers for a typed name. The exact name is asked for first; when it
+ * matches nothing, the shorter forms of the same name are tried, so a subject that is registered
+ * under a slightly different wording can still be chosen. Only rows with a subject ID are offered:
+ * an ID is what the later profile read is verified against.
+ */
+export async function companyCandidates(name: string): Promise<{ candidates: EntityCandidate[]; approximate: boolean }> {
+  const keywords = [name, ...relaxedCompanyKeywords(name)];
   return withXinhua(async call => {
-    const raw = await call("fuzzy_search_company_list", { keyword: name, limit: 10, offset: 0 });
-    return findArrays(raw, ["results", "company_list", "company_info"]).flat().map(row => ({
-      id: textField(row, "company_id", "comp_id_iwudao", "comp_id"),
-      name: textField(row, "company_name", "comp_name", "name") ?? name,
-      status: textField(row, "company_status_name", "company_status", "status"),
-      creditCode: textField(row, "credit_code", "unified_social_credit_code"),
-      address: textField(row, "address", "registered_address"),
-      startDate: textField(row, "start_date", "establish_date"),
-    })).filter(row => row.id);
+    for (const [index, keyword] of keywords.entries()) {
+      const raw = await call("fuzzy_search_company_list", { keyword, limit: 10, offset: 0 });
+      const outcome = candidateSearchOutcome(raw);
+      // The provider answered without a candidate list: the answer cannot be read as one.
+      if (!outcome.present) throw new ExpertProviderError("xinhua_response_invalid");
+      if (!outcome.rows.length) continue;
+      const candidates = mapCompanyCandidates(outcome.rows, name).filter(candidate => candidate.id);
+      if (!candidates.length) throw new ExpertProviderError("xinhua_entity_id_missing");
+      return { candidates, approximate: index > 0 };
+    }
+    throw new ExpertProviderError("xinhua_no_candidates");
   });
 }
 
@@ -182,10 +192,10 @@ export async function runExpertTask(taskId: string) {
     if (task.expert_slug === EXPERT_SLUG && !task.selected_entity) {
       await sql`UPDATE member_expert_tasks SET stage='entity_search',updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
       const name = String(task.input.companyName ?? "");
-      const candidates = await companyCandidates(name);
+      const { candidates, approximate } = await companyCandidates(name);
       await assertRunning(taskId, leaseToken);
       if (!candidates.length) throw new ExpertProviderError("xinhua_no_candidates");
-      await sql`UPDATE member_expert_tasks SET state='waiting_input',stage='choose_entity',result=${sql.json({ candidates })},updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
+      await sql`UPDATE member_expert_tasks SET state='waiting_input',stage='choose_entity',result=${sql.json({ candidates, approximate })},updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
       return;
     }
     report = task.expert_slug === EXPERT_SLUG ? await runBuiltin(task, leaseToken) : await runCustom(task, leaseToken);
