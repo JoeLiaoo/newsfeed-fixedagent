@@ -50,6 +50,7 @@
 - `node scripts/check-doc-links.ts`：303 个本地链接全部可达。
 - `node scripts/check-migrations.ts --base=origin/main`：新增的 5 条迁移均通过在线迁移词表检查（本机为 Windows 工作区，`core.autocrlf=true` 使已发布迁移与 `git show` 的字节比较全部报「immutable」，属本机换行差异，与本次改动无关；在 CI 的 Linux 检出下无此现象）。
 - 新增 `modules/membership/tests/knowledge-bases.test.ts`（PostgreSQL 场景）：两个库各自建页、页面前缀、列表按库过滤、问答按库路由、共享库沿用旧 slug、库卡片计数、不存在的库被拒。已加入 CI 的 PostgreSQL 集成任务清单。
+- **CI（head `d6b231d`）**：`quality`、`postgres-integration`（含上条场景测试与既有 `knowledge-access` 场景）与 `links` 三项全过。第一次 CI  `postgres-integration` 因新测试里用 `assert.equal` 比较数组（引用比较）而失败，实际值正确；已改为 `assert.deepEqual` 后重跑通过。
 - 本机浏览器核对（生产构建的 web 进程 + 桩 API，Chrome 1440×900 与 390×844）：
   - `/experts` 卡片 3 张、页头「新增专家」、侧栏「专家平台」高亮；点卡片进入 `/experts/external-investment-landscape-xinhua-adapter`，详情有专家名、返回入口与提交表单。
   - `/knowledge` 卡片 2 张、页头「新增知识库」、侧栏「知识库」高亮；点卡片进入 `/knowledge/bases/shared`，详情有上传、构建状态、浏览检索与问答四块。
