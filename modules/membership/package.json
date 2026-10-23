@@ -8,6 +8,8 @@
     "./web": "./web.tsx",
     "./gp-queue": "./gp/queue.ts",
     "./gp-sync": "./gp/sync.ts",
+    "./knowledge-queue": "./knowledge/queue.ts",
+    "./knowledge-worker": "./knowledge/worker.ts",
     "./notifications-outbox": "./notifications/outbox.ts",
     "./notifications-inbox": "./notifications/inbox.ts",
     "./notifications-scan": "./notifications/scan.ts"
@@ -19,11 +21,12 @@
     "@aihot/web": "*",
     "@modelcontextprotocol/client": "2.3.0",
     "cheerio": "1.2.0",
-    "fflate": "0.7.5",
     "fastify": "5.12.5",
+    "fflate": "0.7.5",
     "lucide-react": "1.61.0",
     "react": "19.3.0",
     "react-router": "8.4.0",
+    "unpdf": "1.9.1",
     "zod": "4.6.5"
   }
 }

@@ -1,6 +1,6 @@
 # 中信私募ai平台
 
-公司内部使用的个性化资讯平台。员工注册并经管理员审核后，可选择关注赛道；首页按个人关注展示当天的公开资讯摘要和来源。实时新闻、专家入口、信源状态和账号管理可从导航进入。
+公司内部使用的个性化资讯平台。员工注册并经管理员审核后，可选择关注赛道；首页按个人关注展示当天的公开资讯摘要和来源。实时新闻、专家入口、信源状态和账号管理可从导航进入。全公司共享的投研知识库把员工上传的研究材料编译成观点页、预编译问答、判断框架与监测指标，并支持带引用的问答。
 
 ## 本地启动
 
@@ -41,6 +41,7 @@ npm run typecheck
 | P2 | 专家导入、任务、新华财经适配底稿已实现 | 仅一层直接投资；完整规则和真实报告质量仍待联调 |
 | P3 | GP 监测与微信管线由 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 引入；[PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并了全仓审查整改及通知分片、并发投递修复 | [PR #22](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/22) 已部署（release `8a84319`），两条测试通知获 iLink `accepted`，两台手机均已确认收到；跨日送达、失效恢复及 GP 业务仍待验收。四项开关按用户指示启用，普通聊天仍单独授权 |
 | P4 | 新平台已部署并接管 HTTPS 入口；Hermes 网关已运行；旧版归档已完成 | 新平台备份恢复、旧组件处置和员工试运行仍待验收 |
+| P5 | 共享投研知识库的上传、构建、独立复核、发布、浏览检索与问答已实现 | 两名员工共库、真实材料归因与引用跳转待试用；原件与知识页长期保留 |
 
 生产四项 P3 开关已按用户指示启用；双用户连通性测试消息均获 iLink `accepted`，且两台手机均已确认收到。跨日投递、失效恢复与 GP 业务仍待验收，详见 [P3 运维与验收手册](docs/P3-OPERATIONS.md)。
 扫码后由服务端确认绑定的修复已随 PR #18 合并（`4a8299f`），并随 [PR #19 发布](docs/logs/2026-10-23-P4-pr19-deployment.md)。二维码新标签页与互动状态框已随 [PR #22 部署](docs/logs/2026-10-23-P4-pr22-deployment.md)。
@@ -64,6 +65,7 @@ node scripts/check-doc-links.ts
 - [实施状态和剩余验收](docs/IMPLEMENTATION.md)
 - [可视化进度汇报](docs/PROGRESS-REPORT.md)
 - [P2 首个专家适配矩阵](docs/P2-EXPERT-ADAPTER.md)
+- [共享投研知识库运行手册](docs/KNOWLEDGE-OPS.md)
 - [P3 GP 与微信联调](docs/P3-OPERATIONS.md)
 - [微信扫码绑定设计与部署后验收](docs/P3-ILINK-QR-DESIGN.md)
 - [P0-03/P0-04 外部验收手册](docs/P0-03-04-OPERATIONS.md)

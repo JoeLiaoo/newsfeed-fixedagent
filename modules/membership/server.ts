@@ -6,6 +6,7 @@ import { createSource, previewSource } from "@aihot/backend/admin/sources";
 import { registerExpertRoutes } from "./experts/routes.ts";
 import { registerGpRoutes } from "./gp/routes.ts";
 import { registerNotificationRoutes } from "./notifications/routes.ts";
+import { registerKnowledgeRoutes } from "./knowledge/routes.ts";
 import { getDailyDigest } from "./notifications/digest.ts";
 import { beijingDate } from "@aihot/contracts/time";
 import { listedCondition } from "@aihot/backend/publication/scope";
@@ -101,6 +102,7 @@ export function registerMembership(app: FastifyInstance) {
   registerExpertRoutes(app, memberSession);
   registerGpRoutes(app, memberSession);
   registerNotificationRoutes(app, memberSession);
+  registerKnowledgeRoutes(app, memberSession);
   app.post("/api/v1/membership/register", async (req, reply) => {
     noStore(reply);
     if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
@@ -404,3 +406,5 @@ export function registerMembershipAccessBoundary(app: FastifyInstance) {
 
 export { EXPERT_QUEUE } from "./experts/queue.ts";
 export { cleanupExpertData, recoverExpertTasks } from "./experts/worker.ts";
+export { WIKI_QUEUE } from "./knowledge/queue.ts";
+export { recoverWikiTasks } from "./knowledge/worker.ts";
