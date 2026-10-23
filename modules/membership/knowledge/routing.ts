@@ -36,26 +36,47 @@ export function tokenize(text: string): string[] {
   return tokens;
 }
 
-/** How well a page answers a question: the words they share, the longer the better. */
-export function scorePage(question: string, page: RoutablePage): number {
-  const tokens = [...new Set(tokenize(question))];
-  if (!tokens.length) return 0;
-  const haystack = `${page.title} ${page.targetName ?? ""} ${page.track ?? ""} ${page.bodyMd}`.toLowerCase();
+/**
+ * Words that carry no subject: they appear in questions about anything, so a page that merely
+ * contains them is not a match.
+ */
+const STOPWORDS = new Set([
+  "没有", "有的", "什么", "怎么", "如何", "为什", "么样", "可以", "应该", "我们", "他们", "这个", "那个",
+  "一些", "一下", "哪些", "是否", "以及", "并且", "但是", "因为", "所以", "如果", "还是", "或者", "不能",
+  "不会", "需要", "请问", "谢谢", "现在", "目前", "最近", "请问", "问题", "主题", "情况", "内容", "方面",
+  "不是", "就是", "这样", "那样", "之后", "之前", "以后", "以前", "以上", "以下", "其中", "对于", "关于",
+]);
+
+/**
+ * How well a page answers a question: the question's words against the page's subject and its body.
+ * A word of the subject (the target, its name, its track) counts more than a word that only appears
+ * in the text; the question naming the subject outright counts most.
+ */
+export function scorePage(question: string, page: RoutablePage): { score: number; matches: number; subjectHit: boolean } {
+  const tokens = [...new Set(tokenize(question))].filter(token => !STOPWORDS.has(token));
+  const subjectHaystack = `${page.title} ${page.targetName ?? ""} ${page.track ?? ""}`.toLowerCase();
+  const bodyHaystack = page.bodyMd.toLowerCase();
   let score = 0;
+  let matches = 0;
   for (const token of tokens) {
-    if (!haystack.includes(token)) continue;
-    score += token.length >= 4 ? 3 : token.length >= 2 ? 2 : 1;
+    if (subjectHaystack.includes(token)) { matches++; score += 3; continue; }
+    if (bodyHaystack.includes(token)) { matches++; score += 1; }
   }
   const subject = page.targetName?.toLowerCase();
-  if (subject && subject.length >= 2 && question.toLowerCase().includes(subject)) score += 8;
-  return score;
+  const subjectHit = !!subject && subject.length >= 2 && question.toLowerCase().includes(subject);
+  if (subjectHit) score += 10;
+  return { score, matches, subjectHit };
 }
 
-/** The pages a question is answered from, the closest first. */
+/**
+ * The pages a question is answered from, the closest first. A page joins in when the question names
+ * its subject, or when the question and the page share enough wording; one common word alone would
+ * bring in pages the question is not about.
+ */
 export function routePages(question: string, pages: RoutablePage[], limit = 6): Array<{ page: RoutablePage; score: number }> {
   return pages
-    .map(page => ({ page, score: scorePage(question, page) }))
-    .filter(entry => entry.score > 0)
+    .map(page => ({ page, ...scorePage(question, page) }))
+    .filter(entry => entry.subjectHit || (entry.matches >= 2 && entry.score >= 4))
     .sort((left, right) => right.score - left.score || left.page.slug.localeCompare(right.page.slug))
     .slice(0, limit);
 }

@@ -170,6 +170,7 @@ test("a question finds the pages that hold its subject, and only those", () => {
   assert.ok(tokenize("某公司现在怎么看").includes("某公"));
   assert.equal(routePages("某公司现在怎么看", pages).length, 1);
   assert.equal(routePages("完全无关的问题", pages).length, 0, "a question nothing covers gets no page");
+  assert.equal(routePages("完全没有覆盖的问题主题", pages).length, 0, "one shared word is not a match");
 });
 
 test("a page's freshness is read from the date of its newest source", () => {
