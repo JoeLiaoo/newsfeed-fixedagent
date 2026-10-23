@@ -12,3 +12,8 @@
 - 沿用仓库现有 Button 组件与 Lucide 图标，未增加依赖。
 - `npm run typecheck --workspace @aihot/web` 通过；`node scripts/check-doc-links.ts` 检查 210 个本地 Markdown 链接，全部存在；`git diff --check` 通过。
 - 真实微信扫码、浏览器返回后的实际状态显示和双用户投递仍待用户在部署后核验；P3-04 保持未完成。
+
+## PR 审查
+
+- [PR #19](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/19) 的改动范围为两个页面及对应文档；检查了导航目标、二维码生成成功后的同页跳转、返回平台后从服务端恢复扫码会话、错误提示及现有状态轮询。未发现阻碍合并的问题。
+- GitHub Docs checks 与 P3 checks 均完成且通过；无未处理的 review thread。正式微信页面与手机扫码仍需部署后试用。
