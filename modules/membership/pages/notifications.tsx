@@ -15,6 +15,12 @@ type Scan={status:string;qrUrl:string;expiresAt?:string};
 type Channel={channel_state:string;last_inbound_at:string|null};
 type Data={settings:Settings;binding:Binding|null;history:History[];bindingAvailable:boolean;channel:Channel|null;scan:Scan|null};
 const endpoint="/api/v1/membership/";
+const boundMessage="绑定成功，可以关闭微信二维码页面。请向机器人发送一条消息以启用推送。";
+function scanFailureMessage(status:string){
+  if(status==="verify_code_blocked")return "微信安全验证受阻，绑定失败。可以关闭二维码页面后重试。";
+  if(status==="binded_redirect")return "微信提示该机器人已绑定，当前扫码未完成。可以关闭二维码页面后重试。";
+  return "二维码已过期，绑定未完成。可以关闭二维码页面后重试。";
+}
 
 export default function NotificationsPage(){
   const [data,setData]=useState<Data|null>(null),[message,setMessage]=useState(""),[busy,setBusy]=useState(false);
@@ -26,10 +32,19 @@ export default function NotificationsPage(){
     if(!response.ok){setMessage("需要登录后查看通知设置。");return;}
     const result=await response.json() as Data;
     setData(result);
-    setScan(previous=>result.binding?.status==="active"?null:result.scan??previous);
+    setScan(previous=>result.binding?.status==="active"||result.scan?.status==="error"?null:result.scan??previous);
+    if(result.binding?.status==="active")setScanError("");
+    else if(result.scan?.status==="error")setScanError("微信二维码状态查询失败，绑定结果尚未确认。可以关闭二维码页面后重新生成。");
     if(syncSettings){setNews(result.settings.news_enabled);setGp(result.settings.gp_enabled);setPaused(!!result.settings.paused_until&&new Date(result.settings.paused_until)>new Date());}
   },[]);
   useEffect(()=>{void reload().catch(()=>setMessage("加载失败，请刷新。"));},[reload]);
+  useEffect(()=>{
+    if(data?.binding?.status!=="active")return;
+    const refresh=()=>{if(document.visibilityState==="visible")void reload(false).catch(()=>{});};
+    const interval=window.setInterval(refresh,10000);
+    document.addEventListener("visibilitychange",refresh);
+    return()=>{window.clearInterval(interval);document.removeEventListener("visibilitychange",refresh);};
+  },[data?.binding?.status,reload]);
   useEffect(()=>{
     if(!scan || ["expired","bound","binded_redirect","verify_code_blocked"].includes(scan.status))return;
     let active=true;
@@ -42,12 +57,19 @@ export default function NotificationsPage(){
         const response=await fetch(endpoint+"weixin/status",{cache:"no-store"});
         const result=await response.json() as Scan&{error?:string};
         if(!active)return;
-        if(result.status==="error"){setScanError("微信通道暂时不可用，请重新生成二维码。");return;}
+        if(result.status==="error"){
+          setScan(null);setMessage("");
+          setScanError("微信二维码状态查询失败，绑定结果尚未确认。可以关闭二维码页面后重新生成。");
+          return;
+        }
         if(response.status===401){setMessage("需要登录后查看通知设置。");return;}
         if(!response.ok)return;
         setScanError("");
-        if(result.status==="bound"){setScan(null);setMessage("微信已绑定。");await reload();}
-        else if(result.status==="idle"||result.status==="expired"){setScan(null);setMessage("二维码已过期，请重新生成。");}
+        if(result.status==="bound"){setScan(null);setMessage(boundMessage);await reload();}
+        else if(["idle","expired","verify_code_blocked","binded_redirect"].includes(result.status)){
+          setScan(null);
+          setMessage(scanFailureMessage(result.status));
+        }
         else setScan(old=>old?{...old,status:result.status}:old);
       }catch{ /* temporary channel error: next poll will retry */ }
     };
@@ -59,13 +81,19 @@ export default function NotificationsPage(){
     return()=>{active=false;window.clearInterval(interval);document.removeEventListener("visibilitychange",onVisibility);};
   },[scan?.qrUrl,scan?.status,reload]);
   async function startScan(){
-    setBusy(true);setMessage("");
+    // Open synchronously from the click so browsers do not block the new tab after the request.
+    const qrTab=window.open("about:blank","_blank");
+    if(qrTab)qrTab.opener=null;
+    setBusy(true);setMessage("");setScanError("");
     try{
       const response=await fetch(endpoint+"weixin/start",{method:"POST"});
       const result=await response.json() as Scan&{error?:string};
-      if(response.ok&&result.qrUrl){setScan(result);setMessage("");setScanError("");window.location.assign(result.qrUrl);}
-      else setMessage(result.error==="scan_in_progress"?"二维码尚未过期，稍后可重试。":"暂时无法生成二维码。");
-    }catch{setMessage("网络异常，请重试。");}finally{setBusy(false);}
+      if(response.ok&&result.qrUrl){
+        setScan(result);setScanError("");
+        if(qrTab){qrTab.location.replace(result.qrUrl);setMessage("已在新标签页打开微信官方二维码。扫码结果会显示在此页面。");}
+        else setMessage("浏览器阻止了新标签页，请点击下方“打开微信官方二维码”。扫码结果会显示在此页面。");
+      }else{qrTab?.close();setMessage(result.error==="scan_in_progress"?"二维码尚未过期，稍后可重试。":"暂时无法生成二维码，请稍后重试。");}
+    }catch{qrTab?.close();setMessage("网络异常，二维码生成失败，请重试。");}finally{setBusy(false);}
   }
   async function submitVerification(){
     setBusy(true);
@@ -75,8 +103,10 @@ export default function NotificationsPage(){
       if(result.error==="scan_replaced")return;
       if(!response.ok){setMessage("微信安全验证未通过。");return;}
       setVerifyCode("");
-      if(result.status==="bound"){setScan(null);await reload();setMessage("微信已绑定。");}
-      else setScan(old=>old?{...old,status:result.status}:old);
+      if(result.status==="bound"){setScan(null);await reload();setMessage(boundMessage);}
+      else if(["expired","verify_code_blocked","binded_redirect"].includes(result.status)){
+        setScan(null);setMessage(scanFailureMessage(result.status));
+      }else setScan(old=>old?{...old,status:result.status}:old);
     }catch{setMessage("网络异常，请重试。");}finally{setBusy(false);}
   }
   async function request(path:string,body?:Record<string,unknown>,method="POST"){
@@ -92,7 +122,7 @@ export default function NotificationsPage(){
   return <main className="mx-auto w-full max-w-3xl px-5 py-8">
     <Button asChild variant="outline" className="mb-5"><Link to="/settings/profile"><ArrowLeft aria-hidden="true" />返回个人设置</Link></Button>
     <h1 className="mb-6 text-2xl font-semibold">绑定微信</h1>
-    {message&&<Alert role="status" className="mb-4">{message}</Alert>}
+    {message&&<Alert role="status" variant={message.startsWith("绑定成功")?"success":undefined} className="mb-4">{message}</Alert>}
     <Card className="mb-5"><CardHeader><CardTitle>绑定个人微信</CardTitle></CardHeader><CardContent className="grid gap-3">
       <div className="flex items-center gap-2">
         <Badge variant={data?.binding?.status==="active"?"success":"secondary"}>{data?.binding?.status==="active"?"已绑定":data?.binding?.status==="requires_rebind"?"需要重新绑定":"未绑定"}</Badge>
@@ -100,7 +130,7 @@ export default function NotificationsPage(){
       </div>
       {data?.binding?.status!=="active"&&<div className="grid gap-3">
         {scan?.qrUrl?<div className="grid gap-2">
-          <Button asChild className="justify-self-start"><a href={scan.qrUrl}><ExternalLink aria-hidden="true" />打开微信官方二维码</a></Button>
+          <Button asChild className="justify-self-start"><a href={scan.qrUrl} target="_blank" rel="noopener noreferrer"><ExternalLink aria-hidden="true" />打开微信官方二维码</a></Button>
           <p className="text-sm text-ink-3">{scanStatusText(scan.status)}</p>
           {scan.status==="need_verifycode"&&<div className="flex gap-2">
             <input value={verifyCode} onChange={e=>setVerifyCode(e.target.value)} placeholder="微信要求的验证码" className="min-w-0 rounded-control border border-line px-3 py-2" inputMode="numeric" maxLength={8} />
@@ -113,6 +143,10 @@ export default function NotificationsPage(){
         </div>}
         {!data?.bindingAvailable&&<p className="text-sm text-ink-3">管理员尚未启用 iLink 扫码接入。</p>}
       </div>}
+      <div className="grid gap-1">
+        <label className="flex items-center gap-3"><Checkbox checked={data?.binding?.status==="active"&&data?.channel?.channel_state==="active"&&!!data.channel.last_inbound_at} disabled className="disabled:opacity-100" />已向机器人发送消息</label>
+        <p className="pl-7 text-sm text-ink-3">由机器人收到消息后自动勾选；通道提示需重新互动时自动取消。</p>
+      </div>
       <div className="flex flex-wrap gap-2">
         {data?.channel?.channel_state==="needs_interaction"&&<p className="text-sm text-ink-3">需要先在微信向机器人发一条消息，才能继续接收推送。</p>}
         {data?.binding&&<Button disabled={busy} variant="outline" onClick={()=>void request("weixin/unbind")}>解绑</Button>}
