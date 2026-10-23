@@ -10,6 +10,7 @@ import { applyCorrections, coverageOf } from "./render.ts";
 import { lintDraft, blockingFindings } from "./lint.ts";
 import { capExtraction, detectFormat, extractMaterial } from "./extract.ts";
 import { publishBuildPages } from "./publish.ts";
+import { DEFAULT_BASE_ID, baseSlugOf } from "./bases.ts";
 import { compiledDraftSchema, auditResultSchema, type CompiledDraft, type Finding } from "./schema.ts";
 import { MAX_EXTRACTED_CHARS, TASK_ERRORS } from "./catalog.ts";
 
@@ -18,6 +19,8 @@ type TaskRow = {
   document_id: string;
   version_id: string;
   uploader_id: string;
+  /** The base of the material this task builds. */
+  base_id: string;
   stage: string;
   attempt_count: number;
   draft: CompiledDraft | null;
@@ -61,7 +64,8 @@ function dateText(value: unknown): string | null {
 }
 
 async function loadTask(taskId: string): Promise<TaskRow | null> {
-  const rows = await sql<TaskRow[]>`SELECT id, document_id, version_id, uploader_id, stage, attempt_count, draft, audit FROM member_wiki_tasks WHERE id = ${taskId}`;
+  const rows = await sql<TaskRow[]>`SELECT t.id, t.document_id, t.version_id, t.uploader_id, t.stage, t.attempt_count, t.draft, t.audit, d.base_id
+    FROM member_wiki_tasks t JOIN member_wiki_documents d ON d.id = t.document_id WHERE t.id = ${taskId}`;
   return rows[0] ?? null;
 }
 
@@ -134,10 +138,11 @@ async function recordEvent(event: {
     VALUES (${randomUUID()}, ${event.actorId}, ${event.eventType}, ${event.documentId ?? null}, ${event.versionId ?? null}, ${event.taskId ?? null}, ${event.pageId ?? null}, ${sql.json((event.detail ?? {}) as never)})`;
 }
 
-/** The slugs the library already holds, so a page may point at what exists. */
-async function knownSlugs(exclude: string[] = []): Promise<Set<string>> {
-  const rows = await sql<{ slug: string }[]>`SELECT slug FROM member_wiki_pages`;
-  return new Set(rows.map(row => row.slug).filter(slug => !exclude.includes(slug)));
+/** The slugs the library already holds, so a page may point at what exists. Only the base's own
+ *  pages count: a page of another base is not a page this build may point at. */
+async function knownSlugs(baseId: string, exclude: string[] = []): Promise<Set<string>> {
+  const rows = await sql<{ slug: string }[]>`SELECT slug FROM member_wiki_pages WHERE base_id = ${baseId}`;
+  return new Set(rows.map(row => baseSlugOf(row.slug, baseId)).filter(slug => !exclude.includes(slug)));
 }
 
 /**
@@ -150,10 +155,11 @@ async function publish(task: TaskRow, version: VersionRow, draft: CompiledDraft,
   const pages: Array<{ pageId: string; slug: string }> = [];
   await sql.begin(async tx => {
     // The locks are taken in one order everywhere: the material first, then the task.
-    const documents = await tx<{ id: string; status: string }[]>`SELECT id, status FROM member_wiki_documents WHERE id=${version.document_id} FOR UPDATE`;
+    const documents = await tx<{ id: string; status: string; base_id: string }[]>`SELECT id, status, base_id FROM member_wiki_documents WHERE id=${version.document_id} FOR UPDATE`;
     const document = documents[0];
     if (!document) throw new Error("knowledge_document_not_found");
     if (document.status !== "active") throw new Error("knowledge_document_withdrawn");
+    const baseId = document.base_id || DEFAULT_BASE_ID;
     const tasks = await tx<{ id: string; state: string; lease_token: string | null; lease_expires_at: Date | null }[]>`SELECT id, state, lease_token, lease_expires_at FROM member_wiki_tasks WHERE id=${task.id} FOR UPDATE`;
     const running = tasks[0];
     if (!running) throw new Error("knowledge_task_not_found");
@@ -169,6 +175,7 @@ async function publish(task: TaskRow, version: VersionRow, draft: CompiledDraft,
       versionId: version.id,
       documentId: version.document_id,
       versionNo: version.version_no,
+      baseId,
       draft,
       findings,
       attribution: [version.source_org, dateText(version.source_date)].filter(Boolean).join(" ") || null,
@@ -184,8 +191,10 @@ async function publish(task: TaskRow, version: VersionRow, draft: CompiledDraft,
 /** Runs one build. A failure leaves the task failed with a code the page can show, and the pages that were published before stay. */
 export async function runWikiTask(taskId: string): Promise<void> {
   const leaseToken = randomUUID();
-  const started = await sql<TaskRow[]>`UPDATE member_wiki_tasks SET state='running', stage='extracting', updated_at=now(), lease_token=${leaseToken}, lease_expires_at=now() + interval '5 minutes', attempt_count=attempt_count+1, last_attempt_at=now(), error_code=NULL, error_message=NULL
-    WHERE id=${taskId} AND state='queued' RETURNING id, document_id, version_id, uploader_id, stage, attempt_count, draft, audit`;
+  const started = await sql<TaskRow[]>`UPDATE member_wiki_tasks t SET state='running', stage='extracting', updated_at=now(), lease_token=${leaseToken}, lease_expires_at=now() + interval '5 minutes', attempt_count=attempt_count+1, last_attempt_at=now(), error_code=NULL, error_message=NULL
+    FROM member_wiki_documents d
+    WHERE t.id=${taskId} AND d.id=t.document_id AND t.state='queued'
+    RETURNING t.id, t.document_id, t.version_id, t.uploader_id, t.stage, t.attempt_count, t.draft, t.audit, d.base_id`;
   const task = started[0];
   if (!task) return;
   let leaseLost = false;
@@ -214,7 +223,7 @@ export async function runWikiTask(taskId: string): Promise<void> {
     const corrected = applyCorrections(draft, audit.corrections);
     await advanceStage(taskId, leaseToken, "linting");
 
-    const slugs = await knownSlugs(corrected.draft.pages.map(page => page.slug));
+    const slugs = await knownSlugs(task.base_id || DEFAULT_BASE_ID, corrected.draft.pages.map(page => page.slug));
     const findings = [...audit.findings, ...corrected.findings, ...lintDraft(corrected.draft, slugs)];
     if (audit.verdict === "fail") throw new Error("knowledge_audit_failed");
     if (blockingFindings(findings).length) throw new Error("knowledge_lint_blocked");

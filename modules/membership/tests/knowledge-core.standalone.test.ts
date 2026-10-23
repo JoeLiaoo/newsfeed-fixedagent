@@ -11,6 +11,7 @@ import { aggregateContributions, targetKeyOf, type Contribution } from "../knowl
 import { lintDraft, lintPage } from "../knowledge/lint.ts";
 import { routePages, tokenize } from "../knowledge/routing.ts";
 import { freshnessTier } from "../knowledge/catalog.ts";
+import { DEFAULT_BASE_ID, baseSlugOf, scopedSlug, scopedTargetKey } from "../knowledge/bases.ts";
 import type { CompiledDraft, PageDraft, SourceRecord } from "../knowledge/schema.ts";
 
 /** A one-page PDF with a line of text, built here so the test carries its own material. */
@@ -353,4 +354,20 @@ test("a heading before an oversized paragraph does not consume the entire extrac
   const capped = capExtraction(extracted, 60_000);
   assert.ok(capped.text.length > 59_000, "keep a useful prefix rather than only the short heading");
   assert.ok(capped.text.length <= 60_000);
+});
+
+
+test("every knowledge base has a key space and a slug space of its own", () => {
+  // The shared base keeps the keys and slugs its pages already carry, so the pages that are
+  // published stay the pages of that base.
+  assert.equal(scopedTargetKey(DEFAULT_BASE_ID, "view|company|某公司"), "view|company|某公司");
+  assert.equal(scopedSlug(DEFAULT_BASE_ID, "view-company-example"), "view-company-example");
+  assert.equal(baseSlugOf("view-company-example", DEFAULT_BASE_ID), "view-company-example");
+
+  // Another base has a space of its own, so two bases may hold a page about the same target.
+  assert.equal(scopedTargetKey("kb-abc", "view|company|某公司"), "kb-abc|view|company|某公司");
+  assert.equal(scopedSlug("kb-abc", "view-company-example"), "kb-abc-view-company-example");
+  assert.equal(baseSlugOf("kb-abc-view-company-example", "kb-abc"), "view-company-example");
+  assert.notEqual(scopedTargetKey("kb-abc", "view|company|某公司"), scopedTargetKey("kb-xyz", "view|company|某公司"));
+  assert.notEqual(scopedSlug("kb-abc", "view-company-example"), scopedSlug("kb-xyz", "view-company-example"));
 });

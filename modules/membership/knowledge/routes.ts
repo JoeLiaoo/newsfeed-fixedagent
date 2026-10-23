@@ -9,6 +9,7 @@ import { WIKI_QUEUE } from "./queue.ts";
 import { answerQuestion } from "./answer.ts";
 import { routePages, type RoutableCitation, type RoutablePage } from "./routing.ts";
 import { FORMAT_MEDIA_TYPES, freshnessTier, FRESHNESS_LABELS, TASK_ERRORS, maxFileBytes } from "./catalog.ts";
+import { DEFAULT_BASE_ID, MAX_BASES, ensureDefaultBase, newBaseId, resolveBase } from "./bases.ts";
 import { checksum, versionBody } from "./worker.ts";
 import { withdrawDocumentPages } from "./publish.ts";
 import { detectFormat } from "./extract.ts";
@@ -40,6 +41,15 @@ function isDate(value: string | null): value is string {
   return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+/**
+ * The knowledge base a request works in: the one it names, or the default base. A base that is not
+ * there is not worked in: the request is refused rather than answered from another base.
+ */
+async function baseOf(req: FastifyRequest): Promise<{ id: string; name: string } | null> {
+  const raw = typeof req.query === "object" && req.query && "baseId" in req.query ? (req.query as { baseId?: unknown }).baseId : undefined;
+  return resolveBase(typeof raw === "string" ? raw : undefined);
+}
+
 /** The date a column holds, as the text the pages show. */
 function dateText(value: unknown): string | null {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
@@ -60,24 +70,74 @@ async function mayAudit(user: MemberSession, targetKey: string | null): Promise<
 }
 
 export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Authenticate) {
+  /** The knowledge bases of the library: what each of them holds, for the card list. */
+  app.get("/api/v1/membership/knowledge/bases", async (req, reply) => {
+    noStore(reply);
+    const user = await authenticate(req);
+    if (!user) return reply.code(401).send({ error: "login_required" });
+    await ensureDefaultBase();
+    const bases = await sql`
+      SELECT b.id, b.name, b.description, b.status, b.created_at AS "createdAt", b.updated_at AS "updatedAt",
+        (SELECT count(*)::int FROM member_wiki_documents d WHERE d.base_id = b.id AND d.status = 'active') AS documents,
+        (SELECT count(*)::int FROM member_wiki_pages p WHERE p.base_id = b.id AND p.status = 'published') AS pages,
+        (SELECT count(*)::int FROM member_wiki_tasks t JOIN member_wiki_documents d ON d.id = t.document_id WHERE d.base_id = b.id AND t.state IN ('queued','running')) AS building,
+        (SELECT count(*)::int FROM member_wiki_tasks t JOIN member_wiki_documents d ON d.id = t.document_id WHERE d.base_id = b.id AND t.state = 'failed') AS failed
+      FROM member_wiki_bases b
+      WHERE b.status = 'active'
+      ORDER BY (b.id = ${DEFAULT_BASE_ID}) DESC, b.created_at`;
+    return { bases };
+  });
+
+  /** A new knowledge base: a named collection of materials with its own pages and its own answers. */
+  app.post("/api/v1/membership/knowledge/bases", async (req, reply) => {
+    noStore(reply);
+    if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
+    const user = await authenticate(req);
+    if (!user) return reply.code(401).send({ error: "login_required" });
+    const name = text(body(req).name, 80);
+    const description = text(body(req).description, 200) ?? "";
+    if (!name || name.length < 2) return reply.code(400).send({ error: "knowledge_base_name_required", message: "请填写知识库名称（2–80 字）。" });
+    await ensureDefaultBase();
+    const existing = await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM member_wiki_bases WHERE status = 'active'`;
+    if ((existing[0]?.count ?? 0) >= MAX_BASES) return reply.code(409).send({ error: "knowledge_base_limit_reached", message: `知识库数量已达上限（${MAX_BASES} 个）。` });
+    const id = newBaseId();
+    await sql`INSERT INTO member_wiki_bases(id, name, description, status, created_by) VALUES (${id}, ${name}, ${description}, 'active', ${user.id})`;
+    await sql`INSERT INTO member_wiki_audit_events(id, actor_id, event_type, detail) VALUES (${randomUUID()}, ${user.id}, 'knowledge.base.created', ${sql.json({ baseId: id, name })})`;
+    return reply.code(201).send({ base: { id, name, description, status: "active" } });
+  });
+
+  /** One knowledge base: what it is called and when it was last touched. */
+  app.get("/api/v1/membership/knowledge/bases/:id", async (req, reply) => {
+    noStore(reply);
+    const user = await authenticate(req);
+    if (!user) return reply.code(401).send({ error: "login_required" });
+    const id = (req.params as { id: string }).id;
+    await ensureDefaultBase();
+    const bases = await sql`SELECT id, name, description, status, created_at AS "createdAt", updated_at AS "updatedAt" FROM member_wiki_bases WHERE id = ${id} AND status = 'active'`;
+    if (!bases[0]) return reply.code(404).send({ error: "knowledge_base_not_found" });
+    return { base: bases[0] };
+  });
+
   /** What the library holds right now: how much, how current, and what is still open. */
   app.get("/api/v1/membership/knowledge/overview", async (req, reply) => {
     noStore(reply);
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
+    const base = await baseOf(req);
+    if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
     const [counts] = await sql`
-      SELECT (SELECT count(*)::int FROM member_wiki_documents WHERE status='active') AS documents,
-             (SELECT count(*)::int FROM member_wiki_document_versions) AS versions,
-             (SELECT count(*)::int FROM member_wiki_pages WHERE status='published') AS pages,
-             (SELECT count(*)::int FROM member_wiki_tasks WHERE state='queued') AS queued,
-             (SELECT count(*)::int FROM member_wiki_tasks WHERE state='running') AS running,
-             (SELECT count(*)::int FROM member_wiki_tasks WHERE state='failed') AS failed,
-             (SELECT count(*)::int FROM member_wiki_quality_issues WHERE status='open') AS openIssues,
-             (SELECT count(*)::int FROM member_wiki_quality_issues WHERE status='open' AND level='P0') AS blockingIssues`;
+      SELECT (SELECT count(*)::int FROM member_wiki_documents WHERE status='active' AND base_id=${base.id}) AS documents,
+             (SELECT count(*)::int FROM member_wiki_document_versions v JOIN member_wiki_documents d ON d.id=v.document_id WHERE d.base_id=${base.id}) AS versions,
+             (SELECT count(*)::int FROM member_wiki_pages WHERE status='published' AND base_id=${base.id}) AS pages,
+             (SELECT count(*)::int FROM member_wiki_tasks t JOIN member_wiki_documents d ON d.id=t.document_id WHERE d.base_id=${base.id} AND t.state='queued') AS queued,
+             (SELECT count(*)::int FROM member_wiki_tasks t JOIN member_wiki_documents d ON d.id=t.document_id WHERE d.base_id=${base.id} AND t.state='running') AS running,
+             (SELECT count(*)::int FROM member_wiki_tasks t JOIN member_wiki_documents d ON d.id=t.document_id WHERE d.base_id=${base.id} AND t.state='failed') AS failed,
+             (SELECT count(*)::int FROM member_wiki_quality_issues q JOIN member_wiki_pages p ON p.id=q.page_id WHERE p.base_id=${base.id} AND q.status='open') AS openIssues,
+             (SELECT count(*)::int FROM member_wiki_quality_issues q JOIN member_wiki_pages p ON p.id=q.page_id WHERE p.base_id=${base.id} AND q.status='open' AND q.level='P0') AS blockingIssues`;
     const pages = await sql<{ slug: string; coverage: { analysts?: number; last_report?: string | null } | null }[]>`
       SELECT p.slug, r.coverage FROM member_wiki_pages p
       JOIN member_wiki_page_revisions r ON r.page_id = p.id AND r.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = p.id)
-      WHERE p.status='published'`;
+      WHERE p.status='published' AND p.base_id=${base.id}`;
     const freshness = { fresh: 0, semi: 0, stale: 0, undated: 0 };
     for (const page of pages) freshness[freshnessTier(page.coverage?.last_report ?? null)] += 1;
     const coverage = pages.reduce((sum, page) => sum + (page.coverage?.analysts ?? 0), 0);
@@ -89,9 +149,11 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     noStore(reply);
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
+    const base = await baseOf(req);
+    if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
     const query = typeof req.query === "object" && req.query && "query" in req.query ? String((req.query as { query?: unknown }).query ?? "").trim() : "";
     const documents = await sql`
-      SELECT d.id, d.title, d.status, d.uploader_id AS "uploaderId", u.real_name AS "uploaderName", d.created_at AS "createdAt", d.withdrawn_at AS "withdrawnAt",
+      SELECT d.id, d.title, d.status, d.base_id AS "baseId", d.uploader_id AS "uploaderId", u.real_name AS "uploaderName", d.created_at AS "createdAt", d.withdrawn_at AS "withdrawnAt",
         v.id AS "versionId", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.sha256, v.source_author AS "sourceAuthor", v.source_org AS "sourceOrg", v.source_date AS "sourceDate",
         v.extraction_status AS "extractionStatus", v.extraction_note AS "extractionNote", v.version_no AS "versionNo",
         t.state AS "taskState", t.stage AS "taskStage", t.error_code AS "errorCode", t.error_message AS "errorMessage"
@@ -99,7 +161,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       JOIN member_users u ON u.id = d.uploader_id
       JOIN LATERAL (SELECT * FROM member_wiki_document_versions v WHERE v.document_id = d.id ORDER BY v.version_no DESC LIMIT 1) v ON true
       LEFT JOIN LATERAL (SELECT * FROM member_wiki_tasks t WHERE t.version_id = v.id ORDER BY t.created_at DESC LIMIT 1) t ON true
-      WHERE d.status = 'active' AND (${query} = '' OR d.title ILIKE ${`%${query}%`} OR v.file_name ILIKE ${`%${query}%`} OR v.source_org ILIKE ${`%${query}%`})
+      WHERE d.status = 'active' AND d.base_id = ${base.id} AND (${query} = '' OR d.title ILIKE ${`%${query}%`} OR v.file_name ILIKE ${`%${query}%`} OR v.source_org ILIKE ${`%${query}%`})
       ORDER BY d.created_at DESC LIMIT 100`;
     return { documents };
   });
@@ -110,7 +172,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const id = (req.params as { id: string }).id;
-    const documents = await sql`SELECT id, title, status, uploader_id AS "uploaderId", created_at AS "createdAt", withdrawn_at AS "withdrawnAt" FROM member_wiki_documents WHERE id = ${id}`;
+    const documents = await sql`SELECT id, title, status, base_id AS "baseId", uploader_id AS "uploaderId", created_at AS "createdAt", withdrawn_at AS "withdrawnAt" FROM member_wiki_documents WHERE id = ${id}`;
     if (!documents[0]) return reply.code(404).send({ error: "knowledge_document_not_found" });
     // A withdrawn material is no longer part of the shared library: only the uploader and the
     // administrators may still look at what it left behind.
@@ -155,6 +217,8 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const date = text(payload.date, 10);
     if (date && !isDate(date)) return reply.code(400).send({ error: "knowledge_date_invalid", message: "材料日期需为 YYYY-MM-DD。" });
     const requestedDocument = text(payload.documentId, 64);
+    const base = await resolveBase(text(payload.baseId, 64));
+    if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
     const sha256 = checksum(bytes);
 
     const admitted = await sql.begin(async tx => {
@@ -166,16 +230,16 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
 
       let documentId = requestedDocument;
       if (documentId) {
-        const owned = await tx<{ id: string }[]>`SELECT id FROM member_wiki_documents WHERE id=${documentId} AND status='active' AND (uploader_id=${user.id} OR ${user.role === "admin"})`;
+        const owned = await tx<{ id: string }[]>`SELECT id FROM member_wiki_documents WHERE id=${documentId} AND status='active' AND base_id=${base.id} AND (uploader_id=${user.id} OR ${user.role === "admin"})`;
         if (!owned[0]) return { forbidden: true as const };
       } else {
-        const same = await tx<{ document_id: string }[]>`SELECT v.document_id FROM member_wiki_document_versions v WHERE v.sha256=${sha256} AND v.document_id IN (SELECT id FROM member_wiki_documents WHERE uploader_id=${user.id}) LIMIT 1`;
+        const same = await tx<{ document_id: string }[]>`SELECT v.document_id FROM member_wiki_document_versions v WHERE v.sha256=${sha256} AND v.document_id IN (SELECT id FROM member_wiki_documents WHERE uploader_id=${user.id} AND base_id=${base.id}) LIMIT 1`;
         if (same[0]) {
           const version = await tx<{ id: string; version_no: number }[]>`SELECT id, version_no FROM member_wiki_document_versions WHERE document_id=${same[0].document_id} AND sha256=${sha256} LIMIT 1`;
           return { duplicate: true as const, documentId: same[0].document_id, versionId: version[0]!.id, versionNo: version[0]!.version_no };
         }
         documentId = randomUUID();
-        await tx`INSERT INTO member_wiki_documents(id, uploader_id, title) VALUES (${documentId}, ${user.id}, ${title})`;
+        await tx`INSERT INTO member_wiki_documents(id, uploader_id, title, base_id) VALUES (${documentId}, ${user.id}, ${title}, ${base.id})`;
       }
       const duplicate = await tx<{ id: string; version_no: number }[]>`SELECT id, version_no FROM member_wiki_document_versions WHERE document_id=${documentId} AND sha256=${sha256} LIMIT 1`;
       if (duplicate[0]) return { duplicate: true as const, documentId, versionId: duplicate[0].id, versionNo: duplicate[0].version_no };
@@ -230,6 +294,8 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     noStore(reply);
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
+    const base = await baseOf(req);
+    if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
     const tasks = await sql`
       SELECT t.id, t.stage, t.state, t.attempt_count AS "attemptCount", t.error_code AS "errorCode", t.error_message AS "errorMessage",
         t.created_at AS "createdAt", t.updated_at AS "updatedAt", t.finished_at AS "finishedAt",
@@ -238,6 +304,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       JOIN member_wiki_documents d ON d.id = t.document_id
       JOIN member_wiki_document_versions v ON v.id = t.version_id
       JOIN member_users u ON u.id = t.uploader_id
+      WHERE d.base_id = ${base.id}
       ORDER BY t.created_at DESC LIMIT 100`;
     return { tasks };
   });
@@ -267,6 +334,8 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     noStore(reply);
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
+    const base = await baseOf(req);
+    if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
     const query = typeof req.query === "object" && req.query && "query" in req.query ? String((req.query as { query?: unknown }).query ?? "").trim() : "";
     const type = typeof req.query === "object" && req.query && "type" in req.query ? String((req.query as { type?: unknown }).type ?? "") : "";
     const pages = await sql`
@@ -276,7 +345,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
         (SELECT count(*)::int FROM member_wiki_quality_issues q WHERE q.page_id = p.id AND q.status='open') AS "issueCount"
       FROM member_wiki_pages p
       JOIN member_wiki_page_revisions r ON r.page_id = p.id AND r.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = p.id)
-      WHERE p.status='published' AND (${type} = '' OR p.page_type = ${type}) AND (${query} = '' OR p.slug ILIKE ${`%${query}%`} OR p.target_name ILIKE ${`%${query}%`} OR r.body_md ILIKE ${`%${query}%`})
+      WHERE p.status='published' AND p.base_id = ${base.id} AND (${type} = '' OR p.page_type = ${type}) AND (${query} = '' OR p.slug ILIKE ${`%${query}%`} OR p.target_name ILIKE ${`%${query}%`} OR r.body_md ILIKE ${`%${query}%`})
       ORDER BY r.published_at DESC LIMIT 100`;
     return {
       pages: pages.map(page => ({
@@ -294,7 +363,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     if (!user) return reply.code(401).send({ error: "login_required" });
     const slug = (req.params as { slug: string }).slug;
     const pages = await sql`
-      SELECT p.id, p.slug, p.page_type AS "pageType", p.target_type AS "targetType", p.target_name AS "targetName", p.track, p.status, p.target_key AS "targetKey", p.updated_at AS "updatedAt",
+      SELECT p.id, p.slug, p.page_type AS "pageType", p.target_type AS "targetType", p.target_name AS "targetName", p.track, p.status, p.target_key AS "targetKey", p.base_id AS "baseId", p.updated_at AS "updatedAt",
         r.revision, r.body_md AS "bodyMd", r.coverage, r.published_at AS "publishedAt"
       FROM member_wiki_pages p JOIN member_wiki_page_revisions r ON r.page_id = p.id
       WHERE p.slug=${slug} ORDER BY r.revision DESC LIMIT 1`;
@@ -350,15 +419,17 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     if (!user) return reply.code(401).send({ error: "login_required" });
     const question = text(body(req).question, 500);
     if (!question || question.length < 2) return reply.code(400).send({ error: "knowledge_question_required", message: "请输入要问的问题。" });
+    const base = await resolveBase(text(body(req).baseId, 64));
+    if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
     const rows = await sql<{ id: string; slug: string; page_type: string; target_name: string | null; track: string | null; body_md: string; coverage: Record<string, unknown> | null; revision_id: string }[]>`
       SELECT p.id, p.slug, p.page_type, p.target_name, p.track, r.body_md, r.coverage, r.id AS revision_id
       FROM member_wiki_pages p JOIN member_wiki_page_revisions r ON r.page_id = p.id
         AND r.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = p.id)
-      WHERE p.status='published'`;
+      WHERE p.status='published' AND p.base_id = ${base.id}`;
     const citationRows = await sql<{ id: string; page_id: string; label: string; anchor: string | null; analyst: string | null; organization: string | null; published_on: Date | null; source_title: string | null; version_id: string }[]>`
       SELECT c.id, c.page_id, c.label, c.anchor, c.analyst, c.organization, c.published_on, c.source_title, c.version_id
       FROM member_wiki_citations c JOIN member_wiki_pages p ON p.id = c.page_id
-      WHERE p.status='published'
+      WHERE p.status='published' AND p.base_id = ${base.id}
         AND c.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = c.page_id)`;
     const byPage = new Map<string, RoutableCitation[]>();
     for (const row of citationRows) {

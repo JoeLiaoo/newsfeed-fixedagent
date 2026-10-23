@@ -1,8 +1,12 @@
+import { Slot } from "@radix-ui/react-slot";
 import type { HTMLAttributes } from "react";
 import { cn } from "../../lib/cn";
 
-export function Card({ className, ...props }: HTMLAttributes<HTMLElement>) {
-  return <section className={cn("rounded-card border border-line bg-surface text-ink shadow-sm", className)} {...props} />;
+/** A box of the member pages. With `asChild` it takes the shape of its child, so a card that is a
+ *  link keeps the card's own look instead of a second set of classes somewhere else. */
+export function Card({ className, asChild = false, ...props }: HTMLAttributes<HTMLElement> & { asChild?: boolean }) {
+  const Component = asChild ? Slot : "section";
+  return <Component className={cn("rounded-card border border-line bg-surface text-ink shadow-sm", className)} {...props} />;
 }
 
 export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {

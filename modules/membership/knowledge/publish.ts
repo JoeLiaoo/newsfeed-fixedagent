@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type { Tx } from "@aihot/backend/db";
 import { aggregateContributions, targetKeyOf, type Contribution } from "./aggregate.ts";
+import { DEFAULT_BASE_ID, scopedSlug, scopedTargetKey } from "./bases.ts";
 import { renderPage } from "./render.ts";
 import type { CompiledDraft, Finding, PageDraft, SourceRecord } from "./schema.ts";
 
@@ -48,18 +49,19 @@ function isUniqueViolation(error: unknown): boolean {
 /**
  * The page of a target, locked for the rest of the transaction. Two builds of two materials about
  * the same target take turns here, so neither of them writes the page without the other's material.
+ * The page belongs to the base of the material: two bases may hold a page about the same target.
  */
-async function lockPage(tx: Tx, page: PageDraft, targetKey: string): Promise<{ id: string; slug: string }> {
-  const existing = await tx<{ id: string; slug: string }[]>`SELECT id, slug FROM member_wiki_pages WHERE target_key = ${targetKey} FOR UPDATE`;
+async function lockPage(tx: Tx, page: PageDraft, targetKey: string, baseId: string): Promise<{ id: string; slug: string }> {
+  const existing = await tx<{ id: string; slug: string }[]>`SELECT id, slug FROM member_wiki_pages WHERE base_id = ${baseId} AND target_key = ${targetKey} FOR UPDATE`;
   if (existing[0]) return existing[0];
   for (let attempt = 0; attempt < 4; attempt++) {
-    const slug = await freeSlug(tx, page.slug, targetKey, attempt);
+    const slug = await freeSlug(tx, scopedSlug(baseId, page.slug), targetKey, attempt);
     let inserted: Array<{ id: string }> = [];
     try {
       // The savepoint keeps a name that is already taken from taking the whole build down.
       inserted = await tx.savepoint(async sp => sp<{ id: string }[]>`
-        INSERT INTO member_wiki_pages(id, slug, page_type, target_type, target_name, track, status, target_key)
-        VALUES (${randomUUID()}, ${slug}, ${page.pageType}, ${page.targetType}, ${page.targetName}, ${page.track}, 'published', ${targetKey})
+        INSERT INTO member_wiki_pages(id, slug, page_type, target_type, target_name, track, status, target_key, base_id)
+        VALUES (${randomUUID()}, ${slug}, ${page.pageType}, ${page.targetType}, ${page.targetName}, ${page.track}, 'published', ${targetKey}, ${baseId})
         ON CONFLICT (target_key) WHERE target_key <> '' DO NOTHING RETURNING id`);
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
@@ -90,14 +92,14 @@ async function writeContribution(tx: Tx, contribution: ContributionRow): Promise
 }
 
 /** The contributions of a target that still count: the active ones, of materials still in the library. */
-export async function activeContributions(tx: Tx, targetKey: string): Promise<ContributionRow[]> {
+export async function activeContributions(tx: Tx, targetKey: string, baseId: string): Promise<ContributionRow[]> {
   const rows = await tx<{
     version_id: string; document_id: string; version_no: number; created_at: Date; task_id: string | null; slug: string;
     contribution: { page: PageDraft; sources: SourceRecord[]; attribution: string | null; materialTitle: string | null };
   }[]>`SELECT c.version_id, c.document_id, c.version_no, c.created_at, c.task_id, c.slug, c.contribution
     FROM member_wiki_contributions c
     JOIN member_wiki_documents d ON d.id = c.document_id
-    WHERE c.target_key = ${targetKey} AND c.status = 'active' AND d.status = 'active'
+    WHERE c.target_key = ${targetKey} AND c.status = 'active' AND d.status = 'active' AND d.base_id = ${baseId}
     ORDER BY c.version_no, c.created_at, c.version_id`;
   return rows.map(row => ({
     versionId: row.version_id,
@@ -133,10 +135,10 @@ async function writeRevision(tx: Tx, page: { id: string; slug: string }, aggrega
  * Writes the page of a target again, from the contributions that are still active. A page that
  * holds nothing any more goes down.
  */
-export async function rebuildTarget(tx: Tx, targetKey: string): Promise<{ slug: string; withdrawn: boolean } | null> {
-  const pageRow = await tx<{ id: string; slug: string }[]>`SELECT id, slug FROM member_wiki_pages WHERE target_key = ${targetKey} FOR UPDATE`;
+export async function rebuildTarget(tx: Tx, targetKey: string, baseId: string): Promise<{ slug: string; withdrawn: boolean } | null> {
+  const pageRow = await tx<{ id: string; slug: string }[]>`SELECT id, slug FROM member_wiki_pages WHERE base_id = ${baseId} AND target_key = ${targetKey} FOR UPDATE`;
   if (!pageRow[0]) return null;
-  const remaining = await activeContributions(tx, targetKey);
+  const remaining = await activeContributions(tx, targetKey, baseId);
   if (!remaining.length) {
     await tx`UPDATE member_wiki_pages SET status='withdrawn', updated_at=now() WHERE id=${pageRow[0].id} AND status='published'`;
     return { slug: pageRow[0].slug, withdrawn: true };
@@ -156,6 +158,8 @@ export async function publishBuildPages(tx: Tx, args: {
   versionId: string;
   documentId: string;
   versionNo: number;
+  /** The base the material belongs to: its pages are the pages of that base. */
+  baseId: string;
   draft: CompiledDraft;
   findings: Finding[];
   attribution: string | null;
@@ -164,15 +168,18 @@ export async function publishBuildPages(tx: Tx, args: {
   // Remember every target of the previous published version before retiring it, including targets
   // the new draft no longer contains. Retire once per build, never once per page.
   const previous = await tx<{ target_key: string }[]>`SELECT DISTINCT target_key FROM member_wiki_contributions WHERE document_id = ${args.documentId} AND status = 'active'`;
-  const keys = [...new Set([...previous.map(row => row.target_key), ...args.draft.pages.map(targetKeyOf)])].sort();
+  const keys = [...new Set([...previous.map(row => row.target_key), ...args.draft.pages.map(page => scopedTargetKey(args.baseId, targetKeyOf(page)))])].sort();
   await lockTargets(tx, keys);
   await tx`UPDATE member_wiki_contributions SET status='superseded', updated_at=now() WHERE document_id = ${args.documentId} AND status='active'`;
   const written: WrittenPage[] = [];
   const touched = new Set<string>();
   for (const page of [...args.draft.pages].sort((a, b) => targetKeyOf(a).localeCompare(targetKeyOf(b)) || a.slug.localeCompare(b.slug))) {
-    const targetKey = targetKeyOf(page);
+    const targetKey = scopedTargetKey(args.baseId, targetKeyOf(page));
+    // The page and the pages it points at are written in the base's own slug space, so a page of
+    // one base never carries the name of another base's page.
+    const slug = scopedSlug(args.baseId, page.slug);
     touched.add(targetKey);
-    const pageRow = await lockPage(tx, page, targetKey);
+    const pageRow = await lockPage(tx, page, targetKey, args.baseId);
     const contribution: ContributionRow = {
       versionId: args.versionId,
       documentId: args.documentId,
@@ -180,14 +187,14 @@ export async function publishBuildPages(tx: Tx, args: {
       createdAt: new Date().toISOString(),
       taskId: args.taskId,
       targetKey,
-      slug: page.slug,
-      page,
+      slug,
+      page: { ...page, slug, related: page.related.map(related => scopedSlug(args.baseId, related)) },
       sources: args.draft.sources as SourceRecord[],
       attribution: args.attribution,
       materialTitle: args.materialTitle,
     };
     await writeContribution(tx, contribution);
-    const aggregate = aggregateContributions(await activeContributions(tx, targetKey));
+    const aggregate = aggregateContributions(await activeContributions(tx, targetKey, args.baseId));
     const revision = await writeRevision(tx, pageRow, aggregate, { taskId: args.taskId, versionId: args.versionId, documentId: args.documentId });
     await tx`UPDATE member_wiki_pages SET status='published', updated_at=now(), page_type=${page.pageType}, target_type=${page.targetType}, target_name=${page.targetName}, track=${page.track} WHERE id=${pageRow.id}`;
     for (const finding of args.findings.filter(item => item.target === page.slug || item.target?.startsWith(`${page.slug}#`))) {
@@ -199,7 +206,7 @@ export async function publishBuildPages(tx: Tx, args: {
   // A build that no longer holds a page it used to hold: that page is written again without it.
   for (const target of previous) {
     if (touched.has(target.target_key)) continue;
-    await rebuildTarget(tx, target.target_key);
+    await rebuildTarget(tx, target.target_key, args.baseId);
   }
   return written;
 }
@@ -209,13 +216,15 @@ export async function publishBuildPages(tx: Tx, args: {
  * again without it. A page that held nothing else goes down with it.
  */
 export async function withdrawDocumentPages(tx: Tx, documentId: string): Promise<{ withdrawn: string[]; rebuilt: string[] }> {
+  const documents = await tx<{ base_id: string }[]>`SELECT base_id FROM member_wiki_documents WHERE id = ${documentId}`;
+  const baseId = documents[0]?.base_id ?? DEFAULT_BASE_ID;
   const targets = await tx<{ target_key: string }[]>`SELECT DISTINCT target_key FROM member_wiki_contributions WHERE document_id = ${documentId}`;
   await lockTargets(tx, targets.map(row => row.target_key));
   await tx`UPDATE member_wiki_contributions SET status='withdrawn', updated_at=now() WHERE document_id = ${documentId} AND status <> 'withdrawn'`;
   const withdrawn: string[] = [];
   const rebuilt: string[] = [];
   for (const target of targets) {
-    const result = await rebuildTarget(tx, target.target_key);
+    const result = await rebuildTarget(tx, target.target_key, baseId);
     if (!result) continue;
     if (result.withdrawn) withdrawn.push(result.slug);
     else rebuilt.push(result.slug);
