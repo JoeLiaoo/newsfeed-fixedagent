@@ -17,3 +17,4 @@
 
 - [PR #19](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/19) 的改动范围为两个页面及对应文档；检查了导航目标、二维码生成成功后的同页跳转、返回平台后从服务端恢复扫码会话、错误提示及现有状态轮询。未发现阻碍合并的问题。
 - GitHub Docs checks 与 P3 checks 均完成且通过；无未处理的 review thread。正式微信页面与手机扫码仍需部署后试用。
+- PR #19 已合并到 `main`（`a2d67e9a36e2980b55f51a3d1a3c6e231fb89a17`）并部署到火山云；部署和健康检查见[发布记录](2026-10-23-P4-pr19-deployment.md)。
