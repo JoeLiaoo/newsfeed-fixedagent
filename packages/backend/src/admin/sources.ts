@@ -77,19 +77,29 @@ export async function sourceDetail(id: string): Promise<BeforeJson<AdminSourceDe
   return { source, runs, items, stats: stats!, history, republish: republish?.value ?? null };
 }
 
-/** A stored source fetched now without storing anything; null when there is no such source. */
+/** What a stored source fetched now without storing anything; null when there is no such source. */
 export async function previewStoredSource(id: string): Promise<BeforeJson<AdminSourcePreview> | null> {
   const [source] = await sql<SourceRow[]>`SELECT * FROM sources WHERE id = ${id}`;
   return source ? previewSource(source) : null;
 }
 
-export async function previewSource(draft: Pick<SourceRow, "id" | "kind" | "config"> & Partial<SourceRow>): Promise<BeforeJson<AdminSourcePreview>> {
+/** What a preview reads and how it reports what it could not read. */
+export interface PreviewOptions {
+  /** How many article pages this preview reads; the stored source keeps its own budget for its runs. */
+  detailBudget?: number;
+  /** Article pages that cannot be read end the preview; an employee check reports them as a warning instead. */
+  detailFailuresFatal?: boolean;
+  /** Stops the preview when the caller gives up. */
+  signal?: AbortSignal;
+}
+
+export async function previewSource(draft: Pick<SourceRow, "id" | "kind" | "config"> & Partial<SourceRow>, opts: PreviewOptions = {}): Promise<BeforeJson<AdminSourcePreview>> {
   const source = { name: draft.id, enabled: true, cursor: null, tier: "T2", participation_mode: "editorial", ...draft } as SourceRow;
   assertSupportedConfig(source.kind, source.config);
   const started = performance.now();
   let found;
-  if (source.kind === "rss") found = (await fetchRss(source, { force: true })).candidates;
-  else if (source.kind === "web_list") found = await fetchWebList(source);
+  if (source.kind === "rss") found = (await fetchRss(source, { force: true, signal: opts.signal })).candidates;
+  else if (source.kind === "web_list") found = await fetchWebList(source, { signal: opts.signal });
   else if (source.kind === "json_list") found = await fetchJsonList(source);
   else if (source.kind === "x_search") found = (await fetchXSearch(source)).candidates;
   else throw new Error(`preview is not available for ${source.kind} sources`);
@@ -98,15 +108,17 @@ export async function previewSource(draft: Pick<SourceRow, "id" | "kind" | "conf
   let candidates = await listingEntries(source, found);
   const known = await storedDetails(candidates.map((c) => c.identityKey!));
   const admits = (c: Candidate) => filterPublicationWindow([c], source.config.publishedAfter).length > 0;
-  const reads = await enrichDetails(candidates, source, known, { budget: Number(source.config.detail?.maxFetches ?? 0), datedOut: {}, admits });
+  const reads = await enrichDetails(candidates, source, known, { budget: opts.detailBudget ?? Number(source.config.detail?.maxFetches ?? 0), datedOut: {}, admits, signal: opts.signal });
   // A page that fails keeps its listing data, as in collection; when none can be read, the rules are what fails.
-  if (reads.failures.length && reads.failures.length === reads.attempts) {
+  const detailFailures = reads.failures.length;
+  if (detailFailures && detailFailures === reads.attempts && opts.detailFailuresFatal !== false) {
     throw new FetchError(`原文页全部读取失败（${reads.failures.length} 页）：${reads.failures.map((f) => `${f.url}（${f.error}）`).join("；")}`);
   }
   candidates = candidates.filter(admits);
   return {
     ms: Math.round(performance.now() - started),
     count: candidates.length,
+    ...(detailFailures ? { detailFailures } : {}),
     items: candidates.slice(0, 20).map((c) => ({ title: c.title, url: c.url, publishedAt: c.publishedAt?.toISOString() ?? null, excerpt: (c.excerpt ?? c.bodyText ?? "").slice(0, 200) })),
   };
 }

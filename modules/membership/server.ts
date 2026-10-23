@@ -10,6 +10,7 @@ import { getDailyDigest } from "./notifications/digest.ts";
 import { beijingDate } from "@aihot/contracts/time";
 import { listedCondition } from "@aihot/backend/publication/scope";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
+import { SourceCheckTimeout, sourceCheckFailure, sourceCheckTimeoutMs, throwIfCheckAborted } from "./sources.ts";
 import * as cheerio from "cheerio";
 import { PRESET_TAGS } from "./catalog.ts";
 
@@ -19,6 +20,8 @@ const maxAge = 14 * 24 * 60 * 60;
 const attempts = new Map<string, { count: number; until: number }>();
 const sourcePreviews = new Map<string, number[]>();
 const activeSourcePreviews = new Set<string>();
+/** Article pages one employee check reads; the stored source keeps its own budget for its own runs. */
+const SOURCE_PREVIEW_DETAIL_BUDGET = 3;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const randomId = () => randomBytes(16).toString("hex");
 const safeEqual = (a: string, b: string) => {
@@ -254,23 +257,29 @@ export function registerMembership(app: FastifyInstance) {
     let url: URL;
     try { url = new URL(sourceUrl); } catch { return reply.code(400).send({ error: "invalid_url" }); }
     if (!/^https?:$/.test(url.protocol) || url.username || url.password) return reply.code(400).send({ error: "invalid_url" });
+    const digest = createHash("sha256").update(url.toString()).digest("hex").slice(0, 20);
+    const id = `member-source-${digest}`;
+    const alreadyAdded = await sql<{ id: string }[]>`SELECT id FROM sources WHERE id = ${id}`;
+    if (alreadyAdded.length) return reply.code(409).send({ error: "duplicate_source" });
     const key = user.id;
     const nowMs = Date.now();
     const attemptsForUser = (sourcePreviews.get(key) ?? []).filter((stamp) => nowMs - stamp < 60 * 60_000);
     if (activeSourcePreviews.has(key) || activeSourcePreviews.size >= 4 || attemptsForUser.length >= 3) return reply.code(429).send({ error: "source_preview_rate_limited", retryAfterSeconds: 3600 });
     sourcePreviews.set(key, [...attemptsForUser, nowMs]);
     activeSourcePreviews.add(key);
-    const digest = createHash("sha256").update(url.toString()).digest("hex").slice(0, 20);
-    const id = `member-source-${digest}`;
+    // One budget for the whole check (site discovery, listing, article pages): a check that runs out
+    // of time stops the reads it started instead of leaving them running.
+    const budgetMs = sourceCheckTimeoutMs();
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(new SourceCheckTimeout()), budgetMs);
+    deadline.unref?.();
     let previewRunning = false;
     try {
-      const alreadyAdded = await sql<{ id: string }[]>`SELECT id FROM sources WHERE id = ${id}`;
-      if (alreadyAdded.length) return reply.code(409).send({ error: "duplicate_source" });
       let selectedKind = kind;
       let selectedUrl = url.toString();
       let discoveryMethod = "user_supplied";
       if (kind === "web_list" && url.pathname === "/") {
-        const discovered = await discoverSiteFeeds(url);
+        const discovered = await discoverSiteFeeds(url, controller.signal);
         if (discovered.sitemap) { selectedKind = "sitemap"; selectedUrl = discovered.sitemap; discoveryMethod = discovered.sitemapMethod; }
         else if (discovered.rss) { selectedKind = "rss"; selectedUrl = discovered.rss; discoveryMethod = "homepage_alternate"; }
       }
@@ -283,23 +292,35 @@ export function registerMembership(app: FastifyInstance) {
         : selectedKind === "sitemap"
           ? { url: selectedUrl, parseMode: "sitemap", detail: { titleSelector: "title", maxFetches: 15 }, _aihot: report }
           : { url: selectedUrl, parseMode: "html", detail: { maxFetches: 5 }, _aihot: report };
-      const previewTask = previewSource({ id, kind: sourceKind, config: sourceConfig });
+      const previewTask = previewSource({ id, kind: sourceKind, config: sourceConfig }, {
+        signal: controller.signal,
+        detailBudget: SOURCE_PREVIEW_DETAIL_BUDGET,
+        // Article pages that cannot be read are reported with the result; the listing itself was read.
+        detailFailuresFatal: false,
+      });
       previewRunning = true;
       void previewTask.then(() => activeSourcePreviews.delete(key), () => activeSourcePreviews.delete(key));
       let timer: ReturnType<typeof setTimeout> | undefined;
       const preview = await Promise.race([
         previewTask,
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("preview_timeout")), 45_000); }),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new SourceCheckTimeout()), budgetMs + 5_000); }),
       ]).finally(() => { if (timer) clearTimeout(timer); });
-      if (!preview.count) return reply.code(422).send({ error: "no_public_articles_found" });
+      // A check that ran out of time saves nothing: the source is not created after the deadline, and
+      // the page is told the check timed out rather than that the site refused.
+      throwIfCheckAborted(controller.signal);
+      if (!preview.count) return reply.code(422).send({ error: "source_no_articles" });
       (sourceConfig._aihot as Record<string, unknown>).previewCount = preview.count;
       const created = await createSource({ id, name: name.trim(), kind: sourceKind, config: sourceConfig, interval_minutes: 30, tags: ["员工提交"], site_fulltext: false, syndicate_fulltext: false }, `member:${user.id}`);
       if (!created.created) return reply.code(409).send({ error: "duplicate_source", source: created.duplicate });
-      return reply.code(201).send({ source: { id, name: name.trim(), kind: selectedKind, previewCount: preview.count, discoveredUrl: selectedUrl, scope, discoveryMethod } });
+      return reply.code(201).send({ source: { id, name: name.trim(), kind: selectedKind, previewCount: preview.count, detailFailures: preview.detailFailures ?? 0, discoveredUrl: selectedUrl, scope, discoveryMethod } });
     } catch (error) {
-      req.log.info({ sourceId: id }, "employee source preview failed");
-      return reply.code(422).send({ error: "source_validation_failed" });
+      const failure = sourceCheckFailure(error);
+      req.log.info({ sourceId: id, code: failure.code }, "employee source check failed");
+      return reply.code(failure.status).send({ error: failure.code });
     } finally {
+      clearTimeout(deadline);
+      // A check that ended (accepted, refused or out of time) stops the reads it started.
+      controller.abort();
       if (!previewRunning) activeSourcePreviews.delete(key);
       if (sourcePreviews.size > 5000) for (const [entryKey, stamps] of sourcePreviews) {
         const recent = stamps.filter((stamp) => nowMs - stamp < 60 * 60_000);
@@ -323,12 +344,12 @@ export function registerMembership(app: FastifyInstance) {
   });
 }
 
-async function discoverSiteFeeds(home: URL): Promise<{ rss: string | null; sitemap: string | null; sitemapMethod: string }> {
+async function discoverSiteFeeds(home: URL, signal?: AbortSignal): Promise<{ rss: string | null; sitemap: string | null; sitemapMethod: string }> {
   const rssSet = new Set<string>();
   let sitemap: string | null = null;
   let sitemapMethod = "user_supplied";
   try {
-    const page = await guardedFetch(home.toString(), { timeoutMs: 8_000, maxBytes: 512_000, maxRedirects: 3, headers: { accept: "text/html,application/xhtml+xml" } });
+    const page = await guardedFetch(home.toString(), { timeoutMs: 8_000, maxBytes: 512_000, maxRedirects: 3, headers: { accept: "text/html,application/xhtml+xml" }, signal });
     const $ = cheerio.load(page.text());
     $("link[rel~='alternate'][type*='rss'], link[rel~='alternate'][type*='atom']").each((_i, el) => {
       const href = $(el).attr("href");
@@ -338,7 +359,7 @@ async function discoverSiteFeeds(home: URL): Promise<{ rss: string | null; sitem
       const href = $(el).attr("href");
       if (href && !sitemap) try { sitemap = new URL(href, page.url).toString(); sitemapMethod = "homepage_link"; } catch {}
     });
-    const robots = await guardedFetch(new URL("/robots.txt", page.url).toString(), { timeoutMs: 5_000, maxBytes: 64_000, maxRedirects: 2, headers: { accept: "text/plain" } });
+    const robots = await guardedFetch(new URL("/robots.txt", page.url).toString(), { timeoutMs: 5_000, maxBytes: 64_000, maxRedirects: 2, headers: { accept: "text/plain" }, signal });
     const line = robots.text().split(/\r?\n/).find((row) => /^\s*sitemap\s*:/i.test(row));
     if (!sitemap && line) try { sitemap = new URL(line.split(":").slice(1).join(":").trim(), page.url).toString(); sitemapMethod = "robots_txt"; } catch {}
   } catch {
@@ -348,7 +369,7 @@ async function discoverSiteFeeds(home: URL): Promise<{ rss: string | null; sitem
     for (const path of ["/sitemap.xml", "/sitemap_index.xml"]) {
       try {
         const candidate = new URL(path, home).toString();
-        const response = await guardedFetch(candidate, { timeoutMs: 5_000, maxBytes: 32_000, maxRedirects: 2, headers: { accept: "application/xml,text/xml,*/*;q=0.8" } });
+        const response = await guardedFetch(candidate, { timeoutMs: 5_000, maxBytes: 32_000, maxRedirects: 2, headers: { accept: "application/xml,text/xml,*/*;q=0.8" }, signal });
         if (response.status === 200 && /<(?:\w+:)?(?:sitemapindex|urlset)\b/i.test(response.text())) { sitemap = response.url; sitemapMethod = "well_known"; break; }
       } catch { /* Try the next well-known sitemap location. */ }
     }

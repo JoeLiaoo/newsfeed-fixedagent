@@ -82,6 +82,8 @@ export interface GuardedFetchOptions {
    * PRIVATE_FEED_HOSTS it may be a private service. Redirects to any other host keep the normal rules.
    */
   privateFeedHost?: boolean;
+  /** Stops the read when the caller gives up (a preview whose deadline passed); the timeout still applies. */
+  signal?: AbortSignal;
 }
 
 export interface GuardedResponse {
@@ -117,8 +119,9 @@ export const languageHeaders = (language: string | undefined): Record<string, st
 
 export async function guardedFetch(input: string, opts: GuardedFetchOptions = {}): Promise<GuardedResponse> {
   // One budget includes DNS, every redirect and the body. Restarting it at each hop allowed a
-  // nominal 20 s image request to occupy the API for minutes.
-  const signal = AbortSignal.timeout(opts.timeoutMs ?? 20_000);
+  // nominal 20 s image request to occupy the API for minutes. A caller's signal stops the read with it.
+  const deadline = AbortSignal.timeout(opts.timeoutMs ?? 20_000);
+  const signal = opts.signal ? AbortSignal.any([deadline, opts.signal]) : deadline;
   const route = opts.route ?? "egress";
   const configuredHost = hostOf(new URL(input));
   const privateHosts = opts.privateFeedHost && config.privateFeedHosts.includes(configuredHost) ? [configuredHost] : [];
