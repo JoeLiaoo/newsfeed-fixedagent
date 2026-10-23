@@ -86,6 +86,11 @@
 - web、API、worker 运行新镜像，数据库保持健康。公网和本机 `/api/health` 均返回 `ok=true`、`db=ok`、release 为合并提交；公网 `/login` 返回 HTTP 200。二维码新标签页及互动状态仍需用户真机验证，P3-04 未完成。
 - 详细备份位置和发布操作见[PR #22 部署日志](logs/2026-10-23-P4-pr22-deployment.md)。
 
+### PR #29 注册提示发布（2026-10-23）
+
+- [PR #29](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/29) 已合并并部署，提交 `bd53dcbb8a46b83712160409b9424a2ff7061f62`。注册页常驻展示用户名规则与独立密码提醒，未改变注册校验或数据库。
+- 发布前保存配置与数据库转储，`pg_restore --list` 通过；web、API、worker 使用目标镜像，本机及公网健康端点返回该 release，公网 `/register` 返回 HTTP 200。完整操作及回退边界见[PR #29 部署日志](logs/2026-10-23-P4-pr29-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
