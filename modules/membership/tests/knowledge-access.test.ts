@@ -41,15 +41,32 @@ const DRAFT = {
 
 // The second organisation's material about the same target: the same subject, another viewpoint.
 const SECOND_DRAFT = {
-  ...DRAFT,
   pages: [{
-    ...DRAFT.pages[0],
+    pageType: "view",
     slug: "view-company-example-other",
+    title: "某公司",
+    targetType: "公司",
+    targetName: "某公司",
+    track: "食品饮料",
     consensus: "基于 1 家机构 1 位分析师 1 篇材料：需求恢复或慢于预期。",
+    divergences: [{ point: "动销恢复节奏", sides: [{ attribution: "王五/另一券商", argument: "终端动销偏弱", date: "2026-07-01" }] }],
+    marginalChanges: [{ date: "2026-07-01", attribution: "王五/另一券商", note: "维持中性" }],
     stances: [{ analyst: "王五", institution: "另一券商", stance: "中性", date: "2026-07-01", argument: "动销恢复偏慢", sourceRef: "S1" }],
+    expectations: [],
+    risks: [{ threshold: "终端动销持续低于预期", interpretation: "需求恢复证伪", attribution: "王五/另一券商", date: "2026-07-01" }],
     timeline: [{ date: "2026-07-01", headline: "另一家维持中性", notes: [], sourceRefs: ["S1"] }],
+    question: null,
+    answer: null,
+    definition: null,
+    structure: [],
+    inputs: [],
+    outputs: [],
+    anchors: [],
+    metrics: [],
+    related: [],
   }],
   sources: [{ ref: "S1", institution: "另一券商", authors: ["王五"], date: "2026-07-01", dateBasis: "首页", kind: "点评" }],
+  notes: "测试用草稿（另一家机构）",
 };
 
 const AUDIT = { verdict: "pass_with_issues", corrections: [], findings: [{ level: "advisory", category: "coverage-mismatch", target: "view-company-example", message: "覆盖较薄", evidence: null }], notes: "" };
@@ -236,6 +253,7 @@ test("the shared library is open to approved employees and closed to everyone el
   assert.equal((await afterWithdrawal.json() as { pages: unknown[] }).pages.length, 1, "另一份材料还在，页面仍在");
   const afterBody = await sql`SELECT body_md FROM member_wiki_page_revisions ORDER BY revision DESC LIMIT 1`;
   assert.doesNotMatch(afterBody[0]!.body_md, /张三/, "撤回的材料不再出现在页面里");
+  assert.match(afterBody[0]!.body_md, /王五/, "其他机构的观点仍在");
   const withdrawnOriginal = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: { cookie: cookies[1]!, ...common } });
   assert.equal(withdrawnOriginal.statusCode, 404, "共享库不再提供撤回材料的原件");
   const outsiderOriginal = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: { cookie: cookies[2]!, ...common } });
