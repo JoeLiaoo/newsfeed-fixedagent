@@ -346,3 +346,11 @@ test("answer provenance rejects mixed or unbound citations and derives freshness
     { ...valid, citations: [{ ...citation, pageSlug: "not-routed" }] },
   ]) assert.throws(() => verifyAnswer(invalid, pages), /knowledge_answer_unverified/);
 });
+
+
+test("a heading before an oversized paragraph does not consume the entire extraction", async () => {
+  const extracted = await extractMaterial("markdown", Buffer.from("# Heading\n" + "x".repeat(70_000)));
+  const capped = capExtraction(extracted, 60_000);
+  assert.ok(capped.text.length > 59_000, "keep a useful prefix rather than only the short heading");
+  assert.ok(capped.text.length <= 60_000);
+});

@@ -307,7 +307,7 @@ test("the shared library is open to approved employees and closed to everyone el
     const taskId = randomUUID();
     if (!options.documentId) await sql`INSERT INTO member_wiki_documents(id,uploader_id,title) VALUES (${documentId},${owner!.id},'checkpoint fixture')`;
     await sql`INSERT INTO member_wiki_document_versions(id,document_id,version_no,uploader_id,file_name,media_type,format,byte_size,sha256,body,extracted_text,extraction_status)
-      VALUES (${versionId},${documentId},${options.versionNo ?? 1},${owner!.id},'checkpoint.md','text/markdown','markdown',7,${versionId},${Buffer.from('fixture')},'fixture','available')`;
+      VALUES (${versionId},${documentId},${options.versionNo ?? 1},${owner!.id},'checkpoint.md','text/markdown','markdown',7,${versionId},${Buffer.from('fixture')},${`fixture ${versionId}`},'available')`;
     const draft = { ...DRAFT, pages };
     await sql`INSERT INTO member_wiki_tasks(id,document_id,version_id,uploader_id,draft,audit)
       VALUES (${taskId},${documentId},${versionId},${owner!.id},${sql.json(draft)},${options.audit === false ? null : sql.json(AUDIT)})`;
@@ -344,22 +344,30 @@ test("the shared library is open to approved employees and closed to everyone el
   }));
 
   const cancelled = await seed([basePage], { audit: false });
+  let cancellationObserved = false;
   auditHook = async () => {
+    cancellationObserved = true;
     const response = await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/documents/${cancelled.documentId}/withdraw`, headers: { cookie: cookies[0]!, ...common } });
     assert.equal(response.statusCode, 200);
   };
   await runWikiTask(cancelled.taskId);
+  assert.equal(cancellationObserved, true, "the model boundary was actually crossed");
   assert.equal((await sql`SELECT state FROM member_wiki_tasks WHERE id=${cancelled.taskId}`)[0]?.state, "cancelled");
   assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_contributions WHERE document_id=${cancelled.documentId}`)[0]?.n, 0, "an in-flight model result cannot revive a withdrawn document");
 
   const recovered = await seed([basePage], { audit: false });
+  let recoveryObserved = false;
   auditHook = async () => {
-    await sql`UPDATE member_wiki_tasks SET lease_expires_at=now()-interval '1 minute' WHERE id=${recovered.taskId}`;
+    recoveryObserved = true;
+    // Recovery resumes the persisted audit checkpoint, while the old worker still has its result
+    // in flight. A unique material prevents another test's paid-request receipt being reused.
+    await sql`UPDATE member_wiki_tasks SET audit=${sql.json(AUDIT)}, lease_expires_at=now()-interval '1 minute' WHERE id=${recovered.taskId}`;
     const recovery = await recoverWikiTasks(async taskId => { assert.equal(taskId, recovered.taskId); });
     assert.equal(recovery.recovered, 1);
     await runWikiTask(recovered.taskId);
   };
   await runWikiTask(recovered.taskId);
+  assert.equal(recoveryObserved, true, "recovery must execute, not reuse an earlier receipt");
   assert.equal((await sql`SELECT state FROM member_wiki_tasks WHERE id=${recovered.taskId}`)[0]?.state, "succeeded");
   const beforeDuplicate = await sql`SELECT count(*)::int AS n FROM member_wiki_page_revisions WHERE task_id=${recovered.taskId}`;
   assert.equal(beforeDuplicate[0]?.n, 1, "the recovered worker publishes once; the old lease publishes nothing");

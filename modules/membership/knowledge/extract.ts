@@ -149,9 +149,9 @@ function prefixOf(text: string, room: number): string {
   if (text.length <= room) return text;
   const head = text.slice(0, room);
   const line = head.lastIndexOf("\n");
-  if (line > 0) return head.slice(0, line);
+  if (line >= room / 2) return head.slice(0, line);
   const sentence = Math.max(head.lastIndexOf("。"), head.lastIndexOf("！"), head.lastIndexOf("？"), head.lastIndexOf(".\n"));
-  if (sentence > 0) return head.slice(0, sentence + 1);
+  if (sentence >= room / 2) return head.slice(0, sentence + 1);
   return head;
 }
 
