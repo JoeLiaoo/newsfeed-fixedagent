@@ -32,6 +32,7 @@
 
 - **材料与页面各有一个 `base_id`**；构建任务、贡献、修订、引用与质量问题都从材料或页面派生，因此不再单列。
 - **页面的 `target_key` 与 `slug` 按库分开**：共享库沿用上线前已有的 `target_key` 与 `slug`（如 `view-company-example`），因此已发布的页面仍是共享库的页面；其他库在前面加自己的库号（如 `kb-1a2b3c4d5e6f|view|公司|某公司`、`kb-1a2b3c4d5e6f-view-company-example`）。同一标的因此可以在两个库中各有一页，互不合并、互不引用。
+- Builder 原始 slug 上限为 80 字符；问答使用发布后的完整标识（含库前缀与消歧后缀），上限为 128 字符，不截断已有页面地址。
 - **问答只在本库内路由**：提问时带上库号，候选页面只取该库已发布的页面；库里没有覆盖时返回 `knowledge_no_coverage`。
 - 规则与换算写在 `modules/membership/knowledge/bases.ts`（`scopedTargetKey`／`scopedSlug`／`baseSlugOf`），改库的空间规则只改这一处。
 

@@ -371,3 +371,19 @@ test("every knowledge base has a key space and a slug space of its own", () => {
   assert.notEqual(scopedTargetKey("kb-abc", "view|company|某公司"), scopedTargetKey("kb-xyz", "view|company|某公司"));
   assert.notEqual(scopedSlug("kb-abc", "view-company-example"), scopedSlug("kb-xyz", "view-company-example"));
 });
+
+
+test("answer citations accept complete published names with base and collision suffixes", () => {
+  const raw = "a".repeat(80);
+  const published = `${scopedSlug("kb-123456789abc", raw)}-12345678`;
+  const parsed = answerSchema.parse({
+    answer: "依据[^1]。",
+    citations: [{ label: "1", pageSlug: published, citationId: "citation-id" }],
+  });
+  assert.equal(parsed.citations[0]?.pageSlug, published);
+  assert.equal(published.length, 105);
+  assert.equal(answerSchema.parse({
+    answer: "依据[^1]。",
+    citations: [{ label: "1", pageSlug: raw, citationId: "citation-id" }],
+  }).citations[0]?.pageSlug, raw, "shared base names stay unchanged");
+});

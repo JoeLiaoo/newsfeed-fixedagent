@@ -32,6 +32,9 @@ export function maxFileBytes(): number {
 /** How much extracted text one material may contribute to a build. Longer material is cut at a page or section edge. */
 export const MAX_EXTRACTED_CHARS = 60_000;
 
+/** Published slugs include the 80-character draft name, a base prefix and collision suffix. */
+export const MAX_PUBLISHED_PAGE_SLUG_LENGTH = 128;
+
 /** The pages one build may publish. */
 export const MAX_PAGES_PER_BUILD = 8;
 

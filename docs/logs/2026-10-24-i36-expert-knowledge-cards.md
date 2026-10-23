@@ -73,3 +73,11 @@
 ## 涉及文件
 
 `apps/web/app/components/member-ui/card.tsx`、`modules/membership/module.ts`、`modules/membership/knowledge/bases.ts`（新增）、`modules/membership/knowledge/routes.ts`、`modules/membership/knowledge/publish.ts`、`modules/membership/knowledge/worker.ts`、`modules/membership/pages/experts.tsx`（重写）、`modules/membership/pages/expert-detail.tsx`（新增）、`modules/membership/pages/expert-new.tsx`（新增）、`modules/membership/pages/knowledge.tsx`（重写）、`modules/membership/pages/knowledge-base.tsx`（新增）、`modules/membership/pages/knowledge-base-new.tsx`（新增）、`modules/membership/pages/knowledge-target.tsx`、`modules/membership/pages/knowledge-document.tsx`、`modules/membership/tests/knowledge-bases.test.ts`（新增）、`modules/membership/tests/knowledge-core.standalone.test.ts`、`modules/membership/migrations/0176_…`～`0180_…`（新增 5 条）、`.github/workflows/p3-checks.yml`、`docs/PLAN.md`、`docs/IMPLEMENTATION.md`、`docs/KNOWLEDGE-OPS.md`、`docs/PROGRESS-REPORT.md`、`docs/README.md`、`docs/logs/2026-10-24-i36-expert-knowledge-cards.md`（新增）。
+
+## PR #38 复审修复（2026-10-24）
+
+- 首轮意见：[PR 评论](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/38#issuecomment-6371815269)，审阅版本 `341ec58`。提交者在意见之后提交 `d6b231d`，将两处数组比较改为内容比较，进入第二轮复审。
+- 复审仍发现合法原始 slug 加知识库前缀后超过问答引用的 80 字符上限。按已授权流程直接修复：保持 Builder 原始 slug 上限 80，发布后的引用标识上限为 128，并要求模型原样复制完整标识；保留共享库旧地址，不截断或重写页面名。
+- 数据库多库场景改用 70 字符原始 slug，实际经过上传、构建、发布、answers 路由以及引用校验；同时验证共享库旧地址。独立回归覆盖 80 字符原始名加库前缀及碰撞后缀后的 105 字符引用。
+- 本地 knowledge-core 19/19、类型检查、Web 构建、306 个文档链接及 diff 空白检查均通过；最终 head CI 待完成后记录。数据库用例依赖 CI 临时 PostgreSQL，本环境未运行数据库。
+- PR 尚未合并；未部署生产、未执行生产迁移，真实员工与真实模型验收仍待完成。P5-02～P5-04 勾选不变。

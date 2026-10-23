@@ -12,10 +12,13 @@ import { stub, tag } from "../../../tests/setup.ts";
 import { runWikiTask } from "../knowledge/worker.ts";
 import { DEFAULT_BASE_ID } from "../knowledge/bases.ts";
 
+// A valid draft name grows beyond 80 characters once the new base prefixes it.
+const PAGE_SLUG = `view-company-${"a".repeat(57)}`;
+
 const DRAFT = {
   pages: [{
     pageType: "view",
-    slug: "view-company-example",
+    slug: PAGE_SLUG,
     title: "某公司",
     targetType: "公司",
     targetName: "某公司",
@@ -126,7 +129,7 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
   const pages = await sql`SELECT slug, base_id, target_key FROM member_wiki_pages`;
   assert.equal(pages.length, 1);
   assert.equal(pages[0]?.base_id, base.id);
-  assert.equal(pages[0]?.slug, `${base.id}-view-company-example`, "the page carries the base's own prefix");
+  assert.equal(pages[0]?.slug, `${base.id}-${PAGE_SLUG}`, "the page carries the base's own prefix");
   assert.ok((pages[0]?.target_key ?? "").startsWith(`${base.id}|`), "the page's key belongs to the base's key space");
 
   // The pages of the base are listed under that base, and the other base has none.
@@ -140,7 +143,7 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
   const answer = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { baseId: base.id, question: "某公司现在怎么看？" } });
   assert.equal(answer.statusCode, 200);
   const answered = await answer.json() as { answer: { citations: Array<{ pageSlug: string }> } };
-  assert.deepEqual(answered.answer.citations.map(citation => citation.pageSlug), [`${base.id}-view-company-example`]);
+  assert.deepEqual(answered.answer.citations.map(citation => citation.pageSlug), [`${base.id}-${PAGE_SLUG}`]);
   const otherAnswer = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { baseId: DEFAULT_BASE_ID, question: "某公司现在怎么看？" } });
   assert.equal(otherAnswer.statusCode, 404, "the other base has no page to answer from");
   assert.equal((await otherAnswer.json() as { error: string }).error, "knowledge_no_coverage");
@@ -158,12 +161,12 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
   await runWikiTask(sharedTaskId);
   const both = await sql`SELECT slug, base_id FROM member_wiki_pages`;
   assert.equal(both.length, 2, "the two bases hold a page each");
-  assert.equal(both.find(row => row.base_id === DEFAULT_BASE_ID)?.slug, "view-company-example", "the shared base keeps the slugs its pages already carry");
-  assert.equal(both.find(row => row.base_id === base.id)?.slug, `${base.id}-view-company-example`);
+  assert.equal(both.find(row => row.base_id === DEFAULT_BASE_ID)?.slug, PAGE_SLUG, "the shared base keeps the slugs its pages already carry");
+  assert.equal(both.find(row => row.base_id === base.id)?.slug, `${base.id}-${PAGE_SLUG}`);
   const sharedList = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/pages?baseId=${DEFAULT_BASE_ID}`, headers: { cookie: cookies[0]!, ...common } });
-  assert.deepEqual((await sharedList.json() as { pages: Array<{ slug: string }> }).pages.map(page => page.slug), ["view-company-example"]);
+  assert.deepEqual((await sharedList.json() as { pages: Array<{ slug: string }> }).pages.map(page => page.slug), [PAGE_SLUG]);
   const ownList = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/pages?baseId=${base.id}`, headers: { cookie: cookies[0]!, ...common } });
-  assert.deepEqual((await ownList.json() as { pages: Array<{ slug: string }> }).pages.map(page => page.slug), [`${base.id}-view-company-example`]);
+  assert.deepEqual((await ownList.json() as { pages: Array<{ slug: string }> }).pages.map(page => page.slug), [`${base.id}-${PAGE_SLUG}`]);
 
   // The base card counts what the base holds.
   const counted = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/bases", headers: { cookie: cookies[0]!, ...common } });
