@@ -1,19 +1,21 @@
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Link, useRouteLoaderData } from "react-router";
+import { Settings2 } from "lucide-react";
 import { POLICY, SITE } from "@aihot/site";
 import type { loader as rootLoader } from "../root";
 import { useChangelogDot } from "../components/shell/Sidebar";
 import { PhoneBar } from "../components/shell/PhoneBar";
-import { inNav } from "../components/shell/nav";
+import { sidebar } from "../components/shell/nav";
+import { NavList } from "../components/shell/NavGroups";
 import type { Screen } from "../components/shell/screens";
 import { edgeTtl } from "../lib/api.server";
 import { webModules } from "../site-modules";
 import { pageMeta } from "../lib/seo";
-import { setFontPreference, useFontPreference, useStarred } from "../lib/local-state";
+import { setFontPreference, useFontPreference } from "../lib/local-state";
 import { Select } from "../components/ui/Controls";
 import { ThemeSwitch } from "../components/shell/ThemeSwitch";
 import { Filings } from "../components/shell/Filings";
-import { IconBookmark, IconChevronRight, IconGrid, IconHeart, IconMessage, IconMoon, IconPlug, IconSparkles } from "../components/icons";
+import { IconChevronRight, IconHeart, IconMessage, IconMoon, IconPlug, IconSparkles } from "../components/icons";
 
 export const handle: Screen = { tab: "me", name: "我的" };
 
@@ -26,8 +28,8 @@ export function meta() {
 }
 
 /**
- * "我的", the phone's last tab (the address stays /more): this browser's bookmarks and appearance first,
- * then the tools, then the site's own pages.
+ * "我的", the phone's last tab (the address stays /more): the site's groups first, so every entry
+ * is one tap away on a narrow screen, then this browser's account pages, the tools and the site's own pages.
  */
 type Row = { to: string; label: string; icon: ReactNode; detail?: ReactNode };
 
@@ -37,7 +39,6 @@ const agentWays = () => [...webModules().flatMap((m) => m.agentWays ?? []), "MCP
 /** The modules' tools first, then the engine's. */
 const tools = (): Row[] => [
   ...webModules().flatMap((m) => m.tools ?? []),
-  ...(inNav("/topics") ? [{ to: "/topics", label: "主题", icon: <IconGrid size={20} /> }] : []),
   { to: "/agent", label: "Agent 接入", icon: <IconPlug size={20} />, detail: agentWays().slice(0, 3).join(" · ") },
 ];
 
@@ -69,18 +70,20 @@ function RowLink({ row, dot = false }: { row: Row; dot?: boolean }) {
 export default function MorePage() {
   const root = useRouteLoaderData<typeof rootLoader>("root");
   const changelogDot = useChangelogDot(root?.changelogVersion ?? null);
-  const starred = useStarred();
   const font = useFontPreference();
-  // The count is this browser's: shown once the page runs here, never in the shared server copy.
-  const [here, setHere] = useState(false);
-  useEffect(() => setHere(true), []);
   return (
     <div className="mx-auto max-w-[var(--page-max-reading)] pb-8">
       <PhoneBar title="我的" large />
       <h1 className="hidden pb-4 pt-1 text-[22px] font-bold text-ink lg:block">我的</h1>
       <div className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-4 2xl:grid-cols-3">
+        <section>
+          <h2 className="px-4 pb-2 pt-6 text-[13px] font-semibold text-ink-3">导航</h2>
+          <div className="card overflow-hidden">
+            <NavList groups={sidebar()} />
+          </div>
+        </section>
         <Group>
-          <RowLink row={{ to: "/starred", label: "收藏", icon: <IconBookmark size={20} />, detail: here && starred.length > 0 ? <span className="num">{starred.length}</span> : undefined }} />
+          <RowLink row={{ to: "/settings/profile", label: "个人设置", icon: <Settings2 size={20} /> }} />
           <li className="flex min-h-[56px] items-center gap-3 px-4 text-[16px] font-medium text-ink">
             <span className="text-ink-3">
               <IconMoon size={20} />

@@ -1,11 +1,10 @@
-// Site navigation in one place: the desktop sidebar's sections and the phone tab bar's tabs, the engine's
+// Site navigation in one place: the desktop sidebar's groups and the phone tab bar's tabs, the engine's
 // and the site's modules'.
 import type { ReactNode } from "react";
 import { NAV, subjectAfter, withSubject } from "@aihot/site";
+import { BriefcaseBusiness, Building2, FolderKanban, FolderTree, Landmark, Library, Newspaper } from "lucide-react";
 import { webModules } from "../../site-modules";
-import {
-  IconBolt, IconBookmark, IconDoc, IconFlame, IconGrid, IconHeart, IconHistory, IconList, IconMessage, IconPlug, IconUser,
-} from "../icons";
+import { IconBolt, IconBookmark, IconDoc, IconFlame, IconGrid, IconList, IconUser } from "../icons";
 
 export interface NavItem {
   to: string;
@@ -13,13 +12,26 @@ export interface NavItem {
   icon: (p: { size?: number }) => ReactNode;
   /** Match the path exactly (the home page). */
   end?: boolean;
-  /** Shows the unread dot while the changelog has news. */
-  changelog?: boolean;
 }
 
-const SECTIONS: Array<{ title: string; items: NavItem[] }> = [
+/** A group of the sidebar: a title with an icon, either a page of its own or a list of children. */
+export interface NavGroup {
+  /** The group's id: a module fills the group the engine declares (WebModule.sidebar). */
+  id: string;
+  title: string;
+  icon: (p: { size?: number }) => ReactNode;
+  /** The page the group leads to when it has no children. */
+  to?: string;
+  /** The group's children, in the order they are shown. */
+  items?: NavItem[];
+}
+
+/** The site's groups, in the order the sidebar shows them. */
+const GROUPS: NavGroup[] = [
   {
-    title: "内容",
+    id: "news",
+    title: "资讯平台",
+    icon: Newspaper,
     items: [
       { to: "/", label: "精选", icon: IconBolt, end: true },
       { to: "/all", label: subjectAfter("全部", "动态"), icon: IconList },
@@ -29,15 +41,18 @@ const SECTIONS: Array<{ title: string; items: NavItem[] }> = [
       { to: "/starred", label: "收藏", icon: IconBookmark },
     ],
   },
+  { id: "experts", title: "专家平台", icon: BriefcaseBusiness },
   {
-    title: "更多",
+    id: "projects",
+    title: "项目信息",
+    icon: FolderKanban,
     items: [
-      { to: "/agent", label: "Agent 接入", icon: IconPlug },
-      { to: "/about", label: "关于", icon: IconHeart },
-      { to: "/changelog", label: "更新日志", icon: IconHistory, changelog: true },
-      { to: "/feedback", label: "反馈", icon: IconMessage },
+      { to: "/projects/invested-gp", label: "已投GP直投项目", icon: FolderTree },
+      { to: "/projects/citic-alliance", label: "中信股权联盟直投项目", icon: Landmark },
+      { to: "/projects/market-leaders", label: "市场头部机构直投项目", icon: Building2 },
     ],
   },
+  { id: "knowledge", title: "知识库", icon: Library },
 ];
 
 /** Whether an engine page is a way in from the navigation (site.ts NAV.hidden); a hidden page still opens. */
@@ -59,24 +74,27 @@ export function navUp(entry: keyof typeof UP): { to: string; name: string; back:
 }
 
 /**
- * The sidebar: the engine's sections with the modules' between 内容 and 更多; a module naming a section
- * that is already there adds to it.
+ * The sidebar's groups: the engine's, with the modules' entries in the group each of them names. A module
+ * fills a group by its id: with children (the group's list) or with the page the group leads to.
  */
-export function sidebar(): Array<{ title: string; items: NavItem[] }> {
-  const [content, ...rest] = SECTIONS;
-  const more = rest.pop()!;
-  const sections = [content!, ...rest].map((s) => ({ ...s, items: s.items.filter((i) => inNav(i.to)) }));
-  for (const m of webModules()) {
-    if (!m.sidebar) continue;
-    const section = sections.find((s) => s.title === m.sidebar!.section);
-    if (section) section.items.push(...m.sidebar.items);
-    else sections.push({ title: m.sidebar.section, items: [...m.sidebar.items] });
+export function sidebar(): NavGroup[] {
+  const groups: NavGroup[] = GROUPS.map((group) => ({
+    ...group,
+    items: group.items?.filter((item) => inNav(item.to)),
+  }));
+  for (const module of webModules()) {
+    for (const entry of module.sidebar ?? []) {
+      const group = groups.find((g) => g.id === entry.group);
+      if (!group) continue;
+      if (entry.items?.length) group.items = [...(group.items ?? []), ...entry.items.filter((item) => inNav(item.to))];
+      if (entry.link) group.to = entry.link.to;
+    }
   }
-  return [...sections, more];
+  return groups.filter((group) => group.to || group.items?.length);
 }
 
 /** A sidebar entry is lit on its pages; 日报 also covers weekly and monthly reports. */
-export function sidebarIsActive(item: NavItem, pathname: string): boolean {
+export function sidebarIsActive(item: Pick<NavItem, "to" | "end">, pathname: string): boolean {
   if (item.end) return pathname === item.to;
   if (item.to === "/daily") return /^\/(daily|weekly|monthly)(\/|$)/.test(pathname);
   return pathname === item.to || pathname.startsWith(`${item.to}/`);

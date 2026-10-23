@@ -116,8 +116,16 @@ export interface TopicPagePart {
 export interface WebModule {
   /** Its folder under modules/. */
   name: string;
-  /** Desktop sidebar: entries in a section between the engine's 内容 and 更多; modules naming the same section share it. */
-  sidebar?: { section: string; items: NavItem[] };
+  /**
+   * Desktop sidebar: the groups the module fills, each by the id the engine declares
+   * (components/shell/nav.ts). A group with children of its own takes the module's entries as its
+   * children (after the engine's); a group that is a page of its own takes the module's link.
+   */
+  sidebar?: Array<{
+    group: string;
+    items?: NavItem[];
+    link?: { to: string };
+  }>;
   /** Phone tab bar: tabs before 我的. */
   tabs?: Tab[];
   /** The 我的 page: rows ahead of the engine's tools. */
