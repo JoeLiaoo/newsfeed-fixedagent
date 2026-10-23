@@ -13,6 +13,8 @@ export const membershipModule: ModuleDeclaration = {
     { path: "projects/citic-alliance", file: "pages/projects/citic-alliance.tsx" },
     { path: "projects/market-leaders", file: "pages/projects/market-leaders.tsx" },
     { path: "knowledge", file: "pages/knowledge.tsx" },
+    { path: "knowledge/targets/:slug", file: "pages/knowledge-target.tsx" },
+    { path: "knowledge/documents/:id", file: "pages/knowledge-document.tsx" },
     { path: "settings/admin-members", file: "pages/admin-members.tsx" },
     { path: "settings/admin-gps", file: "pages/gp-admin.tsx" },
     { path: "settings/notifications", file: "pages/notifications.tsx" },

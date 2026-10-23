@@ -1,7 +1,7 @@
 // The backend of the site's modules, installed by the api and the worker when they start (site/modules/index.ts).
 import type { ServerModule } from "@aihot/backend/modules";
 import { enqueueOn } from "@aihot/backend/jobs/queue";
-import { registerMembership, cleanupExpertData, recoverExpertTasks, EXPERT_QUEUE } from "@citic/membership/server";
+import { registerMembership, cleanupExpertData, recoverExpertTasks, EXPERT_QUEUE, WIKI_QUEUE, recoverWikiTasks } from "@citic/membership/server";
 import { GP_QUEUE } from "@citic/membership/gp-queue";
 import { syncAllGps,classifyPendingGps } from "@citic/membership/gp-sync";
 import { generateDueNotifications,dispatchOutbox,cleanupP3Data } from "@citic/membership/notifications-outbox";
@@ -11,7 +11,7 @@ import {confirmPendingIlinkBindings} from "@citic/membership/notifications-scan"
 export const SERVER_MODULES: readonly ServerModule[] = [{
   name: "membership",
   http: registerMembership,
-  queues: [EXPERT_QUEUE, GP_QUEUE],
+  queues: [EXPERT_QUEUE, GP_QUEUE, WIKI_QUEUE],
   schedules: [
     {name: "membership.notifications-generate",cron:"0 9-23 * * *",missed:"once",run:generateDueNotifications,when:()=>process.env.P3_NOTIFICATIONS_ENABLED==="true"},
     {name: "membership.notifications-dispatch",cron:"*/5 * * * *",run:dispatchOutbox,when:()=>process.env.P3_DELIVERY_ENABLED==="true"},
@@ -23,6 +23,11 @@ export const SERVER_MODULES: readonly ServerModule[] = [{
     name: "membership.expert-recover",
     cron: "*/5 * * * *",
     run: () => recoverExpertTasks((taskId, tx) => enqueueOn(EXPERT_QUEUE, { taskId }, { singletonKey: taskId }, tx)),
+  }, {
+    // A build whose worker stopped is picked up again and resumes from the stage it reached.
+    name: "membership.knowledge-recover",
+    cron: "*/5 * * * *",
+    run: () => recoverWikiTasks((taskId, tx) => enqueueOn(WIKI_QUEUE, { taskId }, { singletonKey: taskId }, tx)),
   }],
   retention: async now => ({...await cleanupExpertData(now),...await cleanupP3Data()}),
 }];
