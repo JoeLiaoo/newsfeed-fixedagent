@@ -1,6 +1,6 @@
 # 2026-10-23 Issue #27 共享投研知识库 工作日志
 
-- Agent：pi（issue #27 实施）
+- Agent：pi（issue #27 实施）；本条含 PR #34 首轮 Codex 审阅（round 1）的修复
 - 对应任务：`docs/IMPLEMENTATION.md` 中的 P5-01～P5-04；本次完成 P5-01，P5-02～P5-04 待真实员工与真实材料验证，保持未勾选
 - 完成状态：部分完成（代码与文档完成，真实使用验收待办）
 
@@ -28,6 +28,19 @@
   - 复核者只能**撤回或降级**，不能新增：缺失归因写「未知」，不由模型补造。
   - 新增依赖只有 `unpdf@1.9.1`（PDF 文本抽取，无运行时依赖，MIT）；DOCX／PPTX 用仓库已有的 `fflate` 解压后按段落抽取文本，不另引第二个解析库。
   - 私有 `lzj-skill` 只作规则基线：源码、提示词与内部样例未进入本公开仓库，平台提示词为自写。
+
+## PR #34 首轮 Codex 审阅修复（round 1）
+
+审阅 head `82a39d4`，评论 [issuecomment-6369610263](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/34#issuecomment-6369610263)。六条意见逐条处理如下：
+
+1. **[P1] 发布围栏**（`knowledge/worker.ts`、`knowledge/publish.ts`）：发布事务按固定顺序锁材料与任务，核对材料 `active`、任务 `running`、租约令牌属于当前 worker 且未过期；任一检查失败不写页面也不写成功事件。每个阶段的 `UPDATE` 影响 0 行即停止（`knowledge_lease_lost`）。同一材料已有更新版本发布时，旧构建以 `knowledge_publish_stale` 退出，不得覆盖新版本。
+2. **[P1] 撤回后的直读**（`knowledge/routes.ts`、`knowledge/worker.ts`）：`GET /pages/:slug` 只返回 `published` 的页面；`GET /versions/:id/original` 与 `GET /documents/:id` 关联 parent document 状态；已撤回材料对其他员工是 404，对上传者与管理员是 410（审计可见），不再默认全员可读。
+3. **[P1] 同一标的多材料聚合**（新增 `knowledge/aggregate.ts`、`knowledge/publish.ts`，新增表 `member_wiki_contributions`）：每份材料版本对标的稳定标识 `target_key` 存一份结构化贡献，页面由有效贡献聚合；更新一份材料只替换它自己那份贡献；页面按 `target_key` 加锁，并发发布互不覆盖；构建失败时旧发布内容不动。撤回按贡献粒度生效并重新聚合。
+4. **[P1] 复核下标**（`knowledge/render.ts`）：复核的下标按它读到的草稿解释——归因修正先落在原条目上，撤回再按原下标批量执行；重复与越界的修正被忽略并记为质量问题。
+5. **[P1] 问答归因**（`knowledge/answer.ts`、`knowledge/routes.ts`、`knowledge/schema.ts`、`knowledge/routing.ts`）：本轮只把已发布修订与引用 ID 给模型，模型只能引用这些 ID；服务端按 ID 还原分析师、机构、日期，覆盖范围与时效由实际用到的来源去重后计算，不采信模型自述；引用不上的一律丢弃，无可核对引用的回答按 `knowledge_answer_unverified` 拒给。
+6. **[P2] 长单节 Markdown 截成空**（`knowledge/extract.ts`、`knowledge/worker.ts`）：截取预算计入锚点与分隔符，节内过长时保留预算内的非空前缀；截取后仍无文本则构建以 `knowledge_text_empty` 明确失败，不调用模型。
+
+同步：`docs/PLAN.md` 升到 v0.71（聚合与问答归因的边界）；`docs/KNOWLEDGE-OPS.md` 记录新表、发布围栏、聚合、撤回语义与问答归因规则；`modules/membership/pages/knowledge.tsx`（问答覆盖字段改为服务端口径）、`knowledge-target.tsx`（来源数口径）。
 
 ## 最小验证
 
@@ -57,5 +70,20 @@
 - 下一步：
   - CI 通过后由用户用真实账号各上传一份材料，完成 P5-02～P5-04 的验收；用同一标的不同机构／日期的材料核对归因、分歧并列与时效提示。
   - 生产发布前按运行手册执行迁移并核对 `MEMBER_KNOWLEDGE_MAX_FILE_MB` 与备份体积。
+
+## 最小验证（审阅 round 1）
+
+- 执行的检查及结果：
+  - `npm run typecheck`（contracts／backend／api／worker／tests／modules／web）通过。
+  - `npm run build -w @aihot/web` 通过。
+  - `node --import ./tests/standalone.ts --test modules/membership/tests/knowledge-core.standalone.test.ts`：15 项通过（新增：截取预算与长单节非空前缀、复核原下标与重复／越界、多材料聚合与单份材料更新）。
+  - `npm run test:standalone`：280 项中 268 项通过、12 项失败；失败的 12 项与上一轮相同（站点公开页、feed、MCP 方法拦截），在未改动的 `origin/main` 上同样失败，与本次改动无关。
+  - `node --import ./tests/standalone.ts --test --test-skip-pattern='every table and column' tests/architecture.test.ts`：13 项通过。
+  - `node scripts/check-doc-links.ts` 通过（271 个本地链接）。
+  - `node scripts/check-migrations.ts --base=origin/main` 在本机仍因 `core.autocrlf=true` 把全部 130 条既有迁移报成「已修改」（与本次改动无关）；本次新增的 5 条迁移（`0171_…`～`0175_…`）逐条用 `migrationPlan` 校验，分别为 `transaction` 与 `index` 计划（在线安全），且未被该脚本列为「已修改」。
+- 未验证事项：
+  - **数据库集成测试（`knowledge-access.test.ts`）本机无法运行**（本机无 PostgreSQL），只能由 CI 的 `postgres-integration` 任务验证：多材料聚合、并发发布、撤回后的读取边界与问答引用校验都在该用例里。
+  - 真实 DeepSeek 上的编译、复核与问答效果仍未验证：需要真实研报材料与真实模型输出核对。
+  - 两名真实员工共用同一共享库、真实中文 PDF 的抽取效果、页面质量与引用跳转未验证。
 
 不要在日志中写入密钥、未脱敏接口响应或用户私人材料。任务只有达到实施计划的完成标准时才能打勾。

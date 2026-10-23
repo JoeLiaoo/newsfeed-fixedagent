@@ -1,7 +1,7 @@
 # 分步骤实施计划
 
 需求基线日期：2026-10-21（Asia/Shanghai） · 状态核对：2026-10-23
-依据：`docs/PLAN.md` v0.70；当前开发先用 DeepSeek API 与新华财经 MCP。
+依据：`docs/PLAN.md` v0.71；当前开发先用 DeepSeek API 与新华财经 MCP。
 
 阶段勾选的阅读视图见[项目进度汇报](PROGRESS-REPORT.md)；本文件仍是任务状态的唯一依据。
 
