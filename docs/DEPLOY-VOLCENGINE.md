@@ -79,6 +79,13 @@
 - 发布前保存 `.env.before-release-a2d67e9-20261023` 和 `backups/db-before-a2d67e9-20261023.dump`，数据库转储目录检查通过；未执行完整恢复演练。构建时因 Docker Hub 元数据请求停滞，在服务器发布目录内将 Dockerfile 的 Node 基础镜像地址指向已有的国内镜像缓存；该调整没有修改仓库源码。
 - 迁移/种子步骤报告数据库已是最新、26 个信源已存在。web、API、worker 均运行 `citic-newsfeed:a2d67e9a36e2980b55f51a3d1a3c6e231fb89a17`；本机和公网 `/api/health` 均返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 HTTP 200。API 和 worker 四个 P3 开关仍为 `true`，密钥格式检查通过。真实微信扫码与绑定后的投递仍待用户验收；见[部署记录](logs/2026-10-23-P4-pr19-deployment.md)。
 
+### PR #22 合并后发布（2026-10-23）
+
+- [PR #22](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/22) 已合并，提交 `8a84319f8787078c8e321deeabad5bb2b503af6a` 发布到 `/opt/citic-newsfeed/releases/8a84319f8787078c8e321deeabad5bb2b503af6a`。发布前备份了 `.env` 与数据库转储，权限均为 `0600`；`pg_restore --list` 检查通过。
+- Docker Hub 元数据查询停滞，使用服务器已有的 DaoCloud Node 24 镜像构建；只改了该发布目录中的 `Dockerfile.volcengine`，未改仓库源码。镜像构建成功，迁移/种子显示数据库已是最新、26 个信源已存在。
+- web、API、worker 运行新镜像，数据库保持健康。公网和本机 `/api/health` 均返回 `ok=true`、`db=ok`、release 为合并提交；公网 `/login` 返回 HTTP 200。二维码新标签页及互动状态仍需用户真机验证，P3-04 未完成。
+- 详细备份位置和发布操作见[PR #22 部署日志](logs/2026-10-23-P4-pr22-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
