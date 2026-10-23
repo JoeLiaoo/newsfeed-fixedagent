@@ -41,13 +41,13 @@
   - `node --test apps/web/tests/nav-groups.test.ts`：5 项通过。
   - `node --import ./tests/standalone.ts --test --test-skip-pattern='every table and column' tests/architecture.test.ts`：13 项通过（跳过的用例需数据库，在 CI 跑）。
 - 未执行或需用户试用的检查：
-  - **数据库集成测试 `modules/membership/tests/knowledge-access.test.ts` 未在本机运行**：本机没有可用的 PostgreSQL（无 docker；嵌入式 Postgres 拒绝以管理员身份启动），该测试已加入 CI 的 `postgres-integration` 任务，须以 CI 结果为准。
   - 真实 DeepSeek 上的编译、复核与问答效果未验证：需要真实研报材料与真实模型输出核对。
   - 两名真实员工共用同一共享库、真实中文 PDF 的抽取效果、页面质量与引用跳转未验证。
 
 ## 风险与交接
 
 - CI 第 1 轮（PR #34，head `197a197`）：`postgres-integration` 失败——集成测试里“问一个完全无关的问题应当无覆盖”返回 200。原因是问答路由只按字元重合度计分，句子里一个常见词（如“覆盖”）就能把页面拉进来。已修正：路由改为“问题点名标的直接命中；否则需要两个以上共同词且总分达标”，并给通用虚词（没有、什么、请问等）加了停用表，正文里的词权重低于标的、标题与赛道；新增的 standalone 用例覆盖了这条规则。
+- CI 第 2 轮（head `4ba1126`）：`quality`、`postgres-integration`、`links` 三个任务全部通过；数据库集成测试在 CI 的 PostgreSQL 上通过（`✔ the shared library is open to approved employees and closed to everyone else`）。
 - 已知限制／缺失依赖：
   - 页面检索是关键词与字元重合度路由，不是向量检索；标的别名与同义词会影响命中。
   - 扫描件 PDF 没有文字层，只标记「未能提取文本」，不做 OCR。
