@@ -61,6 +61,8 @@
 
 - CI 第 1 轮（PR #34，head `197a197`）：`postgres-integration` 失败——集成测试里“问一个完全无关的问题应当无覆盖”返回 200。原因是问答路由只按字元重合度计分，句子里一个常见词（如“覆盖”）就能把页面拉进来。已修正：路由改为“问题点名标的直接命中；否则需要两个以上共同词且总分达标”，并给通用虚词（没有、什么、请问等）加了停用表，正文里的词权重低于标的、标题与赛道；新增的 standalone 用例覆盖了这条规则。
 - CI 第 2 轮（head `4ba1126`）：`quality`、`postgres-integration`、`links` 三个任务全部通过；数据库集成测试在 CI 的 PostgreSQL 上通过（`✔ the shared library is open to approved employees and closed to everyone else`）。
+- CI 第 3 轮（head `eedcf4b`，审阅 round 1 首推）：`postgres-integration` 失败——「撤回的材料不再出现在页面里」断言不成立。CI 日志里的页面正文显示：撤回后页面只剩另一家机构的观点，但第二家机构的**测试草稿**沿用了第一家的争议点与风险条目（仍写着上一家的分析师名），属测试数据问题而非聚合缺陷。已把第二份草稿改为自带归因（提交 `cdd8656`）。
+- CI 第 4 轮（head `cdd8656`）：`quality`、`postgres-integration`、`Docs checks` 全部通过；数据库集成测试在 CI 的 PostgreSQL 上通过（多材料聚合、并发发布、撤回后的读取边界、问答引用校验均在其中）。
 - 已知限制／缺失依赖：
   - 页面检索是关键词与字元重合度路由，不是向量检索；标的别名与同义词会影响命中。
   - 扫描件 PDF 没有文字层，只标记「未能提取文本」，不做 OCR。
