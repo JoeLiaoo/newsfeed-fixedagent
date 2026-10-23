@@ -4,16 +4,19 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useLocation } from "react-router";
 import { IntentLink } from "../ui/IntentLink";
-import { sidebarIsActive, type NavGroup, type NavItem } from "./nav";
+import type { NavGroup, NavItem } from "./nav";
+import { groupOpen, groupToggled, sidebarIsActive } from "./nav-state";
 
 /**
  * A group holding the page the reader is on opens by itself, so a deep link shows its entry; what the
- * reader opens or closes after that is kept.
+ * reader opens or closes after that is kept. A toggle turns over what is on screen, the default the
+ * group opened by itself included, so the first press closes it and the next one opens it again.
  */
 function useOpened(pathname: string) {
   const [opened, setOpened] = useState<Record<string, boolean>>({});
-  const isOpen = (group: NavGroup) => (group.id in opened ? opened[group.id] : group.items?.some((item) => sidebarIsActive(item, pathname)) ?? false);
-  return { isOpen, toggle: (id: string) => setOpened((current) => ({ ...current, [id]: !current[id] })) };
+  const isOpen = (group: NavGroup) => groupOpen(opened, group, pathname);
+  const toggle = (group: NavGroup) => setOpened((current) => ({ ...current, [group.id]: groupToggled(current, group, pathname) }));
+  return { isOpen, toggle };
 }
 
 /** The desktop sidebar's rows: a group with children opens them, a group of its own leads to its page. */
@@ -52,7 +55,7 @@ export function SidebarGroups({ groups }: { groups: NavGroup[] }) {
               type="button"
               aria-expanded={open}
               aria-controls={panelId}
-              onClick={() => toggle(group.id)}
+              onClick={() => toggle(group)}
               className="flex h-10 w-full items-center gap-2.5 rounded-control px-2.5 text-[14px] font-semibold text-ink transition-colors duration-150 hover:bg-bg-sunk"
             >
               <span className="flex w-[22px] shrink-0 justify-center text-ink-3">
@@ -128,7 +131,7 @@ export function NavList({ groups }: { groups: NavGroup[] }) {
               type="button"
               aria-expanded={open}
               aria-controls={panelId}
-              onClick={() => toggle(group.id)}
+              onClick={() => toggle(group)}
               className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left text-[16px] font-medium text-ink transition-colors active:bg-bg-sunk lg:hover:bg-bg-sunk"
             >
               <span className="text-ink-3">

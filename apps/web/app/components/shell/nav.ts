@@ -93,12 +93,9 @@ export function sidebar(): NavGroup[] {
   return groups.filter((group) => group.to || group.items?.length);
 }
 
-/** A sidebar entry is lit on its pages; 日报 also covers weekly and monthly reports. */
-export function sidebarIsActive(item: Pick<NavItem, "to" | "end">, pathname: string): boolean {
-  if (item.end) return pathname === item.to;
-  if (item.to === "/daily") return /^\/(daily|weekly|monthly)(\/|$)/.test(pathname);
-  return pathname === item.to || pathname.startsWith(`${item.to}/`);
-}
+// Which entry is lit and how a group opens and closes live in nav-state.ts, beside the two places that
+// draw the groups; they are re-exported here so the navigation keeps one entry point.
+export { sidebarIsActive } from "./nav-state";
 
 /**
  * The phone tab bar: 全部 lives beside 精选 as a switch, 热点 and 日报 are tabs, and "我的" at /more holds
