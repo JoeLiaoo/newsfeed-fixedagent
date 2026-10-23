@@ -21,7 +21,7 @@ type Version = {
   extractionStatus: string; extractionNote: string | null; createdAt: string; uploaderName: string;
   taskId: string | null; taskState: string | null; taskStage: string | null; errorCode: string | null; errorMessage: string | null; attemptCount: number | null;
 };
-type DocumentDetail = { id: string; title: string; status: string; uploaderId: string; createdAt: string; withdrawnAt: string | null };
+type DocumentDetail = { id: string; title: string; status: string; baseId: string; uploaderId: string; createdAt: string; withdrawnAt: string | null };
 
 export default function KnowledgeDocumentPage() {
   const { id } = useParams();
@@ -52,7 +52,7 @@ export default function KnowledgeDocumentPage() {
         {document.status !== "active" && <Badge variant="destructive">已撤回</Badge>}
       </div>
       <p className="mt-2 text-xs text-ink-3">入库于 {new Date(document.createdAt).toLocaleString("zh-CN")} · 版本 {versions.length}</p>
-      <p className="mt-1"><Link to="/knowledge" className="text-sm text-accent underline-offset-4 hover:underline">返回知识库</Link></p>
+      <p className="mt-1"><Link to={`/knowledge/bases/${encodeURIComponent(document.baseId)}`} className="text-sm text-accent underline-offset-4 hover:underline">返回知识库</Link></p>
     </header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
 

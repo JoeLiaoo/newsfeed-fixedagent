@@ -20,7 +20,7 @@ type Citation = { label: string; anchor: string | null; analyst: string | null; 
 type Issue = { level: string; category: string; target: string | null; message: string; evidence: string | null; detectedAt: string };
 type PageDetail = {
   id: string; slug: string; pageType: string; targetType: string | null; targetName: string | null; track: string | null; status: string;
-  revision: number; bodyMd: string; publishedAt: string; updatedAt: string; freshness: string; freshnessLabel: string;
+  baseId: string; revision: number; bodyMd: string; publishedAt: string; updatedAt: string; freshness: string; freshnessLabel: string;
   coverage: { analysts: number; firms: number; reports: number; first_report: string | null; last_report: string | null } | null;
 };
 
@@ -55,6 +55,8 @@ export default function KnowledgeTargetPage() {
     <p className="mt-4"><Link to="/knowledge" className="text-sm text-accent underline-offset-4 hover:underline">返回知识库</Link></p>
   </main>;
 
+  const back = `/knowledge/bases/${encodeURIComponent(page.baseId)}`;
+
   return <main className="mx-auto w-full max-w-4xl px-5 py-8">
     <header className="mb-5">
       <div className="flex flex-wrap items-center gap-2">
@@ -64,7 +66,7 @@ export default function KnowledgeTargetPage() {
         {page.track && <Badge variant="outline">{page.track}</Badge>}
       </div>
       <p className="mt-2 text-xs text-ink-3">修订 {page.revision} · 分析师 {page.coverage?.analysts ?? 0} · 机构 {page.coverage?.firms ?? 0} · 来源 {page.coverage?.reports ?? 0} · {page.coverage?.first_report ?? "起始日期未知"} 至 {page.coverage?.last_report ?? "最近日期未知"} · 更新于 {new Date(page.updatedAt).toLocaleString("zh-CN")}</p>
-      <p className="mt-1"><Link to="/knowledge" className="text-sm text-accent underline-offset-4 hover:underline">返回知识库</Link></p>
+      <p className="mt-1"><Link to={back} className="text-sm text-accent underline-offset-4 hover:underline">返回知识库</Link></p>
     </header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
 

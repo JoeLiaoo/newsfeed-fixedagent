@@ -1,7 +1,7 @@
 // What the two build steps and the answer may say. The model fills these shapes; the platform renders
 // the pages and checks the pages, so the shape of a page is never the model's choice.
 import { z } from "zod";
-import { MAX_PAGES_PER_BUILD, PAGE_TYPES, TARGET_TYPES } from "./catalog.ts";
+import { MAX_PAGES_PER_BUILD, MAX_PUBLISHED_PAGE_SLUG_LENGTH, PAGE_TYPES, TARGET_TYPES } from "./catalog.ts";
 
 /** The attribution of one viewpoint: who said it, for whom, when, and on what ground. */
 export const stanceSchema = z.object({
@@ -150,7 +150,7 @@ export const auditResultSchema = z.object({
  */
 export const answerCitationSchema = z.object({
   label: z.string().max(20),
-  pageSlug: z.string().max(80),
+  pageSlug: z.string().max(MAX_PUBLISHED_PAGE_SLUG_LENGTH),
   citationId: z.string().max(64),
 });
 
