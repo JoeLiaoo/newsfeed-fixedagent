@@ -10,9 +10,13 @@
 ## 决定与验证
 
 - 服务端 `modules/membership/server.ts` 接受用户名 `/^[a-zA-Z0-9._-]{3,40}$/`，密码长度 12–200 位；提示不增加新的强制条件，也不改变注册接口。
-- 本次改动仅涉及可见说明和辅助技术描述。合并与发布前核对 PR 文件范围、文档链接及构建结果。
+- 本次改动仅涉及可见说明和辅助技术描述。`node scripts/check-doc-links.ts` 检查 244 个本地链接通过；`git diff --check origin/main...HEAD` 通过；PR 的 Docs checks、P3 checks 均通过。
 
-## 未验证事项与下一步
+## 合并与发布
 
-- 员工在生产浏览器中的实际阅读体验须在部署后确认；本次不改变账号审核或密码策略。
-- 合并后按现有火山云发布流程更新镜像，并核对健康端点及注册页。
+- [PR #29](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/29) 已合并，合并提交 `bd53dcbb8a46b83712160409b9424a2ff7061f62`。
+- 火山云已部署该提交；本机与公网健康端点返回 `ok=true`、`db=ok` 与该 release，公网 `/register` 返回 HTTP 200，HTML 中含两段提示。发布过程见 [P4 发布日志](2026-10-23-P4-pr29-deployment.md)。
+
+## 未验证事项
+
+- 员工在实际浏览器与辅助技术中的阅读体验仍需人工确认；本次不改变账号审核或密码策略。

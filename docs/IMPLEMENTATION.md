@@ -31,7 +31,7 @@ P0 出口：数据源能返回所需基本字段或缺口有明确降级；实�
 | 状态 | ID | 工作及完成标准 | 日志 |
 |---|---|---|---|
 | [x] | P1-01 | 引入固定版本的 AIHOT 基线、许可及本地开发配置；记录上游改动 | [2026-10-21-P1-platform](logs/2026-10-21-P1-platform.md) |
-| [x] | P1-02 | 实现用户名／真实姓名／密码注册、管理员审核、登录会话与用户数据隔离；用户作为首位管理员 | [2026-10-21-P1-platform](logs/2026-10-21-P1-platform.md)、[PR #1 review fixes](logs/2026-10-21-PR1-review.md) |
+| [x] | P1-02 | 实现用户名／真实姓名／密码注册、管理员审核、登录会话与用户数据隔离；用户作为首位管理员 | [2026-10-21-P1-platform](logs/2026-10-21-P1-platform.md)、[PR #1 review fixes](logs/2026-10-21-PR1-review.md)、[注册输入提示与发布](logs/2026-10-23-P1-02-register-hints.md) |
 | [x] | P1-03 | 实现五个方向及预置细分赛道、跨部门多选、默认勾选、取消及公共新增标签 | [2026-10-21-P1-platform](logs/2026-10-21-P1-platform.md)、[PR #1 review fixes](logs/2026-10-21-PR1-review.md) |
 | [x] | P1-04 | 接入 AIHOT 原生信源作为人工智能相关赛道样例；员工可添加网站或 RSS，持续采集公开文章并显示覆盖情况 | [PR #1 review fixes](logs/2026-10-21-PR1-review.md)、[其他方向示范信源](logs/2026-10-22-P1-04-direction-sources.md)、[员工信源入口改进](logs/2026-10-22-P1-04-source-entry.md) |
 | [x] | P1-05 | 生成带来源的个人日报；首页默认显示当天日报，实时新闻与专家从导航进入 | [PR #1 review fixes](logs/2026-10-21-PR1-review.md) |
@@ -79,7 +79,7 @@ PR #18 的服务端扫码确认修复及评审并发整改已合并（`4a8299fa9
 | 状态 | ID | 工作及完成标准 | 日志 |
 |---|---|---|---|
 | [x] | P4-01 | 完成旧版 `ai-work-mvp` 及关联资源的归档清单和校验 | [只读复核记录](logs/2026-10-22-P4-field-refresh.md)、[火山云旧应用归档](logs/2026-10-22-P4-old-app-archive.md)；用户确认旧版本归档留存即可，不要求异地备份或恢复演练 |
-| [ ] | P4-02 | 保留操作系统及其他服务，在原实例部署新平台及 HTTPS；核对 `.config/` 凭据读取权限；明确仍运行的旧组件退役范围和共享资源影响 | [隔离部署日志](logs/2026-10-22-P4-volcengine-deploy.md)、[公网入口切换记录](logs/2026-10-22-P4-field-refresh.md)、[Hermes 网关部署日志](logs/2026-10-22-P4-hermes-gateway.md)、[旧应用归档记录](logs/2026-10-22-P4-old-app-archive.md)；新平台已接管该 IP 的 HTTPS、Hermes 网关已连接 Weixin；旧发布目录与 WeKnora 容器/卷仍保留，旧组件退役处置待办 |
+| [ ] | P4-02 | 保留操作系统及其他服务，在原实例部署新平台及 HTTPS；核对 `.config/` 凭据读取权限；明确仍运行的旧组件退役范围和共享资源影响 | [隔离部署日志](logs/2026-10-22-P4-volcengine-deploy.md)、[公网入口切换记录](logs/2026-10-22-P4-field-refresh.md)、[Hermes 网关部署日志](logs/2026-10-22-P4-hermes-gateway.md)、[旧应用归档记录](logs/2026-10-22-P4-old-app-archive.md)、[PR #29 发布](logs/2026-10-23-P4-pr29-deployment.md)；新平台已接管该 IP 的 HTTPS、Hermes 网关已连接 Weixin；旧发布目录与 WeKnora 容器/卷仍保留，旧组件退役处置待办 |
 | [ ] | P4-03 | 完成新平台监控、费用记录、备份恢复验证、操作说明和回退路径；不在日志中记录凭据 | — |
 | [ ] | P4-04 | 组织员工试用，记录关键链路通过、缺口和试运行状态；上线结论与遗留项写入最终日志 | [现场复核记录](logs/2026-10-22-P4-field-refresh.md)、[资讯不可用现场修复](logs/2026-10-22-P4-04-news-availability.md)；管理员登录已由用户确认、两名员工已注册；员工本人仍需复核关注赛道、日报与热点状态，并完成两个账号的数据隔离试用 |
 
