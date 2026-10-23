@@ -161,9 +161,9 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
   assert.equal(both.find(row => row.base_id === DEFAULT_BASE_ID)?.slug, "view-company-example", "the shared base keeps the slugs its pages already carry");
   assert.equal(both.find(row => row.base_id === base.id)?.slug, `${base.id}-view-company-example`);
   const sharedList = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/pages?baseId=${DEFAULT_BASE_ID}`, headers: { cookie: cookies[0]!, ...common } });
-  assert.equal((await sharedList.json() as { pages: Array<{ slug: string }> }).pages.map(page => page.slug), ["view-company-example"]);
+  assert.deepEqual((await sharedList.json() as { pages: Array<{ slug: string }> }).pages.map(page => page.slug), ["view-company-example"]);
   const ownList = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/pages?baseId=${base.id}`, headers: { cookie: cookies[0]!, ...common } });
-  assert.equal((await ownList.json() as { pages: Array<{ slug: string }> }).pages.map(page => page.slug), [`${base.id}-view-company-example`]);
+  assert.deepEqual((await ownList.json() as { pages: Array<{ slug: string }> }).pages.map(page => page.slug), [`${base.id}-view-company-example`]);
 
   // The base card counts what the base holds.
   const counted = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/bases", headers: { cookie: cookies[0]!, ...common } });
