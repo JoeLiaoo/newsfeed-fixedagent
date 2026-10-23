@@ -101,6 +101,17 @@ export const sourceSchema = z.object({
   kind: z.string().max(60).nullable(),
 });
 
+/**
+ * One source as the library keeps it. The material gives the attribution; the library adds where the
+ * source may be read, so a page that holds several materials links each of them to its own material.
+ */
+export type SourceRecord = z.infer<typeof sourceSchema> & {
+  /** The material version the source was read from. */
+  versionId?: string;
+  /** The document the source may be read in. */
+  documentId?: string;
+};
+
 export const compiledDraftSchema = z.object({
   pages: z.array(pageDraftSchema).max(MAX_PAGES_PER_BUILD),
   sources: z.array(sourceSchema).max(30),
@@ -132,36 +143,24 @@ export const auditResultSchema = z.object({
   notes: z.string().max(4000),
 });
 
-/** One footnote of an answer: which page it rests on, and who said it there. */
+/**
+ * One footnote of an answer: the page it rests on and the citation of that page it points at. The
+ * model may only name a citation it was given; who said it and when is the library's own record,
+ * so the attribution never comes from the model's memory.
+ */
 export const answerCitationSchema = z.object({
   label: z.string().max(20),
   pageSlug: z.string().max(80),
-  title: z.string().max(120),
-  analyst: z.string().max(80).nullable(),
-  organization: z.string().max(80).nullable(),
-  publishedOn: z.string().max(10).nullable(),
-  anchor: z.string().max(240).nullable(),
+  citationId: z.string().max(64),
 });
 
 export const answerSchema = z.object({
   answer: z.string().max(20_000),
   citations: z.array(answerCitationSchema).max(40),
-  coverage: z.object({
-    analysts: z.number().int().min(0).max(200),
-    firms: z.number().int().min(0).max(200),
-    reports: z.number().int().min(0).max(200),
-    firstReport: z.string().max(10).nullable(),
-    lastReport: z.string().max(10).nullable(),
-    note: z.string().max(400).nullable(),
-  }),
-  freshness: z.array(z.object({
-    pageSlug: z.string().max(80),
-    tier: z.enum(["fresh", "semi", "stale", "undated"]),
-    lastReport: z.string().max(10).nullable(),
-  })).max(20),
 });
 
 export type Stance = z.infer<typeof stanceSchema>;
+export type AnswerCitationClaim = z.infer<typeof answerCitationSchema>;
 export type PageDraft = z.infer<typeof pageDraftSchema>;
 export type CompiledDraft = z.infer<typeof compiledDraftSchema>;
 export type Correction = z.infer<typeof correctionSchema>;

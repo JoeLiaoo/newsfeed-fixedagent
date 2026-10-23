@@ -134,16 +134,52 @@ export async function extractMaterial(format: WikiFormat, bytes: Uint8Array): Pr
   }
 }
 
-/** Keeps the material inside the budget the build allows, cutting at a section edge where it can. */
+/** The text of a section as it is written into the material: its anchor, then its content. */
+function sectionText(section: ExtractionSection): string {
+  return `<!-- ${section.label} -->\n${section.text}`;
+}
+
+/**
+ * The head of a text that is longer than the room left: the last whole line that fits, or the last
+ * whole sentence, or the plain cut. A material that is one long section still gives the build
+ * something to read.
+ */
+function prefixOf(text: string, room: number): string {
+  if (room <= 0) return "";
+  if (text.length <= room) return text;
+  const head = text.slice(0, room);
+  const line = head.lastIndexOf("\n");
+  if (line > 0) return head.slice(0, line);
+  const sentence = Math.max(head.lastIndexOf("。"), head.lastIndexOf("！"), head.lastIndexOf("？"), head.lastIndexOf(".\n"));
+  if (sentence > 0) return head.slice(0, sentence + 1);
+  return head;
+}
+
+/**
+ * Keeps the material inside the budget the build allows. The budget counts the anchors and the
+ * separators too, so the text that comes out never exceeds it; a section that does not fit whole
+ * leaves a readable prefix behind instead of nothing at all.
+ */
 export function capExtraction(result: ExtractionResult, limit = MAX_EXTRACTED_CHARS): { text: string; sections: ExtractionSection[]; truncated: boolean } {
-  if (result.text.length <= limit) return { text: result.text, sections: result.sections, truncated: false };
+  const whole = result.sections.map(sectionText).join("\n\n");
+  if (whole.length <= limit) return { text: whole, sections: result.sections, truncated: false };
   const sections: ExtractionSection[] = [];
   let used = 0;
   for (const section of result.sections) {
-    if (used + section.text.length > limit) break;
-    sections.push(section);
-    used += section.text.length;
+    const separator = sections.length ? 2 : 0;
+    const anchor = sectionText({ label: section.label, text: "" }).length;
+    const room = limit - used - separator - anchor;
+    if (room <= 0) break;
+    if (section.text.length <= room) {
+      sections.push(section);
+      used += separator + anchor + section.text.length;
+      continue;
+    }
+    const prefix = prefixOf(section.text, room);
+    if (!prefix) break;
+    sections.push({ label: section.label, text: prefix });
+    used += separator + anchor + prefix.length;
+    break;
   }
-  const text = sections.map(section => `<!-- ${section.label} -->\n${section.text}`).join("\n\n");
-  return { text, sections, truncated: true };
+  return { text: sections.map(sectionText).join("\n\n"), sections, truncated: true };
 }

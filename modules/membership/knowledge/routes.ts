@@ -7,9 +7,10 @@ import { enqueueOn } from "@aihot/backend/jobs/queue";
 import type { MemberSession } from "../server.ts";
 import { WIKI_QUEUE } from "./queue.ts";
 import { answerQuestion } from "./answer.ts";
-import { routePages, type RoutablePage } from "./routing.ts";
+import { routePages, type RoutableCitation, type RoutablePage } from "./routing.ts";
 import { FORMAT_MEDIA_TYPES, freshnessTier, FRESHNESS_LABELS, TASK_ERRORS, maxFileBytes } from "./catalog.ts";
 import { checksum, versionBody } from "./worker.ts";
+import { withdrawDocumentPages } from "./publish.ts";
 import { detectFormat } from "./extract.ts";
 
 type Authenticate = (request: FastifyRequest, allowPending?: boolean) => Promise<MemberSession | null>;
@@ -37,6 +38,25 @@ function text(value: unknown, max: number): string | null {
 
 function isDate(value: string | null): value is string {
   return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+/** The date a column holds, as the text the pages show. */
+function dateText(value: unknown): string | null {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  return null;
+}
+
+/**
+ * Whether an employee may look at what a withdrawn material left behind: the uploader of one of
+ * the materials the page was built from, or an administrator. The shared library itself never
+ * shows a withdrawn material to anyone else.
+ */
+async function mayAudit(user: MemberSession, targetKey: string | null): Promise<boolean> {
+  if (user.role === "admin") return true;
+  if (!targetKey) return false;
+  const rows = await sql<{ id: string }[]>`SELECT v.id FROM member_wiki_contributions c JOIN member_wiki_document_versions v ON v.id = c.version_id WHERE c.target_key = ${targetKey} AND v.uploader_id = ${user.id} LIMIT 1`;
+  return !!rows[0];
 }
 
 export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Authenticate) {
@@ -92,6 +112,11 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const id = (req.params as { id: string }).id;
     const documents = await sql`SELECT id, title, status, uploader_id AS "uploaderId", created_at AS "createdAt", withdrawn_at AS "withdrawnAt" FROM member_wiki_documents WHERE id = ${id}`;
     if (!documents[0]) return reply.code(404).send({ error: "knowledge_document_not_found" });
+    // A withdrawn material is no longer part of the shared library: only the uploader and the
+    // administrators may still look at what it left behind.
+    if (documents[0].status !== "active" && documents[0].uploaderId !== user.id && user.role !== "admin") {
+      return reply.code(404).send({ error: "knowledge_document_not_found" });
+    }
     const versions = await sql`
       SELECT v.id, v.version_no AS "versionNo", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.sha256, v.source_title AS "sourceTitle", v.source_author AS "sourceAuthor",
         v.source_org AS "sourceOrg", v.source_date AS "sourceDate", v.source_kind AS "sourceKind", v.extraction_status AS "extractionStatus", v.extraction_note AS "extractionNote",
@@ -190,12 +215,10 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       if (!owned[0]) return false;
       await tx`UPDATE member_wiki_documents SET status='withdrawn', withdrawn_at=now(), withdrawn_by=${user.id}, updated_at=now() WHERE id=${id}`;
       await tx`UPDATE member_wiki_tasks SET state='cancelled', stage='failed', error_code='knowledge_task_cancelled', error_message=${TASK_ERRORS.knowledge_task_cancelled}, updated_at=now(), finished_at=now() WHERE document_id=${id} AND state IN ('queued','running')`;
-      await tx`UPDATE member_wiki_pages SET status='withdrawn', updated_at=now() WHERE status='published' AND id IN (
-        SELECT r.page_id FROM member_wiki_page_revisions r
-        JOIN member_wiki_document_versions v ON v.id = r.version_id
-        WHERE v.document_id = ${id}
-          AND r.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = r.page_id))`;
-      await tx`INSERT INTO member_wiki_audit_events(id, actor_id, event_type, document_id, detail) VALUES (${randomUUID()}, ${user.id}, 'knowledge.document.withdrawn', ${id}, ${tx.json({})})`;
+      // The material's own contribution leaves the library; the pages it held are written again
+      // without it, and a page that held nothing else goes down with it.
+      const pages = await withdrawDocumentPages(tx, id);
+      await tx`INSERT INTO member_wiki_audit_events(id, actor_id, event_type, document_id, detail) VALUES (${randomUUID()}, ${user.id}, 'knowledge.document.withdrawn', ${id}, ${tx.json({ withdrawn: pages.withdrawn, rebuilt: pages.rebuilt })})`;
       return true;
     });
     if (!changed) return reply.code(404).send({ error: "knowledge_document_not_found" });
@@ -271,14 +294,23 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     if (!user) return reply.code(401).send({ error: "login_required" });
     const slug = (req.params as { slug: string }).slug;
     const pages = await sql`
-      SELECT p.id, p.slug, p.page_type AS "pageType", p.target_type AS "targetType", p.target_name AS "targetName", p.track, p.status, p.updated_at AS "updatedAt",
+      SELECT p.id, p.slug, p.page_type AS "pageType", p.target_type AS "targetType", p.target_name AS "targetName", p.track, p.status, p.target_key AS "targetKey", p.updated_at AS "updatedAt",
         r.revision, r.body_md AS "bodyMd", r.coverage, r.published_at AS "publishedAt"
       FROM member_wiki_pages p JOIN member_wiki_page_revisions r ON r.page_id = p.id
       WHERE p.slug=${slug} ORDER BY r.revision DESC LIMIT 1`;
     const page = pages[0];
     if (!page) return reply.code(404).send({ error: "knowledge_page_not_found" });
+    // A withdrawn page is not part of the shared library any more: the uploader and the
+    // administrators may still see that it is gone, nobody else.
+    if (page.status !== "published") {
+      const auditor = await mayAudit(user, page.targetKey);
+      return reply.code(auditor ? 410 : 404).send({
+        error: auditor ? "knowledge_page_withdrawn" : "knowledge_page_not_found",
+        message: auditor ? TASK_ERRORS.knowledge_page_withdrawn : undefined,
+      });
+    }
     const citations = await sql`
-      SELECT c.label, c.anchor, c.analyst, c.organization, c.published_on AS "publishedOn", c.source_title AS "sourceTitle", v.id AS "versionId", v.file_name AS "fileName", v.format, d.id AS "documentId", d.title AS "documentTitle"
+      SELECT c.label, c.anchor, c.analyst, c.organization, to_char(c.published_on, 'YYYY-MM-DD') AS "publishedOn", c.source_title AS "sourceTitle", v.id AS "versionId", v.file_name AS "fileName", v.format, d.id AS "documentId", d.title AS "documentTitle"
       FROM member_wiki_citations c JOIN member_wiki_document_versions v ON v.id = c.version_id JOIN member_wiki_documents d ON d.id = v.document_id
       WHERE c.page_id=${page.id} AND c.revision=${page.revision} ORDER BY c.label, c.created_at`;
     const issues = await sql`SELECT level, category, target, message, evidence, detected_at AS "detectedAt" FROM member_wiki_quality_issues WHERE page_id=${page.id} AND status='open' ORDER BY level, detected_at DESC`;
@@ -294,6 +326,15 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const id = (req.params as { id: string }).id;
     const material = await versionBody(id);
     if (!material) return reply.code(404).send({ error: "knowledge_document_not_found" });
+    // The bytes of a withdrawn material are kept for the audit; the shared library does not serve
+    // them to anybody else.
+    if (material.documentStatus !== "active") {
+      const auditor = material.uploaderId === user.id || user.role === "admin";
+      return reply.code(auditor ? 410 : 404).send({
+        error: auditor ? "knowledge_document_withdrawn" : "knowledge_document_not_found",
+        message: auditor ? TASK_ERRORS.knowledge_document_withdrawn : undefined,
+      });
+    }
     return reply
       .header("Content-Type", material.mediaType)
       .header("Content-Disposition", `attachment; filename="${material.fileName.replace(/[^\w.\-]/g, "_")}"`)
@@ -309,11 +350,31 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     if (!user) return reply.code(401).send({ error: "login_required" });
     const question = text(body(req).question, 500);
     if (!question || question.length < 2) return reply.code(400).send({ error: "knowledge_question_required", message: "请输入要问的问题。" });
-    const rows = await sql<{ slug: string; page_type: string; target_name: string | null; track: string | null; body_md: string; coverage: Record<string, unknown> | null }[]>`
-      SELECT p.slug, p.page_type, p.target_name, p.track, r.body_md, r.coverage
+    const rows = await sql<{ id: string; slug: string; page_type: string; target_name: string | null; track: string | null; body_md: string; coverage: Record<string, unknown> | null; revision_id: string }[]>`
+      SELECT p.id, p.slug, p.page_type, p.target_name, p.track, r.body_md, r.coverage, r.id AS revision_id
       FROM member_wiki_pages p JOIN member_wiki_page_revisions r ON r.page_id = p.id
         AND r.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = p.id)
       WHERE p.status='published'`;
+    const citationRows = await sql<{ id: string; page_id: string; label: string; anchor: string | null; analyst: string | null; organization: string | null; published_on: Date | null; source_title: string | null; version_id: string }[]>`
+      SELECT c.id, c.page_id, c.label, c.anchor, c.analyst, c.organization, c.published_on, c.source_title, c.version_id
+      FROM member_wiki_citations c JOIN member_wiki_pages p ON p.id = c.page_id
+      WHERE p.status='published'
+        AND c.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = c.page_id)`;
+    const byPage = new Map<string, RoutableCitation[]>();
+    for (const row of citationRows) {
+      const list = byPage.get(row.page_id) ?? [];
+      list.push({
+        id: row.id,
+        label: row.label,
+        analyst: row.analyst,
+        organization: row.organization,
+        publishedOn: dateText(row.published_on),
+        anchor: row.anchor,
+        sourceTitle: row.source_title,
+        versionId: row.version_id,
+      });
+      byPage.set(row.page_id, list);
+    }
     const candidates: RoutablePage[] = rows.map(row => ({
       slug: row.slug,
       title: row.slug,
@@ -321,6 +382,8 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       targetName: row.target_name,
       track: row.track,
       bodyMd: row.body_md,
+      revisionId: row.revision_id,
+      citations: byPage.get(row.id) ?? [],
       coverage: {
         analysts: Number(row.coverage?.analysts ?? 0),
         firms: Number(row.coverage?.firms ?? 0),
@@ -334,8 +397,9 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     let answer;
     try { answer = await answerQuestion(question, routed.map(entry => entry.page)); }
     catch { return reply.code(502).send({ error: "knowledge_answer_failed", message: TASK_ERRORS.knowledge_answer_failed }); }
-    const known = new Set(candidates.map(page => page.slug));
-    const citations = answer.citations.filter(citation => known.has(citation.pageSlug));
+    const citations = answer.citations;
+    // An answer that rests on nothing the library can show is not an answer: it is refused.
+    if (!citations.length) return reply.code(502).send({ error: "knowledge_answer_unverified", message: TASK_ERRORS.knowledge_answer_unverified });
     const labels = new Set(citations.map(citation => citation.label));
     // A footnote without a source is dropped rather than left pointing nowhere.
     let bodyText = answer.answer

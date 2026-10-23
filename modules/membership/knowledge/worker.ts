@@ -1,15 +1,17 @@
 // The build of a knowledge page, stage by stage. Every stage leaves a checkpoint on the task, so a
 // failed build can be resumed from where it stopped and a new version of a material never takes the
-// published pages down with it.
+// published pages down with it. A build only writes while it still holds the task: a material that
+// was withdrawn, or a lease that was lost to another worker, stops the build where it stands.
 import { createHash, randomUUID } from "node:crypto";
 import { sql, type Db } from "@aihot/backend/db";
 import { ModelOutputError, ModelUnavailableError } from "@aihot/backend/providers/receipts";
 import { compileMaterial, auditMaterial, type MaterialInput } from "./compile.ts";
-import { applyCorrections, coverageOf, renderPage, type SourceRecord } from "./render.ts";
+import { applyCorrections, coverageOf } from "./render.ts";
 import { lintDraft, blockingFindings } from "./lint.ts";
 import { capExtraction, detectFormat, extractMaterial } from "./extract.ts";
+import { publishBuildPages } from "./publish.ts";
 import { compiledDraftSchema, auditResultSchema, type CompiledDraft, type Finding } from "./schema.ts";
-import { MAX_EXTRACTED_CHARS } from "./catalog.ts";
+import { MAX_EXTRACTED_CHARS, TASK_ERRORS } from "./catalog.ts";
 
 type TaskRow = {
   id: string;
@@ -25,6 +27,7 @@ type TaskRow = {
 type VersionRow = {
   id: string;
   document_id: string;
+  version_no: number;
   file_name: string;
   body: Buffer;
   source_title: string | null;
@@ -37,13 +40,24 @@ type VersionRow = {
 };
 
 function failureCode(error: unknown): { code: string; message: string } {
-  if (error instanceof ModelUnavailableError) return { code: "knowledge_model_failed", message: "模型服务不可用，构建未完成，可重试。" };
-  if (error instanceof ModelOutputError) return { code: "knowledge_model_output_invalid", message: "模型输出无法解析，构建未完成，可重试。" };
+  if (error instanceof ModelUnavailableError) return { code: "knowledge_model_failed", message: TASK_ERRORS.knowledge_model_failed };
+  if (error instanceof ModelOutputError) return { code: "knowledge_model_output_invalid", message: TASK_ERRORS.knowledge_model_output_invalid };
   const code = error instanceof Error ? error.message : "knowledge_model_failed";
   if (code === "knowledge_text_unavailable" || code === "knowledge_file_unreadable") return { code, message: "未能读取材料内容，未生成知识页。" };
-  if (code === "knowledge_audit_failed") return { code, message: "独立复核未通过，未发布任何页面，可重试。" };
-  if (code === "knowledge_lint_blocked") return { code, message: "结构与引用检查未通过，未发布任何页面，可重试。" };
-  return { code: "knowledge_model_failed", message: "构建未完成，可重试。" };
+  if (code === "knowledge_text_empty") return { code, message: TASK_ERRORS.knowledge_text_empty };
+  if (code === "knowledge_audit_failed") return { code, message: TASK_ERRORS.knowledge_audit_failed };
+  if (code === "knowledge_lint_blocked") return { code, message: TASK_ERRORS.knowledge_lint_blocked };
+  if (code === "knowledge_publish_stale") return { code, message: TASK_ERRORS.knowledge_publish_stale };
+  if (code === "knowledge_document_withdrawn") return { code, message: TASK_ERRORS.knowledge_document_withdrawn };
+  if (code === "knowledge_lease_lost") return { code, message: TASK_ERRORS.knowledge_lease_lost };
+  return { code: "knowledge_model_failed", message: TASK_ERRORS.knowledge_model_failed };
+}
+
+/** The date a column holds, as the text the pages show. */
+function dateText(value: unknown): string | null {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  return null;
 }
 
 async function loadTask(taskId: string): Promise<TaskRow | null> {
@@ -52,8 +66,25 @@ async function loadTask(taskId: string): Promise<TaskRow | null> {
 }
 
 async function loadVersion(versionId: string): Promise<VersionRow | null> {
-  const rows = await sql<VersionRow[]>`SELECT id, document_id, file_name, body, source_title, source_author, source_org, source_date, source_kind, extracted_text, extraction_status FROM member_wiki_document_versions WHERE id = ${versionId}`;
+  const rows = await sql<VersionRow[]>`SELECT id, document_id, version_no, file_name, body, source_title, source_author, source_org, source_date, source_kind, extracted_text, extraction_status FROM member_wiki_document_versions WHERE id = ${versionId}`;
   return rows[0] ?? null;
+}
+
+/**
+ * Moves the build to its next stage. The stage only moves while this worker still holds the task:
+ * a build whose material was withdrawn, or whose lease went to another worker, stops here.
+ */
+async function advanceStage(taskId: string, leaseToken: string, stage: string): Promise<void> {
+  const rows = await sql<{ id: string }[]>`UPDATE member_wiki_tasks SET stage=${stage}, updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`;
+  if (!rows.length) throw new Error("knowledge_lease_lost");
+}
+
+/** Keeps a checkpoint of the build. A checkpoint that cannot be written means the build is not ours. */
+async function saveCheckpoint(taskId: string, leaseToken: string, field: "draft" | "audit", value: unknown): Promise<void> {
+  const rows = field === "draft"
+    ? await sql<{ id: string }[]>`UPDATE member_wiki_tasks SET draft=${sql.json(value as never)}, updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`
+    : await sql<{ id: string }[]>`UPDATE member_wiki_tasks SET audit=${sql.json(value as never)}, updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`;
+  if (!rows.length) throw new Error("knowledge_lease_lost");
 }
 
 /** Reads the material out and keeps the text on the version, so a retry does not read the file again. */
@@ -67,7 +98,10 @@ async function extractVersion(version: VersionRow): Promise<string> {
     throw new Error("knowledge_text_unavailable");
   }
   const capped = capExtraction(result, MAX_EXTRACTED_CHARS);
-  const note = [result.note, capped.truncated ? `内容超出上限，已截取前 ${capped.sections.length} 节` : null].filter(Boolean).join("；") || null;
+  // A build without text has nothing to compile; it fails here rather than asking a model to read
+  // an empty material.
+  if (!capped.text.trim()) throw new Error("knowledge_text_empty");
+  const note = [result.note, capped.truncated ? `内容超出上限，已截取前 ${capped.sections.length} 节（末节可能不完整）` : null].filter(Boolean).join("；") || null;
   await sql`UPDATE member_wiki_document_versions SET extracted_text=${capped.text}, extraction_status='available', extraction_note=${note} WHERE id=${version.id}`;
   return capped.text;
 }
@@ -80,7 +114,7 @@ function materialInput(task: TaskRow, version: VersionRow, text: string): Materi
     declared: {
       author: version.source_author,
       organization: version.source_org,
-      date: version.source_date,
+      date: dateText(version.source_date),
       kind: version.source_kind,
     },
     text,
@@ -107,64 +141,46 @@ async function knownSlugs(exclude: string[] = []): Promise<Set<string>> {
 }
 
 /**
- * Publishes the pages of a build. Each page becomes a new revision of the page with the same slug; the
- * pages published before stay readable, and the whole set is written in one transaction.
+ * Publishes the pages of a build. The material's own contribution and the page it belongs to are
+ * written in one transaction, and only while this worker still holds the task: the material must
+ * still be in the library, the task must still be running with this worker's lease, and no newer
+ * version of the same material may have been published already.
  */
-async function publish(task: TaskRow, version: VersionRow, draft: CompiledDraft, findings: Finding[]): Promise<string[]> {
-  const pageIds: string[] = [];
+async function publish(task: TaskRow, version: VersionRow, draft: CompiledDraft, findings: Finding[], leaseToken: string): Promise<Array<{ pageId: string; slug: string }>> {
+  const pages: Array<{ pageId: string; slug: string }> = [];
   await sql.begin(async tx => {
-    for (const page of draft.pages) {
-      const rendered = renderPage(page, draft.sources as SourceRecord[], version.document_id);
-      const existing = await tx<{ id: string }[]>`SELECT id FROM member_wiki_pages WHERE slug = ${page.slug} FOR UPDATE`;
-      let pageId = existing[0]?.id;
-      let revision = 1;
-      if (pageId) {
-        const latest = await tx<{ revision: number }[]>`SELECT max(revision) AS revision FROM member_wiki_page_revisions WHERE page_id = ${pageId}`;
-        revision = (latest[0]?.revision ?? 0) + 1;
-        await tx`UPDATE member_wiki_pages SET status='published', updated_at=now(), page_type=${page.pageType}, target_type=${page.targetType}, target_name=${page.targetName}, track=${page.track} WHERE id=${pageId}`;
-      } else {
-        pageId = randomUUID();
-        await tx`INSERT INTO member_wiki_pages(id, slug, page_type, target_type, target_name, track, status) VALUES (${pageId}, ${page.slug}, ${page.pageType}, ${page.targetType}, ${page.targetName}, ${page.track}, 'published')`;
-      }
-      await tx`INSERT INTO member_wiki_page_revisions(id, page_id, revision, body_md, coverage, task_id, version_id) VALUES (${randomUUID()}, ${pageId}, ${revision}, ${rendered.bodyMd}, ${tx.json(rendered.coverage as never)}, ${task.id}, ${version.id})`;
-      const byRef = new Map((draft.sources as SourceRecord[]).map(source => [source.ref, source]));
-      const citations = new Map<string, { ref: string; analyst: string | null; organization: string | null; publishedOn: string | null }>();
-      for (const stance of page.stances) {
-        if (!stance.sourceRef) continue;
-        const key = `${stance.sourceRef}|${stance.analyst}|${stance.institution}|${stance.date}`;
-        citations.set(key, {
-          ref: stance.sourceRef,
-          analyst: stance.analyst || null,
-          organization: stance.institution || null,
-          publishedOn: /^\d{4}-\d{2}-\d{2}$/.test(stance.date) ? stance.date : null,
-        });
-      }
-      for (const entry of page.timeline) {
-        for (const ref of entry.sourceRefs ?? []) {
-          if ([...citations.values()].some(citation => citation.ref === ref)) continue;
-          const source = byRef.get(ref);
-          citations.set(`${ref}||`, { ref, analyst: null, organization: source?.institution ?? null, publishedOn: source?.date ?? null });
-        }
-      }
-      // A page that quotes no viewpoint still rests on the material it was compiled from.
-      if (!citations.size) {
-        for (const source of byRef.values()) {
-          citations.set(`${source.ref}||`, { ref: source.ref, analyst: null, organization: source.institution ?? null, publishedOn: source.date ?? null });
-        }
-      }
-      for (const citation of citations.values()) {
-        const source = byRef.get(citation.ref);
-        await tx`INSERT INTO member_wiki_citations(id, page_id, revision, version_id, label, anchor, analyst, organization, published_on, source_title)
-          VALUES (${randomUUID()}, ${pageId}, ${revision}, ${version.id}, ${citation.ref}, ${source?.dateBasis ?? null}, ${citation.analyst}, ${citation.organization}, ${citation.publishedOn}, ${source?.institution ?? version.source_title})`;
-      }
-      for (const finding of findings.filter(item => item.target === page.slug || item.target?.startsWith(`${page.slug}#`))) {
-        await tx`INSERT INTO member_wiki_quality_issues(id, page_id, level, category, target, message, evidence, status) VALUES (${randomUUID()}, ${pageId}, ${finding.level}, ${finding.category}, ${finding.target}, ${finding.message}, ${finding.evidence}, 'open')`;
-      }
-      pageIds.push(pageId);
-    }
-    await tx`UPDATE member_wiki_tasks SET state='succeeded', stage='published', updated_at=now(), finished_at=now(), error_code=NULL, error_message=NULL, lease_token=NULL, lease_expires_at=NULL WHERE id=${task.id}`;
+    // The locks are taken in one order everywhere: the material first, then the task.
+    const documents = await tx<{ id: string; status: string }[]>`SELECT id, status FROM member_wiki_documents WHERE id=${version.document_id} FOR UPDATE`;
+    const document = documents[0];
+    if (!document) throw new Error("knowledge_document_not_found");
+    if (document.status !== "active") throw new Error("knowledge_document_withdrawn");
+    const tasks = await tx<{ id: string; state: string; lease_token: string | null; lease_expires_at: Date | null }[]>`SELECT id, state, lease_token, lease_expires_at FROM member_wiki_tasks WHERE id=${task.id} FOR UPDATE`;
+    const running = tasks[0];
+    if (!running) throw new Error("knowledge_task_not_found");
+    if (running.state !== "running") throw new Error("knowledge_lease_lost");
+    if (!running.lease_token || running.lease_token !== leaseToken) throw new Error("knowledge_lease_lost");
+    if (!running.lease_expires_at || running.lease_expires_at.getTime() <= Date.now()) throw new Error("knowledge_lease_lost");
+    // A newer version of this material was published already: this build is out of date and may not
+    // take the page back to what it knows.
+    const newer = await tx<{ version_id: string }[]>`SELECT version_id FROM member_wiki_contributions WHERE document_id=${version.document_id} AND status='active' AND version_no > ${version.version_no} LIMIT 1`;
+    if (newer[0]) throw new Error("knowledge_publish_stale");
+    // The older versions of this material step aside; the new one takes their place.
+    await tx`UPDATE member_wiki_contributions SET status='superseded', updated_at=now() WHERE document_id=${version.document_id} AND version_id <> ${version.id} AND status='active'`;
+    const written = await publishBuildPages(tx, {
+      taskId: task.id,
+      versionId: version.id,
+      documentId: version.document_id,
+      versionNo: version.version_no,
+      draft,
+      findings,
+      attribution: [version.source_org, dateText(version.source_date)].filter(Boolean).join(" ") || null,
+      materialTitle: version.source_title ?? version.file_name,
+    });
+    for (const page of written) pages.push({ pageId: page.pageId, slug: page.slug });
+    const finished = await tx<{ id: string }[]>`UPDATE member_wiki_tasks SET state='succeeded', stage='published', updated_at=now(), finished_at=now(), error_code=NULL, error_message=NULL, lease_token=NULL, lease_expires_at=NULL WHERE id=${task.id} AND state='running' AND lease_token=${leaseToken} RETURNING id`;
+    if (!finished.length) throw new Error("knowledge_lease_lost");
   });
-  return pageIds;
+  return pages;
 }
 
 /** Runs one build. A failure leaves the task failed with a code the page can show, and the pages that were published before stay. */
@@ -185,43 +201,44 @@ export async function runWikiTask(taskId: string): Promise<void> {
     const version = await loadVersion(task.version_id);
     if (!version) throw new Error("knowledge_document_not_found");
     const text = await extractVersion(version);
-    await sql`UPDATE member_wiki_tasks SET stage='compiling', updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
+    await advanceStage(taskId, leaseToken, "compiling");
 
     let draft = task.draft ? compiledDraftSchema.parse(task.draft) : null;
     if (!draft) {
       draft = await compileMaterial(materialInput(task, version, text));
-      await sql`UPDATE member_wiki_tasks SET draft=${sql.json(draft as never)}, updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
+      await saveCheckpoint(taskId, leaseToken, "draft", draft);
     }
-    await sql`UPDATE member_wiki_tasks SET stage='auditing', updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
+    await advanceStage(taskId, leaseToken, "auditing");
 
     const audit = task.audit ? auditResultSchema.parse(task.audit) : await auditMaterial(materialInput(task, version, text), draft);
-    await sql`UPDATE member_wiki_tasks SET audit=${sql.json(audit as never)}, updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
+    await saveCheckpoint(taskId, leaseToken, "audit", audit);
 
     const corrected = applyCorrections(draft, audit.corrections);
-    await sql`UPDATE member_wiki_tasks SET stage='linting', updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
+    await advanceStage(taskId, leaseToken, "linting");
 
     const slugs = await knownSlugs(corrected.draft.pages.map(page => page.slug));
     const findings = [...audit.findings, ...corrected.findings, ...lintDraft(corrected.draft, slugs)];
     if (audit.verdict === "fail") throw new Error("knowledge_audit_failed");
     if (blockingFindings(findings).length) throw new Error("knowledge_lint_blocked");
 
-    await sql`UPDATE member_wiki_tasks SET stage='publishing', updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
-    const pageIds = await publish(task, version, corrected.draft, findings);
+    await advanceStage(taskId, leaseToken, "publishing");
+    const pages = await publish(task, version, corrected.draft, findings, leaseToken);
     await recordEvent({
       actorId: task.uploader_id,
       eventType: "knowledge.build.published",
       documentId: task.document_id,
       versionId: task.version_id,
       taskId: task.id,
-      pageId: pageIds[0] ?? null,
-      detail: { pages: pageIds.length, slugs: corrected.draft.pages.map(page => page.slug), findings: findings.length, coverage: corrected.draft.pages.map(page => coverageOf(page)) },
+      pageId: pages[0]?.pageId ?? null,
+      detail: { pages: pages.length, slugs: pages.map(page => page.slug), findings: findings.length, coverage: corrected.draft.pages.map(page => coverageOf(page)) },
     });
   } catch (error) {
     const failure = failureCode(error);
-    if (!leaseLost) {
-      await sql`UPDATE member_wiki_tasks SET state='failed', stage='failed', error_code=${failure.code}, error_message=${failure.message}, updated_at=now(), finished_at=now(), lease_token=NULL, lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
-      await recordEvent({ actorId: task.uploader_id, eventType: "knowledge.build.failed", documentId: task.document_id, versionId: task.version_id, taskId: task.id, detail: { code: failure.code } });
-    }
+    // The task is only marked failed while this worker still holds it; a build that lost the task
+    // to a withdrawal or to another worker leaves the task to whoever holds it now.
+    const owned = await sql<{ id: string }[]>`UPDATE member_wiki_tasks SET state='failed', stage='failed', error_code=${failure.code}, error_message=${failure.message}, updated_at=now(), finished_at=now(), lease_token=NULL, lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`;
+    if (!owned.length || leaseLost) return;
+    await recordEvent({ actorId: task.uploader_id, eventType: "knowledge.build.failed", documentId: task.document_id, versionId: task.version_id, taskId: task.id, detail: { code: failure.code } });
   } finally {
     clearInterval(heartbeat);
   }
@@ -237,12 +254,30 @@ export async function recoverWikiTasks(enqueue: (taskId: string, tx: Db) => Prom
   });
 }
 
-/** The bytes of an original material, for the authorized download. */
-export async function versionBody(versionId: string): Promise<{ body: Buffer; fileName: string; mediaType: string; sha256: string } | null> {
-  const rows = await sql<{ body: Buffer; file_name: string; media_type: string; sha256: string }[]>`SELECT body, file_name, media_type, sha256 FROM member_wiki_document_versions WHERE id = ${versionId}`;
+/** The bytes of an original material, with the state of the material they belong to. */
+export async function versionBody(versionId: string): Promise<{
+  body: Buffer;
+  fileName: string;
+  mediaType: string;
+  sha256: string;
+  documentId: string;
+  documentStatus: string;
+  uploaderId: string;
+} | null> {
+  const rows = await sql<{ body: Buffer; file_name: string; media_type: string; sha256: string; document_id: string; document_status: string; uploader_id: string }[]>`
+    SELECT v.body, v.file_name, v.media_type, v.sha256, v.document_id, d.status AS document_status, d.uploader_id
+    FROM member_wiki_document_versions v JOIN member_wiki_documents d ON d.id = v.document_id WHERE v.id = ${versionId}`;
   const row = rows[0];
   if (!row) return null;
-  return { body: row.body, fileName: row.file_name, mediaType: row.media_type, sha256: row.sha256 };
+  return {
+    body: row.body,
+    fileName: row.file_name,
+    mediaType: row.media_type,
+    sha256: row.sha256,
+    documentId: row.document_id,
+    documentStatus: row.document_status,
+    uploaderId: row.uploader_id,
+  };
 }
 
 /** The checksum of an upload, so the same material is recognised when it comes again. */

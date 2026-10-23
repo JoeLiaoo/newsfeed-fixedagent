@@ -1,7 +1,7 @@
 // Turning a draft into a page. The platform renders the page, not the model: the section order, the
 // table shape, the coverage counts and the source labels are all decided here, so every page in the
 // library reads the same way and can be checked by machine.
-import type { CompiledDraft, Correction, Finding, PageDraft } from "./schema.ts";
+import type { CompiledDraft, Correction, Finding, PageDraft, SourceRecord } from "./schema.ts";
 import { FRESHNESS_TIERS, today } from "./catalog.ts";
 
 export type Coverage = {
@@ -12,19 +12,10 @@ export type Coverage = {
   last_report: string | null;
 };
 
-export type SourceRecord = {
-  ref: string;
-  institution: string | null;
-  authors: string[];
-  date: string | null;
-  dateBasis: string | null;
-  kind: string | null;
-};
-
 const UNKNOWN = "未知";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-export function isKnownDate(value: string | null | undefined): boolean {
+export function isKnownDate(value: string | null | undefined): value is string {
   return typeof value === "string" && DATE_PATTERN.test(value);
 }
 
@@ -36,6 +27,17 @@ function line(value: string | null | undefined): string {
 function cell(value: string | null | undefined): string {
   const text = line(value);
   return text.replace(/\|/g, "\\|") || UNKNOWN;
+}
+
+/**
+ * The paragraphs of a statement. A page that holds several materials keeps each material's
+ * statement apart, so the reader can tell whose words they are.
+ */
+export function paragraphs(value: string | null | undefined): string[] {
+  return (value ?? "")
+    .split(/\n{2,}/)
+    .map(part => line(part))
+    .filter(Boolean);
 }
 
 /**
@@ -97,49 +99,77 @@ export function orderedTimeline(page: PageDraft): PageDraft["timeline"] {
 /**
  * Applies the Auditor's corrections. It may withdraw an entry or lower an attribution to unknown; it
  * may never add one, so a correction can only make a page smaller or less certain than the draft.
+ *
+ * The Auditor's indices point at the draft it read, so they are read as they are and never as the
+ * indices of a list that is already being shortened: the attributions are lowered on the original
+ * entries first, and the withdrawn entries are removed afterwards, by their original index.
  */
 export function applyCorrections(draft: CompiledDraft, corrections: Correction[]): { draft: CompiledDraft; findings: Finding[] } {
   const findings: Finding[] = [];
   const pages = draft.pages.map(original => {
     const page = structuredClone(original);
-    for (const correction of corrections.filter(item => item.pageSlug === page.slug)) {
+    const own = corrections.filter(item => item.pageSlug === page.slug);
+    // The entries to withdraw, by the index they had in the draft the Auditor read.
+    const withdrawn = new Map<string, Set<number>>();
+    for (const correction of own) {
       const reason = line(correction.reason) || "独立复核要求调整";
       if (correction.section === "consensus") {
-        if (correction.action === "remove") page.consensus = "（该共识经独立复核撤回：缺少原文依据）";
-        findings.push({
-          level: "P1",
-          category: "attribution-vague",
-          target: page.slug,
-          message: `共识段被独立复核调整：${reason}`,
-          evidence: null,
-        });
+        if (correction.action === "remove" && !page.consensus.startsWith("（该共识经独立复核撤回")) {
+          page.consensus = "（该共识经独立复核撤回：缺少原文依据）";
+          findings.push({
+            level: "P1",
+            category: "attribution-vague",
+            target: page.slug,
+            message: `共识段被独立复核调整：${reason}`,
+            evidence: null,
+          });
+        }
         continue;
       }
       const list = page[correction.section] as Array<Record<string, unknown>> | undefined;
       if (!list) continue;
-      const entry = list[correction.index];
-      if (!entry) continue;
+      const index = correction.index;
+      if (!Number.isInteger(index) || index < 0 || index >= list.length) {
+        findings.push({
+          level: "advisory",
+          category: "correction-out-of-range",
+          target: `${page.slug}#${correction.section}[${index}]`,
+          message: `复核指向的${sectionLabel(correction.section)}不存在或已越界，已忽略：${reason}`,
+          evidence: null,
+        });
+        continue;
+      }
       if (correction.action === "remove") {
-        list.splice(correction.index, 1);
+        const indices = withdrawn.get(correction.section) ?? new Set<number>();
+        indices.add(index);
+        withdrawn.set(correction.section, indices);
         findings.push({
           level: "P1",
           category: "claim-without-evidence",
-          target: `${page.slug}#${correction.section}[${correction.index}]`,
+          target: `${page.slug}#${correction.section}[${index}]`,
           message: `撤回一条缺少依据的${sectionLabel(correction.section)}：${reason}`,
           evidence: null,
         });
         continue;
       }
       if (correction.field) {
-        entry[correction.field] = UNKNOWN;
+        list[index]![correction.field] = UNKNOWN;
         findings.push({
           level: "P1",
           category: "attribution-missing",
-          target: `${page.slug}#${correction.section}[${correction.index}]`,
+          target: `${page.slug}#${correction.section}[${index}]`,
           message: `归因改为「未知」：${reason}`,
           evidence: null,
         });
       }
+    }
+    // The withdrawn entries leave the list by their original index, so the entries after them keep
+    // the meaning the Auditor gave them.
+    for (const [section, indices] of withdrawn) {
+      const list = page[section as keyof PageDraft] as unknown as Array<Record<string, unknown>>;
+      if (!Array.isArray(list)) continue;
+      const kept = list.filter((_entry, index) => !indices.has(index));
+      (page as unknown as Record<string, unknown>)[section] = kept;
     }
     return page;
   });
@@ -187,8 +217,13 @@ export function renderPage(page: PageDraft, sources: SourceRecord[], documentId:
   const coverage = coverageOf(page);
   const byRef = new Map(sources.map(source => [source.ref, source]));
   const head = frontmatter(page, coverage);
-  const link = (ref: string) => `[${ref}](/knowledge/documents/${documentId}#${ref})`;
+  // A page may hold several materials; each source points at the material it may be read in.
+  const link = (ref: string) => `[${ref}](/knowledge/documents/${byRef.get(ref)?.documentId ?? documentId}#${ref})`;
   const related = (slugs: string[]) => slugs.filter(Boolean).map(slug => `- [${slug}](/knowledge/targets/${slug})`).join("\n") || "- 暂无";
+  const statement = (value: string | null | undefined) => {
+    const parts = paragraphs(value);
+    return parts.length ? parts.flatMap(part => [part, ""]) : [UNKNOWN, ""];
+  };
 
   if (page.pageType === "query") {
     const body = [
@@ -196,12 +231,10 @@ export function renderPage(page: PageDraft, sources: SourceRecord[], documentId:
       "",
       "## 简答",
       "",
-      line(page.answer) || UNKNOWN,
-      "",
+      ...statement(page.answer),
       "## 推理路径",
       "",
-      line(page.consensus) || UNKNOWN,
-      "",
+      ...statement(page.consensus),
       ...(page.timeline.length ? ["## 依据", "", ...orderedTimeline(page).map(entry => `- [${isKnownDate(entry.date) ? entry.date : "日期未知"}] ${line(entry.headline)}${entry.sourceRefs.length ? `（${entry.sourceRefs.map(link).join("、")}）` : ""}`), ""] : []),
       "## Related Pages",
       "",
@@ -216,8 +249,7 @@ export function renderPage(page: PageDraft, sources: SourceRecord[], documentId:
       "",
       "## 一句话定义",
       "",
-      line(page.definition) || UNKNOWN,
-      "",
+      ...statement(page.definition),
       "## 框架结构",
       "",
       ...(page.structure.length ? page.structure.map((step, index) => `${index + 1}. ${line(step)}`) : ["- 未知"]),
@@ -275,8 +307,7 @@ export function renderPage(page: PageDraft, sources: SourceRecord[], documentId:
     "",
     "## 共识与分歧",
     "",
-    line(page.consensus) || UNKNOWN,
-    "",
+    ...statement(page.consensus),
     ...(page.divergences.length ? ["**关键争议点**：", ...page.divergences.map((item, index) => `${index + 1}. **${line(item.point)}**${item.sides.length ? `：${item.sides.map(side => `${line(side.attribution)}（${isKnownDate(side.date) ? side.date : "日期未知"}）${line(side.argument)}`).join("；")}` : ""}`), ""] : []),
     "## 边际变化",
     "",

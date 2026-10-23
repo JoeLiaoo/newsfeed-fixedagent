@@ -17,9 +17,10 @@ function missing(value: string): boolean {
   return !value || !value.trim();
 }
 
-function dateProblem(value: string): string | null {
+function dateProblem(value: string | null | undefined): string | null {
   if (isKnownDate(value)) return null;
-  if (value.trim() === "未知" || value.trim() === "") return null;
+  const text = (value ?? "").trim();
+  if (text === "未知" || text === "") return null;
   return `日期「${value}」既不是 YYYY-MM-DD，也不是「未知」`;
 }
 

@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY IF NOT EXISTS member_wiki_contributions_document_idx ON member_wiki_contributions(document_id)

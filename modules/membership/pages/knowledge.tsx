@@ -40,7 +40,7 @@ type PageRow = {
 type AnswerCitation = { label: string; pageSlug: string; title: string; analyst: string | null; organization: string | null; publishedOn: string | null; anchor: string | null };
 type Answer = {
   id: string; question: string; answerMd: string; citations: AnswerCitation[];
-  coverage: { analysts: number; firms: number; reports: number; firstReport: string | null; lastReport: string | null };
+  coverage: { analysts: number; firms: number; reports: number; first_report: string | null; last_report: string | null };
   freshness: Array<{ pageSlug: string; tier: string; lastReport: string | null }>;
 };
 
@@ -291,7 +291,7 @@ export default function KnowledgePage() {
                 {citation.analyst ? ` · ${citation.analyst}` : ""}{citation.organization ? ` · ${citation.organization}` : ""}{citation.publishedOn ? ` · ${citation.publishedOn}` : ""}
               </li>)}</ul> : <p className="text-xs text-ink-3">本次回答没有可跳转的引用。</p>}
             </div>
-            <p className="text-xs text-ink-4">覆盖：分析师 {answer.coverage.analysts} · 机构 {answer.coverage.firms} · 材料 {answer.coverage.reports} · {answer.coverage.firstReport ?? "起始日期未知"} 至 {answer.coverage.lastReport ?? "最近日期未知"}</p>
+            <p className="text-xs text-ink-4">覆盖：分析师 {answer.coverage.analysts} · 机构 {answer.coverage.firms} · 材料 {answer.coverage.reports} · {answer.coverage.first_report ?? "起始日期未知"} 至 {answer.coverage.last_report ?? "最近日期未知"}</p>
           </div>}
         </CardContent>
       </Card>

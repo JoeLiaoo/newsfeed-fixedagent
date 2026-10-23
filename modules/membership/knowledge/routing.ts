@@ -3,6 +3,18 @@
 // it are left out rather than padded in.
 import type { Coverage } from "./render.ts";
 
+/** One citation of a published page: what it points at, and who said it. */
+export type RoutableCitation = {
+  id: string;
+  label: string;
+  analyst: string | null;
+  organization: string | null;
+  publishedOn: string | null;
+  anchor: string | null;
+  sourceTitle: string | null;
+  versionId: string;
+};
+
 export type RoutablePage = {
   slug: string;
   title: string;
@@ -11,6 +23,10 @@ export type RoutablePage = {
   track: string | null;
   bodyMd: string;
   coverage: Coverage;
+  /** The published revision the answer reads. */
+  revisionId: string;
+  /** The citations of that revision: the only things an answer may point at. */
+  citations: RoutableCitation[];
 };
 
 const CJK = /[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff]/;

@@ -63,7 +63,7 @@ export default function KnowledgeTargetPage() {
         <Badge variant={FRESHNESS_VARIANT[page.freshness] ?? "secondary"}>{page.freshnessLabel}</Badge>
         {page.track && <Badge variant="outline">{page.track}</Badge>}
       </div>
-      <p className="mt-2 text-xs text-ink-3">修订 {page.revision} · 分析师 {page.coverage?.analysts ?? 0} · 机构 {page.coverage?.firms ?? 0} · 材料 {page.coverage?.reports ?? 0} · {page.coverage?.first_report ?? "起始日期未知"} 至 {page.coverage?.last_report ?? "最近日期未知"} · 更新于 {new Date(page.updatedAt).toLocaleString("zh-CN")}</p>
+      <p className="mt-2 text-xs text-ink-3">修订 {page.revision} · 分析师 {page.coverage?.analysts ?? 0} · 机构 {page.coverage?.firms ?? 0} · 来源 {page.coverage?.reports ?? 0} · {page.coverage?.first_report ?? "起始日期未知"} 至 {page.coverage?.last_report ?? "最近日期未知"} · 更新于 {new Date(page.updatedAt).toLocaleString("zh-CN")}</p>
       <p className="mt-1"><Link to="/knowledge" className="text-sm text-accent underline-offset-4 hover:underline">返回知识库</Link></p>
     </header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}

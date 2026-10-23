@@ -39,14 +39,20 @@ const DRAFT = {
   notes: "测试用草稿",
 };
 
-const AUDIT = { verdict: "pass_with_issues", corrections: [], findings: [{ level: "advisory", category: "coverage-mismatch", target: "view-company-example", message: "覆盖较薄", evidence: null }], notes: "" };
-
-const ANSWER = {
-  answer: "综合已覆盖的材料，某公司当前以张三/某券商的看好为主[^1]。\n\n参考资料：\n[^1]: 某公司 观点页",
-  citations: [{ label: "1", pageSlug: "view-company-example", title: "某公司", analyst: "张三", organization: "某券商", publishedOn: "2026-06-20", anchor: null }],
-  coverage: { analysts: 1, firms: 1, reports: 1, firstReport: "2026-06-20", lastReport: "2026-06-20", note: null },
-  freshness: [{ pageSlug: "view-company-example", tier: "fresh", lastReport: "2026-06-20" }],
+// The second organisation's material about the same target: the same subject, another viewpoint.
+const SECOND_DRAFT = {
+  ...DRAFT,
+  pages: [{
+    ...DRAFT.pages[0],
+    slug: "view-company-example-other",
+    consensus: "基于 1 家机构 1 位分析师 1 篇材料：需求恢复或慢于预期。",
+    stances: [{ analyst: "王五", institution: "另一券商", stance: "中性", date: "2026-07-01", argument: "动销恢复偏慢", sourceRef: "S1" }],
+    timeline: [{ date: "2026-07-01", headline: "另一家维持中性", notes: [], sourceRefs: ["S1"] }],
+  }],
+  sources: [{ ref: "S1", institution: "另一券商", authors: ["王五"], date: "2026-07-01", dateBasis: "首页", kind: "点评" }],
 };
+
+const AUDIT = { verdict: "pass_with_issues", corrections: [], findings: [{ level: "advisory", category: "coverage-mismatch", target: "view-company-example", message: "覆盖较薄", evidence: null }], notes: "" };
 
 const provider = await stub((_hit, req) => {
   const body = JSON.parse(req.body) as { messages: Array<{ role: string; content: string }> };
@@ -54,10 +60,22 @@ const provider = await stub((_hit, req) => {
   const user = body.messages.find(message => message.role === "user")?.content ?? "";
   if (system.includes("Builder")) {
     if (user.includes("FAILME")) return { choices: [{ message: { content: "这不是 JSON" } }] };
+    if (user.includes("另一券商")) return { choices: [{ message: { content: JSON.stringify(SECOND_DRAFT) } }] };
     return { choices: [{ message: { content: JSON.stringify(DRAFT) } }] };
   }
   if (system.includes("Auditor")) return { choices: [{ message: { content: JSON.stringify(AUDIT) } }] };
-  return { choices: [{ message: { content: JSON.stringify(ANSWER) } }] };
+  // The answer may only cite the citations it was given, and it may not say who said it: the
+  // library reads the attribution from its own record.
+  const payload = JSON.parse(user) as { availablePages: Array<{ slug: string; availableCitations: Array<{ citationId: string }> }> };
+  const page = payload.availablePages[0];
+  const citation = page?.availableCitations[0];
+  const citationId = user.includes("BADCITATION") ? "00000000-0000-0000-0000-000000000000" : citation?.citationId ?? "";
+  return {
+    choices: [{ message: { content: JSON.stringify({
+      answer: "综合已覆盖的材料，某公司当前以张三/某券商的看好为主[^1]。\n\n参考资料：\n[^1]: 某公司 观点页",
+      citations: [{ label: "1", pageSlug: page?.slug ?? "", citationId, analyst: "编造的分析师", organization: "编造的机构" }],
+    }) } }],
+  };
 });
 Object.assign(process.env, { LLM_BASE_URL: `${provider.url}/v1`, LLM_API_KEY: "test-key", LLM_MODEL: "test-model" });
 
@@ -69,13 +87,14 @@ test("the shared library is open to approved employees and closed to everyone el
   const accounts = [
     { username: `wiki-a-${suffix}`, realName: "员工甲", password: "long-test-password-123" },
     { username: `wiki-b-${suffix}`, realName: "员工乙", password: "long-test-password-123" },
+    { username: `wiki-c-${suffix}`, realName: "员工丙", password: "long-test-password-123" },
   ];
   const common = { host: "newsfeed.test", origin: "http://newsfeed.test" };
   for (const account of accounts) {
     const registered = await app.inject({ method: "POST", url: "/api/v1/membership/register", headers: common, payload: account });
     assert.equal(registered.statusCode, 201);
   }
-  await sql`UPDATE member_users SET status='active' WHERE username IN (${accounts[0]!.username},${accounts[1]!.username})`;
+  await sql`UPDATE member_users SET status='active' WHERE username IN (${accounts[0]!.username},${accounts[1]!.username},${accounts[2]!.username})`;
   const cookies: string[] = [];
   for (const account of accounts) {
     const login = await app.inject({ method: "POST", url: "/api/v1/membership/login", headers: common, payload: { username: account.username, password: account.password } });
@@ -125,14 +144,51 @@ test("the shared library is open to approved employees and closed to everyone el
   assert.equal(original.statusCode, 200);
   assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: common })).statusCode, 401);
 
+  // A second organisation's material about the same target joins the page instead of replacing it.
+  const secondUpload = await app.inject({
+    method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[1]!, ...common },
+    payload: { fileName: "某公司点评.md", base64: Buffer.from("# 某公司点评\n\n另一券商，2026-07-01：中性，动销恢复偏慢。\n", "utf8").toString("base64"), title: "某公司点评", author: "王五", organization: "另一券商", date: "2026-07-01", kind: "点评" },
+  });
+  assert.equal(secondUpload.statusCode, 202);
+  const second = await secondUpload.json() as { documentId: string; versionId: string; taskId: string };
+  await runWikiTask(second.taskId);
+  const merged = await sql`SELECT body_md, coverage FROM member_wiki_page_revisions ORDER BY revision DESC LIMIT 1`;
+  assert.match(merged[0]!.body_md, /\| 张三 \| 某券商 \| 看好 \| 2026-06-20 \|/, "前一份材料的观点仍在");
+  assert.match(merged[0]!.body_md, /\| 王五 \| 另一券商 \| 中性 \| 2026-07-01 \|/, "后一份材料的观点也进来了");
+  assert.equal((merged[0]!.coverage as { analysts: number }).analysts, 2, "两位分析师");
+  const pageCount = await sql`SELECT count(*)::int AS count FROM member_wiki_pages`;
+  assert.equal(pageCount[0]?.count, 1, "同一标的只有一页");
+  const contributions = await sql`SELECT status, document_id FROM member_wiki_contributions ORDER BY version_no`;
+  assert.equal(contributions.length, 2, "两份材料各留一份贡献");
+  assert.ok(contributions.every(row => row.status === "active"));
+
+  // Two builds that publish at the same time keep both materials' contributions.
+  const third = await app.inject({
+    method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[0]!, ...common },
+    payload: { fileName: "另一份点评.md", base64: Buffer.from("# 另一份点评\n\n另一券商，2026-07-02：中性，渠道反馈一般。\n", "utf8").toString("base64"), title: "另一份点评", author: "王五", organization: "另一券商", date: "2026-07-02", kind: "点评" },
+  });
+  const fourth = await app.inject({
+    method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[1]!, ...common },
+    payload: { fileName: "第三份点评.md", base64: Buffer.from("# 第三份点评\n\n另一券商，2026-07-03：中性，需求恢复偏慢。\n", "utf8").toString("base64"), title: "第三份点评", author: "王五", organization: "另一券商", date: "2026-07-03", kind: "点评" },
+  });
+  const thirdTask = (await third.json() as { taskId: string; documentId: string }).taskId;
+  const fourthTask = (await fourth.json() as { taskId: string; documentId: string }).taskId;
+  const thirdDocument = (await third.json() as { documentId: string }).documentId;
+  const fourthDocument = (await fourth.json() as { documentId: string }).documentId;
+  await Promise.all([runWikiTask(thirdTask), runWikiTask(fourthTask)]);
+  const concurrent = await sql`SELECT count(*)::int AS count FROM member_wiki_contributions WHERE status='active'`;
+  assert.equal(concurrent[0]?.count, 4, "并发的构建各留一份贡献，谁也没有覆盖谁");
+  const concurrentBody = await sql`SELECT body_md FROM member_wiki_page_revisions ORDER BY revision DESC LIMIT 1`;
+  assert.match(concurrentBody[0]!.body_md, /另一券商/);
+
   // A new version of the same material is a new build; the published page stays readable while it runs.
   const updated = await app.inject({
     method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[0]!, ...common },
     payload: { fileName: "某公司深度报告.md", base64: Buffer.from("# 某公司深度报告（更新）\n\n张三/某券商，2026-08-20：维持看好。\n", "utf8").toString("base64"), documentId: uploaded.documentId },
   });
   assert.equal(updated.statusCode, 202);
-  const second = await updated.json() as { versionId: string; taskId: string; versionNo: number };
-  assert.equal(second.versionNo, 2);
+  const second2 = await updated.json() as { versionId: string; taskId: string; versionNo: number };
+  assert.equal(second2.versionNo, 2);
   assert.equal((await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages/view-company-example", headers: { cookie: cookies[1]!, ...common } })).statusCode, 200);
 
   // A build whose model output is unusable fails, and leaves the published page alone.
@@ -157,18 +213,52 @@ test("the shared library is open to approved employees and closed to everyone el
   // An answer rests on the published pages, and says what it rests on.
   const answer = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { question: "某公司现在怎么看？" } });
   assert.equal(answer.statusCode, 200);
-  const answered = await answer.json() as { answer: { answerMd: string; citations: Array<{ pageSlug: string }> } };
-  assert.match(answered.answer.answerMd, /\/knowledge\/targets\/view-company-example/);
-  assert.deepEqual(answered.answer.citations.map(citation => citation.pageSlug), ["view-company-example"]);
+  const answered = answer.json() as Promise<{ answer: { answerMd: string; citations: Array<{ pageSlug: string; analyst: string | null; organization: string | null }>; coverage: { analysts: number; reports: number } } }>;
+  assert.match((await answered).answer.answerMd, /\/knowledge\/targets\/view-company-example/);
+  assert.deepEqual((await answered).answer.citations.map(citation => citation.pageSlug), ["view-company-example"]);
+  assert.ok((await answered).answer.citations.every(citation => citation.analyst !== "编造的分析师"), "归因来自库的记录，不是模型写的");
+  assert.ok((await answered).answer.citations.some(citation => citation.analyst === "张三"));
+  assert.ok((await answered).answer.coverage.analysts >= 1);
+  assert.ok((await answered).answer.coverage.reports >= 1);
   const uncovered = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { question: "完全没有覆盖的问题主题" } });
   assert.equal(uncovered.statusCode, 404);
   assert.equal((await uncovered.json() as { error: string }).error, "knowledge_no_coverage");
 
-  // Taking a material out of the library withdraws the pages it produced.
+  // An answer that cites something the library never offered is refused.
+  const unverifiable = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { question: "某公司 BADCITATION 怎么看？" } });
+  assert.equal(unverifiable.statusCode, 502);
+  assert.equal((await unverifiable.json() as { error: string }).error, "knowledge_answer_unverified");
+
+  // Taking a material out of the library withdraws what it contributed; the other materials stay.
   const withdrawn = await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/documents/${uploaded.documentId}/withdraw`, headers: { cookie: cookies[0]!, ...common } });
   assert.equal(withdrawn.statusCode, 200);
   const afterWithdrawal = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages", headers: { cookie: cookies[1]!, ...common } });
-  assert.deepEqual((await afterWithdrawal.json() as { pages: unknown[] }).pages, []);
+  assert.equal((await afterWithdrawal.json() as { pages: unknown[] }).pages.length, 1, "另一份材料还在，页面仍在");
+  const afterBody = await sql`SELECT body_md FROM member_wiki_page_revisions ORDER BY revision DESC LIMIT 1`;
+  assert.doesNotMatch(afterBody[0]!.body_md, /张三/, "撤回的材料不再出现在页面里");
+  const withdrawnOriginal = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: { cookie: cookies[1]!, ...common } });
+  assert.equal(withdrawnOriginal.statusCode, 404, "共享库不再提供撤回材料的原件");
+  const outsiderOriginal = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: { cookie: cookies[2]!, ...common } });
+  assert.equal(outsiderOriginal.statusCode, 404, "没有上传过的员工也读不到撤回材料");
+  const auditorOriginal = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: { cookie: cookies[0]!, ...common } });
+  assert.equal(auditorOriginal.statusCode, 410, "上传者本人看得到它已撤回");
   const auditEvents = await sql`SELECT event_type FROM member_wiki_audit_events WHERE document_id = ${uploaded.documentId}`;
   assert.ok(auditEvents.some(event => event.event_type === "knowledge.document.withdrawn"));
+
+  // The last materials leave: the page goes down with them.
+  const remaining = [
+    { documentId: second.documentId, cookie: cookies[1]! },
+    { documentId: thirdDocument, cookie: cookies[0]! },
+    { documentId: fourthDocument, cookie: cookies[1]! },
+  ];
+  for (const entry of remaining) {
+    const lastWithdrawn = await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/documents/${entry.documentId}/withdraw`, headers: { cookie: entry.cookie, ...common } });
+    assert.equal(lastWithdrawn.statusCode, 200);
+  }
+  const gone = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages", headers: { cookie: cookies[0]!, ...common } });
+  assert.deepEqual((await gone.json() as { pages: unknown[] }).pages, []);
+  const gonePage = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages/view-company-example", headers: { cookie: cookies[2]!, ...common } });
+  assert.equal(gonePage.statusCode, 404, "下架的知识页对其他员工不再可读");
+  const auditorPage = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages/view-company-example", headers: { cookie: cookies[0]!, ...common } });
+  assert.equal(auditorPage.statusCode, 410, "上传者本人看得到它已下架");
 });
