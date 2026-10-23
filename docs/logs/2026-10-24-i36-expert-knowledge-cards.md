@@ -1,6 +1,6 @@
 # 2026-10-24 · Issue #36 专家平台与知识库卡片列表
 
-- Agent：pi（分支 `feat/issue-36-expert-knowledge-cards`，基于 `origin/main` 的 `af6b39a`；开 PR 时未合并）
+- Agent：pi（分支 `feat/issue-36-expert-knowledge-cards`，基于 `origin/main` 的 `af6b39a`；PR [#38](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/38)，开 PR 时未合并）
 - 对应任务：维护任务（不对应 P0–P5）；需求来源为 [Issue #36](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/36)，需求基线记入 `docs/PLAN.md` v0.73
 - 完成状态：完成（卡片列表、详情页与新增入口、多知识库数据模型与接口已交付；真实员工验收与生产发布未做）
 
