@@ -4,7 +4,7 @@
 
 **实现状态：代码经 [PR #15](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/15) 合并到 `main`（`acef3866367d`），并已随 `main` 提交 `5031e2c04dec382263d05b38484b0cfaabeaa15b` 部署；功能开关已按用户指示启用，仍待双用户真机验收。** PR #15 已移除静态联系人二维码 + 手动验证码 + 网页确认的旧流程；新增平台会话绑定、iLink 二维码生成和轮询、原子身份绑定、AES-256-GCM Bot token 与 cursor 加密存储、多账号收件箱轮询、按收件人发送、会话互动恢复状态和自动化 mock/数据库测试。独立 iLink 账号的主动推送不再通过旧 Hermes 插件的单例 `_adapter`，旧插件仅兼容历史通道。生产迁移 `0152`–`0155` 已应用；`P3_ILINK_CREDENTIAL_KEY` 已安全配置，`P3_ILINK_BINDING_ENABLED`、`P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED` 均为 true。启用时有 0 个 active 微信绑定、0 个 iLink 账号、0 条通知 outbox、0 个 GP watchlist/active GP，因此暂无实际微信投递或 GP 同步；P3-04 仍未勾选。
 
-**本轮修复（记录见[服务端确认绑定日志](logs/2026-10-22-P3-04-server-side-binding.md)）：** 2026-10-22 生产实测发现员工扫码后服务器没有记录绑定（`member_ilink_logins` 一直 `status=wait`），原因是网页在标签页不可见时停止轮询，而服务器只在网页请求状态时才去问渠道。代码已改为由 worker 定时确认扫码会话、网页回到前台立即查询、渠道失败返回可区分的错误状态，并在收到首条入站消息时回一句连接确认；该版本尚未部署，线上行为以上一次发布为准。
+**本轮修复（记录见[服务端确认绑定日志](logs/2026-10-22-P3-04-server-side-binding.md)及[PR #18 评审修复日志](logs/2026-10-23-P3-04-pr18-review.md)）：** 2026-10-22 生产实测发现员工扫码后服务器没有记录绑定（`member_ilink_logins` 一直 `status=wait`），原因是网页在标签页不可见时停止轮询，而服务器只在网页请求状态时才去问渠道。PR #18 已合并（`4a8299f`）：worker 定时确认扫码会话，网页回到前台立即查询，渠道失败返回可区分的错误状态；首条入站消息可回一句连接确认。该版本尚未部署，线上行为以上一次发布为准。
 
 **范围说明：** 本轮完成网页扫码绑定和订阅推送通道。扫码得到的独立 iLink Bot 可以收取用户互动以刷新推送上下文，但**这些 Bot 的普通聊天消息暂不会被交给 Hermes Agent**；原 Hermes 聊天网关单独保留，不能把“推送 Bot 可绑定”描述为“多 Bot Hermes AI 对话已接通”。若后续需要每个员工在同一 Bot 内与 Hermes 直接对话，应另外增加租户隔离的 Hermes ingress/pairing 联调并独立验收。
 
