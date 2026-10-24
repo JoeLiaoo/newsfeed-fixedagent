@@ -31,4 +31,4 @@
 ## 风险与交接
 
 - 已知限制／缺失依赖：规则能力边界不变；P2-05 仍需生产真实主体样例核对主体选择、分层结果、预算与缺口清单，不能由自动化测试替代。
-- 下一步：PR [#51](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/51) 已打开，当前提交 `3c2be84` 待评审；提供临时测试数据库后补跑 `panorama-db.test.ts`。P2-05 保持未勾选，待用户完成生产样例验收。
+- 最终状态：PR [#51](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/51) 已合并（`509714f6e3c3d6dd3f7e3b6e6eabd9bb30faa670`），预算中途耗尽的追加修复及最终验证见[复审日志](2026-10-24-P2-05-panorama-review.md)。最终 head 的三项 CI 全通过，数据库 29/29；本地未配置 PostgreSQL。未部署本次硬化，生产真实样例和员工验收仍待完成，P2-05 保持未勾选。

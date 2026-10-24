@@ -61,7 +61,7 @@ P2 已交付专家导入、依赖状态、持久化队列、实体确认、任�
 
 2026-10-24 专家平台改用能力优先文案：专家卡片、详情页、导入说明、任务错误与 Markdown 产物不再出现数据源或模型品牌名，改为「一层对外投资核查」「文本任务专家」「平台企业信息查询」等能力表述，并说明每种模式需要员工提供什么。导入说明按导入包声明区分两种能力：未声明工具的技能为文本任务专家，完整声明主体检索、工商画像与一层直接投资三项平台能力的技能为一层对外投资核查并需先确认企业主体。内部标识（`xinhua_trial`、`xinhua_*` 错误码、MCP 主机名、环境变量、专家 slug）与 MCP 接入方式不变；见[工作日志](logs/2026-10-24-experts-capability-copy.md)。
 
-2026-10-24 新增第二个内置专家「对外投资全景图」（slug `outbound-investment-panorama`，执行模式 `xinhua_panorama`），按用户决定保留参考 skill 的终止条件与穿透规则，改用平台已授权的八项企业信息能力逐层取数。PR #48 已合并并于 release `9e116bd` 发布；真实 MCP 全景与登录员工验收尚未记录，P2-05 保持 `[ ]`。本轮硬化已在 [PR #51](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/51) 开放评审，首轮审查又修正层级预算边界、预算截断缺口记录和空台账下载，详见[适配矩阵](P2-EXPERT-ADAPTER.md)、[硬化日志](logs/2026-10-24-P2-05-panorama-hardening.md)与[首轮审查日志](logs/2026-10-24-P2-05-panorama-review.md)。
+2026-10-24 新增第二个内置专家「对外投资全景图」（slug `outbound-investment-panorama`，执行模式 `xinhua_panorama`），按用户决定保留参考 skill 的终止条件与穿透规则，改用平台已授权的八项企业信息能力逐层取数。PR #48 已合并并于 release `9e116bd` 发布；真实 MCP 全景与登录员工验收尚未记录，P2-05 保持 `[ ]`。本轮硬化已随 [PR #51](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/51) 合并（`509714f`），首轮审查及复审直接修复又修正层级预算边界、预算截断缺口记录和空台账下载，详见[适配矩阵](P2-EXPERT-ADAPTER.md)、[硬化日志](logs/2026-10-24-P2-05-panorama-hardening.md)与[首轮审查日志](logs/2026-10-24-P2-05-panorama-review.md)。
 
 2026-10-24 按 Joe 的决定（第一个专家「没啥意义」）隐藏「企业一层对外投资核查」的内置目录入口：新增 `member_experts.status` 的第三个取值 `hidden`（迁移 `0185`–`0187`），播种时把该内置专家写成 `hidden`（已部署的 `available` 行在下一次播种时翻转），目录接口对所有角色都不返回隐藏行，对该 slug 新建任务按「不存在」拒绝。该专家的行、技能文本与执行器保留，隐藏前已建的任务照常执行；只声明主体检索、企业画像与一层直接投资三个工具的自定义技能仍是「一层对外投资核查」模式。代码与测试已随 PR #48 合并并以 release `9e116bd` 发布；见[适配矩阵](P2-EXPERT-ADAPTER.md)与[工作日志](logs/2026-10-24-P2-05-hide-one-layer-entry.md)。
 
