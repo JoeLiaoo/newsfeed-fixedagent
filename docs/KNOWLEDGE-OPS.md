@@ -48,10 +48,10 @@
 | `GET /documents`、`GET /documents/:id` | 材料列表（可检索，`?baseId=`、`?query=`）与单份材料的版本、构建状态（已撤回的材料只对上传者与管理员可见） |
 | `POST /documents` | 上传：文件名、base64 正文、标题、作者、机构、日期、类型、所属库 `baseId`、可选的 `documentId`（作为新版本）；日期须为真实有效的 `YYYY-MM-DD`，无效值返回 `knowledge_date_invalid` |
 | `POST /documents/:id/withdraw` | 撤回材料：它的贡献退出所在库，由它生成的知识页重新聚合或下架 |
-| `GET /tasks`、`POST /tasks/:id/retry` | 库内构建状态列表；重跑失败的任务（从上次成功的检查点继续） |
+| `GET /tasks`、`POST /tasks/:id/retry` | 库内构建状态列表（分页：`?limit=`（1–100，默认 50）、`?offset=`，返回 `hasMore` 与 `nextOffset`）；重跑失败的任务（从上次成功的检查点继续） |
 | `GET /pages`、`GET /pages/:slug` | 已发布知识页列表（可检索，`?baseId=`、`?query=`）与单页正文、引用、质量问题（下架的页面对其他员工是 404） |
 | `GET /versions/:id/original` | 下载原件（经会话鉴权，带 `nosniff`；已撤回材料的原件只对上传者与管理员开放，其余为 404） |
-| `POST /answers` | 提问：按问题在**所在库**内路由到已发布页面，生成带脚注引用的回答（请求体带 `baseId`）；有引用时返回 200，无覆盖时返回 422 `knowledge_no_coverage` 与中文 `message`，库不存在时返回 404 `knowledge_base_not_found` |
+| `POST /answers` | 提问：按问题在**所在库**内路由到已发布页面，生成带脚注引用的回答（请求体带 `baseId`）；每条引用带 `pageSlug`、`documentId`、`versionId`、材料标题与文件名，可跳回依据页与下载原件；有引用时返回 200，无覆盖时返回 422 `knowledge_no_coverage` 与中文 `message`，库不存在时返回 404 `knowledge_base_not_found` |
 
 材料详情 `GET /documents/:id` 对可读取的 Markdown 版本额外返回 `bodyMd`（UTF-8 原件正文），供已批准员工在详情页直接阅读；其他格式仍只保留元数据与原件下载。知识页详情 `GET /pages/:slug` 返回同库已发布页面的 `related` 标题与 slug，页面据此把历史正文里的短 slug／完整 slug 链接解析为标题与有效地址；来源计数按详情实际返回的引用条数显示。已发布目标存在时，历史遗留的 `related-target-missing` 误报不会在详情继续展示；库中确实不存在的目标仍报告。
 
@@ -155,6 +155,8 @@
 - 发布和撤回按排序后的目标集合取得事务锁，避免多目标构建交叉锁定；成功发布的版本（包括不产生页面的版本）都阻止旧版本随后覆盖当前状态。
 - 问答只接受本次路由提供的引用 ID 与脚注标签；脚注标签可以是本轮的编号或页面自己的来源编号，部分无效或未绑定脚注会拒绝整条回答。覆盖与时效按实际引用计算，当前页面包含新材料不代表被引用的旧材料也是当前观点。
 - 模型响应期间若依据页更新或材料撤回，回答保存前再次检查相同修订及共享状态；变化时返回 409，员工重新提问即可。不会保存已经失效的回答。
+- **问答可跳回依据**：每条引用除脚注标签与依据页外，还带 `documentId`（材料）与 `versionId`（原件版本），页面据此给出材料页与原件下载两个入口；材料缺失的元数据显示「未知」，不补造。
+- **构建列表分页**：`GET /tasks` 按 `limit`（1–100，默认 50）与 `offset` 取一页，返回 `hasMore` 与 `nextOffset`；列表不再被固定 100 条截断。
 - 复审与回归记录见 [PR #34 复审日志](logs/2026-10-24-P5-pr34-review.md)。真实模型语义质量及 P5-02～P5-04 的真实员工验收仍待执行。
 
 ## 13. 多个知识库（Issue #36）的落地边界

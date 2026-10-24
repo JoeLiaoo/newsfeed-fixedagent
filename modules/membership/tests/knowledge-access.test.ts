@@ -10,6 +10,7 @@ import { buildApp } from "../../../apps/api/src/app.ts";
 import { SERVER_MODULES } from "../../../site/modules/server.ts";
 import { stub, tag } from "../../../tests/setup.ts";
 import { runWikiTask, recoverWikiTasks } from "../knowledge/worker.ts";
+import { TASK_ERRORS } from "../knowledge/catalog.ts";
 
 const DRAFT = {
   pages: [{
@@ -234,6 +235,27 @@ test("the shared library is open to approved employees and closed to everyone el
   assert.equal(unknownMaterial.freshness, "undated");
   await sql`UPDATE member_wiki_document_versions SET source_title='另一券商', source_author='王五', source_org='另一券商', source_date='2026-07-01', source_kind='点评' WHERE id=${second.versionId}`;
 
+  // The build list is read a page at a time: it is never cut at an arbitrary number of rows.
+  const firstTaskPage = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/tasks?limit=1", headers: { cookie: cookies[0]!, ...common } });
+  assert.equal(firstTaskPage.statusCode, 200);
+  const firstTasks = firstTaskPage.json() as Promise<{ tasks: Array<{ id: string }>; hasMore: boolean; nextOffset: number | null }>;
+  assert.equal((await firstTasks).tasks.length, 1);
+  assert.equal((await firstTasks).hasMore, true);
+  assert.equal((await firstTasks).nextOffset, 1);
+  const secondTaskPage = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/tasks?limit=1&offset=1", headers: { cookie: cookies[0]!, ...common } });
+  const secondTasks = secondTaskPage.json() as Promise<{ tasks: Array<{ id: string }>; hasMore: boolean; nextOffset: number | null }>;
+  assert.notEqual((await secondTasks).tasks[0]?.id, (await firstTasks).tasks[0]?.id, "the second page holds other builds");
+  assert.equal((await secondTasks).hasMore, false);
+  assert.equal((await secondTasks).nextOffset, null);
+  // A page size beyond the cap is clamped rather than refused.
+  const clampedTasks = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/tasks?limit=500", headers: { cookie: cookies[0]!, ...common } });
+  const clamped = clampedTasks.json() as Promise<{ tasks: unknown[]; hasMore: boolean; nextOffset: number | null }>;
+  assert.ok((await clamped).tasks.length <= 100);
+  assert.equal((await clamped).hasMore, false);
+  assert.equal((await clamped).nextOffset, null);
+  // A visitor reads no build list.
+  assert.equal((await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/tasks", headers: common })).statusCode, 401);
+
   // Two builds that publish at the same time keep both materials' contributions.
   const third = await app.inject({
     method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[0]!, ...common },
@@ -297,16 +319,34 @@ test("the shared library is open to approved employees and closed to everyone el
   // An answer rests on the published pages, and says what it rests on.
   const answer = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { question: "某公司现在怎么看？" } });
   assert.equal(answer.statusCode, 200);
-  const answered = answer.json() as Promise<{ answer: { answerMd: string; citations: Array<{ pageSlug: string; analyst: string | null; organization: string | null }>; coverage: { analysts: number; reports: number } } }>;
+  const answered = answer.json() as Promise<{ answer: { answerMd: string; citations: Array<{ pageSlug: string; analyst: string | null; organization: string | null; documentId: string; versionId: string }>; coverage: { analysts: number; reports: number } } }>;
   assert.match((await answered).answer.answerMd, /\/knowledge\/targets\/view-company-example/);
   assert.deepEqual((await answered).answer.citations.map(citation => citation.pageSlug), ["view-company-example"]);
   assert.ok((await answered).answer.citations.every(citation => citation.analyst !== "编造的分析师"), "归因来自库的记录，不是模型写的");
   assert.ok((await answered).answer.citations.some(citation => citation.analyst === "张三"));
   assert.ok((await answered).answer.coverage.analysts >= 1);
   assert.ok((await answered).answer.coverage.reports >= 1);
+  // Every citation leads back to the material it was read from, and to the file behind it.
+  const citedMaterials = await sql<{ document_id: string; version_id: string }[]>`
+    SELECT d.id AS document_id, v.id AS version_id
+    FROM member_wiki_citations c
+    JOIN member_wiki_document_versions v ON v.id = c.version_id
+    JOIN member_wiki_documents d ON d.id = v.document_id`;
+  for (const citation of (await answered).answer.citations) {
+    assert.ok(citation.documentId, "引用带着材料标识");
+    assert.ok(citation.versionId, "引用带着原件标识");
+    assert.ok(citedMaterials.some(row => row.document_id === citation.documentId && row.version_id === citation.versionId),
+      "引用指向库里的材料与原件");
+  }
+  assert.ok((await answered).answer.citations.some(citation => citation.documentId === uploaded.documentId), "第一份材料在引用里");
   const uncovered = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { question: "完全没有覆盖的问题主题" } });
   assert.equal(uncovered.statusCode, 422);
-  assert.equal((await uncovered.json() as { error: string }).error, "knowledge_no_coverage");
+  const uncoveredBody = uncovered.json() as { error: string; message: string; answer?: unknown; citations?: unknown };
+  assert.equal(uncoveredBody.error, "knowledge_no_coverage");
+  assert.equal(uncoveredBody.message, TASK_ERRORS.knowledge_no_coverage, "没有覆盖时说的是没有覆盖");
+  assert.equal(uncoveredBody.answer, undefined, "没有覆盖时不给出任何回答");
+  assert.equal(uncoveredBody.citations, undefined, "没有覆盖时不给出任何引用");
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_answers WHERE question='完全没有覆盖的问题主题'`)[0]?.n, 0, "没有覆盖时不留下回答记录");
 
   // An answer that cites something the library never offered is refused. The request was understood
   // and the answer was not: it is not a gateway failure.

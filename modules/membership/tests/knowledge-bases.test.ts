@@ -181,6 +181,16 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
   await sql`INSERT INTO member_wiki_tasks(id,document_id,version_id,uploader_id,draft,audit)
     VALUES (${sharedTaskId},${sharedDocumentId},${sharedVersionId},${owner!.id},${sql.json(DRAFT)},${sql.json(AUDIT)})`;
   await runWikiTask(sharedTaskId);
+  // Each base's build list is its own.
+  const ownTasks = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/tasks?baseId=${base.id}`, headers: { cookie: cookies[0]!, ...common } });
+  const ownTaskPage = ownTasks.json() as Promise<{ tasks: Array<{ id: string }>; hasMore: boolean; nextOffset: number | null }>;
+  assert.deepEqual((await ownTaskPage).tasks.map(task => task.id), [uploaded.taskId], "另一个库的构建不在这个库的列表里");
+  assert.equal((await ownTaskPage).hasMore, false);
+  assert.equal((await ownTaskPage).nextOffset, null);
+  const sharedTasks = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/tasks?baseId=${DEFAULT_BASE_ID}`, headers: { cookie: cookies[0]!, ...common } });
+  const sharedTaskPage = sharedTasks.json() as Promise<{ tasks: Array<{ id: string }> }>;
+  assert.deepEqual((await sharedTaskPage).tasks.map(task => task.id), [sharedTaskId]);
+  assert.equal((await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/tasks", headers: common })).statusCode, 401, "访客读不到构建列表");
   const both = await sql`SELECT slug, base_id FROM member_wiki_pages`;
   assert.equal(both.length, 2, "the two bases hold a page each");
   assert.equal(both.find(row => row.base_id === DEFAULT_BASE_ID)?.slug, PAGE_SLUG, "the shared base keeps the slugs its pages already carry");
