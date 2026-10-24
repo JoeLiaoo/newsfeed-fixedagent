@@ -43,7 +43,7 @@
 - [Issue #36 专家平台与知识库卡片列表](logs/2026-10-24-i36-expert-knowledge-cards.md)：两个入口改为对称的卡片列表 → 详情（页头分别「+ 新增专家」与「+ 新增知识库」）；知识库按库组织，默认保留一个共享库，问答只依据所问之库；新增 5 条迁移与多库场景测试；[PR #38](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/38) 已合并（`78c0fa3`），最终 CI 全通过（数据库 26/26）；生产迁移与发布已随 `d81f901` 完成，见[发布记录](logs/2026-10-24-P4-pr38-cards-deployment.md)，真实员工验收仍待执行。
 - [PR #45 专家展示文字清理](logs/2026-10-24-pr45-expert-scope-cleanup.md)：内置专家按现有新华财经查询能力独立命名并说明一层范围，清理页面、报告和现行文档中的旧数据源对照文字；随 [PR #45](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/45) 合并（`2b50816`），未部署。
 - [PR #45 复审修复](logs/2026-10-24-pr45-review.md)：恢复已发布专家共享、修复空日期上传和大材料校验，记录权限、上传边界与重试预算回归验证；已合并（`2b50816`），最终 CI 全通过（standalone 58/58、数据库 26/26），未部署。
-- [专家平台能力优先文案](logs/2026-10-24-experts-capability-copy.md)：专家卡片、详情页、任务错误与 Markdown 产物去掉数据源与模型品牌名，改用「一层对外投资核查」「文本任务专家」等能力表述；内部标识与 MCP 接入不变；[PR #47](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/47) 已创建，未合并、未部署。
+- [专家平台能力优先文案](logs/2026-10-24-experts-capability-copy.md)：专家卡片、详情页、导入说明、任务错误与 Markdown 产物去掉数据源与模型品牌名，改用「一层对外投资核查」「文本任务专家」等能力表述，并按导入包声明区分两种能力；内部标识与 MCP 接入不变；[PR #47](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/47) 首轮审阅修正后待复审，未合并、未部署。
 
 ## 阶段文档
 

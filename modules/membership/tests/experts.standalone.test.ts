@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import { parseSkillMarkdown, parseSkillUpload, executionMode } from "../experts/import.ts";
 import { parseTaskMaterials, materialContext, MAX_MATERIAL_BYTES } from "../experts/materials.ts";
 import { strToU8, zipSync } from "fflate";
@@ -141,4 +142,13 @@ test("task materials reject unsafe uploads and extract bounded text as data", as
   assert.throws(() => parseTaskMaterials([upload("large.md", Buffer.alloc(MAX_MATERIAL_BYTES + 1, 97))]), /expert_material_too_large/);
   assert.throws(() => parseTaskMaterials([upload("image.pdf", Buffer.from([0, 1, 2, 3]))]), /expert_material_format_unsupported/);
   assert.throws(() => parseTaskMaterials(Array(4).fill(upload("evidence.md", markdown))), /expert_material_count_invalid/);
+});
+
+test("the import page describes both expert capabilities without supplier brands", () => {
+  const page = readFileSync(new URL("../pages/expert-new.tsx", import.meta.url), "utf8");
+  assert.ok(page.includes("文本任务专家"), "导入说明需说明未声明工具的技能为文本任务专家");
+  assert.ok(page.includes("一层对外投资核查"), "导入说明需说明完整声明平台三项能力的技能为一层对外投资核查");
+  assert.ok(page.includes("未接入的依赖会阻止运行"), "导入说明需说明未接入依赖会阻止运行");
+  assert.ok(!page.includes("不查询企业信息库"), "导入说明不得断言自定义技能一律不查询企业信息");
+  assert.ok(!/悟道|新华财经|DeepSeek|wudao/i.test(page), "导入说明不得出现供应商品牌名");
 });
