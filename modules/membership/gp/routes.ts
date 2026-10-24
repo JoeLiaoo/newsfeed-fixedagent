@@ -18,18 +18,25 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     reply.header("Cache-Control","private, no-store").header("Vary","Cookie");
     const user=await authenticate(req);
     if(!user) return reply.code(401).send({error:"login_required"});
-    const query=req.query as {limit?:string;offset?:string};
+    const query=req.query as {limit?:string;offset?:string;matched?:string};
+    const matched=query.matched==="1";
     const requestedLimit=Number(query.limit??50),requestedOffset=Number(query.offset??0);
     const limit=Number.isInteger(requestedLimit)?Math.min(100,Math.max(1,requestedLimit)):50;
     const offset=Number.isInteger(requestedOffset)?Math.min(100_000,Math.max(0,requestedOffset)):0;
+    const interests=matched?await sql<{tag:string}[]>`SELECT tag FROM member_interest_tags WHERE user_id=${user.id} ORDER BY tag`:[];
+    const interestTags=interests.map(row=>row.tag);
     const rows=await sql`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.sector_tags,
       i.approved_event_date::text AS event_date,'verified'::text AS status,i.approved_source_url AS source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       WHERE i.status='verified' AND g.status='active' AND g.entity_role='gp'
+        AND (NOT ${matched} OR (
+          EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id}
+            AND t.tag=ANY(i.sector_tags) AND t.tag<>'战略配售')
+        ))
       ORDER BY i.approved_event_date DESC NULLS LAST,i.approved_at DESC NULLS LAST,i.id
       LIMIT ${limit+1} OFFSET ${offset}`;
     const hasMore=rows.length>limit;
-    return {investments:rows.slice(0,limit),pagination:{limit,offset,nextOffset:hasMore?offset+limit:null}};
+    return {investments:rows.slice(0,limit),pagination:{limit,offset,nextOffset:hasMore?offset+limit:null},...(matched?{interest_tags:interestTags}: {})};
   });
 
   async function admin(req:FastifyRequest,reply:FastifyReply) {

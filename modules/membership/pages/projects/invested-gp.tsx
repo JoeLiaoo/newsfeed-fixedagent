@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router";
 import { CalendarDays, ExternalLink } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
@@ -20,7 +21,7 @@ type Investment = {
   source_url: string | null;
 };
 
-type Page = { investments: Investment[]; pagination: { limit: number; offset: number; nextOffset: number | null } };
+type Page = { investments: Investment[]; pagination: { limit: number; offset: number; nextOffset: number | null }; interest_tags?: string[] };
 const PAGE_SIZE = 50;
 
 function displayDate(value: string | null) {
@@ -30,39 +31,54 @@ function displayDate(value: string | null) {
 }
 
 export default function InvestedGpProjectsPage() {
+  const [searchParams] = useSearchParams();
+  const matched = searchParams.get("matched") === "1";
   const [items, setItems] = useState<Investment[]>([]);
+  const [interestTags, setInterestTags] = useState<string[]>([]);
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [message, setMessage] = useState("");
   const [retry, setRetry] = useState<{ offset: number; append: boolean }>({ offset: 0, append: false });
 
-  const load = useCallback(async (offset: number, append = false) => {
+  const load = useCallback(async (offset: number, append = false, signal?: AbortSignal) => {
     setMessage("");
     if (append) setLoadingMore(true);
     else setLoading(true);
     try {
-      const response = await fetch(`/api/v1/membership/gp-projects?limit=${PAGE_SIZE}&offset=${offset}`);
+      const response = await fetch(`/api/v1/membership/gp-projects?limit=${PAGE_SIZE}&offset=${offset}${matched ? "&matched=1" : ""}`, { signal });
       if (response.status === 401) { location.href = "/login"; return; }
       if (!response.ok) throw new Error("request_failed");
       const page = await response.json() as Page;
       setItems(current => append ? [...current, ...page.investments] : page.investments);
+      if (!append) setInterestTags(page.interest_tags ?? []);
       setNextOffset(page.pagination.nextOffset);
       setRetry({ offset: 0, append: false });
     } catch {
+      if (signal?.aborted) return;
       setMessage("项目列表暂时无法加载，请重试。");
       setRetry({ offset, append });
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
-  }, []);
+  }, [matched]);
 
-  useEffect(() => { void load(0); }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(0, false, controller.signal);
+    return () => controller.abort();
+  }, [load]);
 
   return <main className="mx-auto w-full max-w-5xl px-5 py-8">
     <header className="mb-6">
-      <h1 className="text-2xl font-semibold tracking-tight text-ink">已投GP直投项目</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-ink">{matched ? "与我关注匹配" : "已投GP直投项目"}</h1>
+      <nav aria-label="GP 项目筛选" className="mt-4 flex flex-wrap gap-2">
+        <Button asChild variant={matched ? "outline" : "default"}><Link to="/projects/invested-gp">全部已核实</Link></Button>
+        <Button asChild variant={matched ? "default" : "outline"}><Link to="/projects/invested-gp?matched=1">与我关注匹配</Link></Button>
+      </nav>
     </header>
 
     {message && <Alert className="mb-5 flex flex-wrap items-center justify-between gap-3" role="alert">
@@ -71,7 +87,13 @@ export default function InvestedGpProjectsPage() {
 
     {loading
       ? <p className="text-sm text-ink-3" role="status">正在加载项目…</p>
-      : items.length
+        : matched && !interestTags.length
+          ? <Card className="px-6 py-10">
+            <p className="font-medium text-ink">还没有选择关注赛道</p>
+            <p className="mt-2 text-sm text-ink-3">选择关注赛道后，这里会显示与之匹配的已核实投资。</p>
+            <Button asChild variant="outline" className="mt-4"><Link to="/settings/interests">设置关注赛道</Link></Button>
+          </Card>
+        : items.length
         ? <>
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {items.map(item => <li key={item.id}>
@@ -104,8 +126,8 @@ export default function InvestedGpProjectsPage() {
           </div>}
         </>
         : message ? null : <Card className="px-6 py-12 text-center">
-          <p className="font-medium text-ink">暂无已核实的直投项目</p>
-          <p className="mt-2 text-sm text-ink-3">经审核并处于有效状态的项目会显示在这里。</p>
+          <p className="font-medium text-ink">{matched ? "暂无匹配的已核实投资" : "暂无已核实的直投项目"}</p>
+          <p className="mt-2 text-sm text-ink-3">{matched ? "后续审核通过且赛道标签与关注重合的投资会显示在这里。" : "经审核并处于有效状态的项目会显示在这里。"}</p>
         </Card>}
   </main>;
 }
