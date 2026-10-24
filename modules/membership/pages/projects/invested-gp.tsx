@@ -90,7 +90,7 @@ export default function InvestedGpProjectsPage() {
                   <span className="inline-flex items-center gap-1.5" aria-label={`投资日期：${displayDate(item.event_date)}`}>
                     <CalendarDays size={15} aria-hidden="true" />{displayDate(item.event_date)}
                   </span>
-                  {item.source_url && <a className="inline-flex min-h-11 items-center gap-1.5 rounded-sm text-accent underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" href={item.source_url} target="_blank" rel="noreferrer">
+                  {item.source_url && <a className="inline-flex min-h-11 items-center gap-1.5 rounded-control text-accent underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" href={item.source_url} target="_blank" rel="noreferrer">
                     核对来源<ExternalLink size={14} aria-hidden="true" />
                   </a>}
                 </div>

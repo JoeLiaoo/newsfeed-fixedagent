@@ -12,7 +12,7 @@
 
 ## 最小验证
 
-- 执行的检查及结果：`npm run typecheck`、`npm run build -w @aihot/web`、新增 PostgreSQL 路由用例通过（未登录为 401、无记录为空、已核实有效 GP 可见，observed/baseline/retracted 投资和 paused GP 隐藏、响应不含审核私有字段、分页生效）；GP standalone 规则用例 7/7 通过；`node scripts/check-doc-links.ts` 检查 357 个本地链接全部存在；`git diff --check` 通过。
+- 执行的检查及结果：`npm run typecheck`、`npm run build -w @aihot/web`、新增 PostgreSQL 路由用例通过（未登录为 401、无记录为空、已核实有效 GP 可见，observed/baseline/retracted 投资和 paused GP 隐藏、响应不含审核私有字段、分页生效）；GP standalone 规则用例 7/7 通过；`tests/architecture.test.ts` 按 CI 参数跳过数据库连通性项后 13/13 通过；`node scripts/check-doc-links.ts` 检查 357 个本地链接全部存在；`git diff --check` 通过。
 - 未执行或需用户试用的检查：完整 `npm run test:standalone` 未通过：页面元数据相关用例由 web server 返回 503；公开只读端点用例期望 405 而实际返回 401。这些失败发生在仓库其他页面/端点，非本改动路由；本页客户端 bundle 与生产构建已通过。未连接生产数据，也未进行真实员工页面验收。
 
 ## 风险与交接
@@ -21,3 +21,5 @@
 - 下一步：等待 PR #52 的 review 与 CI；员工登录后的真实页面验收待安排。本次不合并、不部署。
 
 PR：[PR #52](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/52)，分支 `feat/projects-invested-gp-v1`。
+
+PR 第一次 `quality` 检查发现本页链接使用了设计系统外的 `rounded-sm`；已改为 `rounded-control` 并复跑架构规则通过。后续 CI 以最新 head 为准。
