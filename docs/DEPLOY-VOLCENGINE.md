@@ -98,6 +98,14 @@
 - setup 阶段应用 5 条多知识库迁移（`0176_member_wiki_bases` 至 `0180_member_wiki_pages_base_idx`），信源未重复写入；web、API、worker 重建为 `citic-newsfeed:d81f901c6d521c16387d4151b54b5d76d8cf35bf`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200，`/experts` 与 `/knowledge` 按会话鉴权 302 跳转登录页。
 - 完整操作、回退边界与未验收项见[PR #38 部署日志](logs/2026-10-24-P4-pr38-cards-deployment.md)。
 
+### PR #48 对外投资全景图发布（2026-10-24）
+
+- [PR #48](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/48) 已合并，提交 `9e116bd2f14bb495c022db4995356509d406c47a` 已发布到 `/opt/citic-newsfeed/releases/9e116bd2f14bb495c022db4995356509d406c47a`。新增「对外投资全景图」专家，隐藏「企业一层对外投资核查」入口，并新增企业舆情报告「开发中」条目。
+- 发布前保存 `.env.before-release-9e116bd-20261024` 与 `backups/db-before-9e116bd-20261024.dump`，权限均为 `0600`，转储经 `pg_restore --list` 检查可读（未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变。
+- **迁移先于新代码上线**：新代码在目录播种时写入 `member_experts.status` 的 `hidden` 与 `coming_soon` 取值，旧约束不允许，因此先以新镜像跑完 setup（10 条迁移 `0181`–`0190`，`schema_migrations` 154 → 164，setup 退出码 0），确认约束已放宽并验证后才重建 web、API、worker。信源未重复写入。
+- web、API、worker 运行 `citic-newsfeed:9e116bd2f14bb495c022db4995356509d406c47a`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200，`/experts`、`/knowledge`、`/knowledge-bases` 按会话鉴权 302 跳转登录页。
+- 全景图执行、隐藏后的专家目录与企业舆情报告「开发中」条目未做登录后验收，详见[PR #48 部署日志](logs/2026-10-24-P4-pr48-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
