@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router";
-import { ArrowLeft, FileUp, MessageSquare, RefreshCw, Search } from "lucide-react";
+import { ArrowLeft, ChevronDown, Download, FileUp, MessageSquare, RefreshCw, Search } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
@@ -16,6 +16,8 @@ export const handle: Screen = { tab: "me", name: "知识库" };
 export const meta = () => pageMeta({ title: "知识库", path: "/knowledge", noindex: true });
 
 const ENDPOINT = "/api/v1/membership/knowledge/";
+/** How many answers one page of the answer history holds. */
+const ANSWER_PAGE_SIZE = 10;
 
 type Base = { id: string; name: string; description: string; status: string; createdAt: string; updatedAt: string };
 type Overview = {
@@ -38,11 +40,16 @@ type PageRow = {
   revision: number; coverage: { analysts: number; firms: number; reports: number; last_report: string | null } | null;
   citationCount: number; issueCount: number; freshness: string; freshnessLabel: string;
 };
-type AnswerCitation = { label: string; pageSlug: string; title: string; analyst: string | null; organization: string | null; publishedOn: string | null; anchor: string | null };
+type AnswerCitation = {
+  label: string; pageSlug: string; title: string; analyst: string | null; organization: string | null;
+  publishedOn: string | null; anchor: string | null;
+  citationId: string | null; versionId: string | null; documentId: string | null; documentTitle: string | null; fileName: string | null;
+};
 type Answer = {
   id: string; question: string; answerMd: string; citations: AnswerCitation[];
   coverage: { analysts: number; firms: number; reports: number; first_report: string | null; last_report: string | null };
-  freshness: Array<{ pageSlug: string; tier: string; lastReport: string | null }>;
+  freshness: Array<{ pageSlug: string; tier: string | null; lastReport: string | null }>;
+  pages: string[]; createdAt?: string | null;
 };
 
 const PAGE_TYPE_LABEL: Record<string, string> = { view: "观点页", query: "预编译问答", concept: "判断框架", monitor: "监测指标" };
@@ -61,6 +68,24 @@ function fileAsBase64(file: File) {
   });
 }
 
+/**
+ * The sources of an answer: the page it rests on, the material behind it and the file itself. A
+ * source the library never recorded a place for is shown without links, never with a made-up one.
+ */
+function AnswerCitations({ citations }: { citations: AnswerCitation[] }) {
+  if (!citations.length) return <p className="text-xs text-ink-3">这次回答没有可跳转的引用。</p>;
+  return <ul className="grid gap-2">{citations.map(citation => <li key={`${citation.pageSlug}-${citation.label}`} className="rounded-card border border-line p-3">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <span className="text-xs text-ink">[{citation.label}] <Link to={`/knowledge/targets/${encodeURIComponent(citation.pageSlug)}`} className="text-accent underline-offset-4 hover:underline">{citation.title || citation.pageSlug}</Link></span>
+      <span className="flex flex-wrap items-center gap-2">
+        {citation.documentId && <Link to={`/knowledge/documents/${encodeURIComponent(citation.documentId)}`} className="text-sm text-accent underline-offset-4 hover:underline">材料</Link>}
+        {citation.versionId && <Button asChild variant="outline" size="sm"><a href={`${ENDPOINT}versions/${encodeURIComponent(citation.versionId)}/original`}><Download size={14} aria-hidden="true" />原件</a></Button>}
+      </span>
+    </div>
+    <p className="mt-1 text-xs text-ink-3">{citation.analyst ?? "分析师未知"} · {citation.organization ?? "机构未知"} · {citation.publishedOn ?? "日期未知"}{citation.documentTitle ? ` · ${citation.documentTitle}` : ""}</p>
+  </li>)}</ul>;
+}
+
 /** One knowledge base: its materials, the pages they built, and the answers it gives. */
 export default function KnowledgeBasePage() {
   const { id } = useParams();
@@ -76,6 +101,14 @@ export default function KnowledgeBasePage() {
   const [busy, setBusy] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<Answer | null>(null);
+  const [history, setHistory] = useState<Answer[]>([]);
+  const [historyOffset, setHistoryOffset] = useState(0);
+  const [historyNextOffset, setHistoryNextOffset] = useState<number | null>(null);
+  const [historyReload, setHistoryReload] = useState(0);
+  const [openAnswerId, setOpenAnswerId] = useState<string | null>(null);
+  const [historyFailed, setHistoryFailed] = useState(false);
+  /** The read of the history that is under way: a slower earlier read must not overwrite a newer one. */
+  const historyRead = useRef("");
   const [withdrawing, setWithdrawing] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [missing, setMissing] = useState(false);
@@ -99,7 +132,24 @@ export default function KnowledgeBasePage() {
     setPages((await pagesResponse.json() as { pages: PageRow[] }).pages);
   }, [baseId]);
 
-  useEffect(() => { void load(search).catch(() => setMessage("加载失败，请刷新重试。")).finally(() => setLoading(false)); }, [load, search]);  useEffect(() => {
+  /** The employee's own answers in this base, one page at a time. */
+  const loadHistory = useCallback(async (offset: number) => {
+    const read = `${baseId}:${offset}`;
+    historyRead.current = read;
+    const response = await fetch(`${ENDPOINT}answers?baseId=${encodeURIComponent(baseId)}&limit=${ANSWER_PAGE_SIZE}&offset=${offset}`);
+    if (!response.ok) { if (historyRead.current === read) setHistoryFailed(true); return; }
+    const result = await response.json() as { answers: Answer[]; pagination: { nextOffset: number | null } };
+    if (historyRead.current !== read) return;
+    setHistoryFailed(false);
+    setHistory(result.answers);
+    setHistoryNextOffset(result.pagination.nextOffset);
+  }, [baseId]);
+
+  // Another base has its own history: read its first page again.
+  useEffect(() => { setHistoryOffset(0); }, [baseId]);
+  useEffect(() => { void load(search).catch(() => setMessage("加载失败，请刷新重试。")).finally(() => setLoading(false)); }, [load, search]);
+  useEffect(() => { void loadHistory(historyOffset).catch(() => setHistoryFailed(true)); }, [loadHistory, historyOffset, historyReload]);
+  useEffect(() => {
     if (!tasks.some(task => task.state === "queued" || task.state === "running")) return;
     const timer = setInterval(() => { void load(search).catch(() => undefined); }, 5000);
     return () => clearInterval(timer);
@@ -173,6 +223,10 @@ export default function KnowledgeBasePage() {
       if (!result.answer) { setMessage("问答失败，请重试。"); return; }
       setAnswer(result.answer);
       setMessage("");
+      // The new answer is the newest one in the history: read the first page again.
+      setHistoryOffset(0);
+      setHistoryReload(token => token + 1);
+      setOpenAnswerId(result.answer.id);
     } catch { setMessage("问答请求失败，请检查网络后重试。"); }
     finally { setBusy(false); }
   }
@@ -311,12 +365,41 @@ export default function KnowledgeBasePage() {
             <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(answer.answerMd, siteUrl()).html }} />
             <div className="grid gap-1 border-t border-line pt-3">
               <h3 className="text-sm font-semibold text-ink">参考资料</h3>
-              {answer.citations.length ? <ul className="grid gap-1 text-xs text-ink-3">{answer.citations.map(citation => <li key={`${citation.pageSlug}-${citation.label}`}>
-                [{citation.label}] <Link to={`/knowledge/targets/${encodeURIComponent(citation.pageSlug)}`} className="text-accent underline-offset-4 hover:underline">{citation.title}</Link>
-                {citation.analyst ? ` · ${citation.analyst}` : ""}{citation.organization ? ` · ${citation.organization}` : ""}{citation.publishedOn ? ` · ${citation.publishedOn}` : ""}
-              </li>)}</ul> : <p className="text-xs text-ink-3">本次回答没有可跳转的引用。</p>}
+              <AnswerCitations citations={answer.citations} />
             </div>
             <p className="text-xs text-ink-4">覆盖：分析师 {answer.coverage.analysts} · 机构 {answer.coverage.firms} · 材料 {answer.coverage.reports} · {answer.coverage.first_report ?? "起始日期未知"} 至 {answer.coverage.last_report ?? "最近日期未知"}</p>
+          </div>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>问答记录</CardTitle></CardHeader>
+        <CardContent className="grid gap-3">
+          {historyFailed ? <p className="text-sm text-ink-3">问答记录暂时读不到，请刷新重试。</p>
+            : !history.length ? <p className="text-sm text-ink-3">还没有问答记录。</p>
+            : <ul className="grid gap-2">{history.map(item => <li key={item.id} className="rounded-card border border-line p-3">
+              <button type="button" aria-expanded={openAnswerId === item.id} className="flex w-full items-start justify-between gap-2 text-left"
+                onClick={() => setOpenAnswerId(openAnswerId === item.id ? null : item.id)}>
+                <span className="text-sm font-medium text-ink">{item.question}</span>
+                <ChevronDown size={16} aria-hidden="true" className={`mt-0.5 shrink-0 text-ink-4 transition-transform duration-150 ${openAnswerId === item.id ? "rotate-180" : ""}`} />
+              </button>
+              <p className="mt-1 text-xs text-ink-3">{item.createdAt ? new Date(item.createdAt).toLocaleString("zh-CN") : "时间未知"} · 分析师 {item.coverage.analysts} · 机构 {item.coverage.firms} · 材料 {item.coverage.reports}</p>
+              {openAnswerId === item.id && <div className="mt-3 grid gap-3 border-t border-line pt-3">
+                <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.answerMd, siteUrl()).html }} />
+                <div className="grid gap-1">
+                  <h3 className="text-sm font-semibold text-ink">参考资料</h3>
+                  <AnswerCitations citations={item.citations} />
+                </div>
+              </div>}
+            </li>)}</ul>}
+          {history.length > 0 && <div className="flex items-center justify-between border-t border-line pt-3 text-sm text-ink-3">
+            <span>第 {Math.floor(historyOffset / ANSWER_PAGE_SIZE) + 1} 页</span>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" disabled={historyOffset === 0}
+                onClick={() => { setOpenAnswerId(null); setHistoryOffset(Math.max(0, historyOffset - ANSWER_PAGE_SIZE)); }}>上一页</Button>
+              <Button type="button" variant="outline" size="sm" disabled={historyNextOffset === null}
+                onClick={() => { setOpenAnswerId(null); setHistoryOffset(historyNextOffset ?? historyOffset); }}>下一页</Button>
+            </div>
           </div>}
         </CardContent>
       </Card>

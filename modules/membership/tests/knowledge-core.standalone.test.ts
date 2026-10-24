@@ -13,6 +13,7 @@ import { routePages, tokenize } from "../knowledge/routing.ts";
 import { freshnessTier } from "../knowledge/catalog.ts";
 import { DEFAULT_BASE_ID, baseSlugOf, scopedSlug, scopedTargetKey } from "../knowledge/bases.ts";
 import { coerceDate, normalizeAuditResult, normalizeCompiledDraft, parseJsonObject } from "../knowledge/normalize.ts";
+import { readCitations, readCoverage, readFreshness, readPages, toAnswerCitation } from "../knowledge/history.ts";
 import type { CompiledDraft, PageDraft, SourceRecord } from "../knowledge/schema.ts";
 
 /** A one-page PDF with a line of text, built here so the test carries its own material. */
@@ -325,6 +326,40 @@ test("updating one material replaces only that material's contribution", () => {
   const merged = aggregateContributions([contributionOf({ versionId: "v1", documentId: "doc-1", page: updated }), second]);
   assert.deepEqual(merged.page.stances.map(stance => stance.analyst), ["张三", "王五"], "新材料只换掉自己的那一份");
   assert.equal(merged.page.stances.length, 2);
+});
+
+
+test("the answers an employee reads back keep what the library recorded and nothing more", () => {
+  // A citation that names the material it was read in keeps it; the material itself is joined when
+  // the answer is read, never made up here.
+  const citation = toAnswerCitation({ label: "1", pageSlug: "view-company-example", title: "某公司", analyst: "张三", organization: "某券商", publishedOn: "2026-06-20", citationId: "c1", versionId: "v1" });
+  assert.equal(citation.citationId, "c1");
+  assert.equal(citation.versionId, "v1");
+  assert.equal(citation.documentId, null, "a material that was not joined is not invented");
+  assert.equal(citation.documentTitle, null);
+  // A citation that names nothing stays empty.
+  const bare = toAnswerCitation({ label: "1", pageSlug: "view-company-example" });
+  assert.equal(bare.analyst, null, "a missing attribution stays empty");
+  assert.equal(bare.organization, null);
+  assert.equal(bare.publishedOn, null);
+  assert.equal(bare.anchor, null);
+  assert.equal(bare.versionId, null);
+  assert.equal(bare.documentId, null);
+  // The citations an answer stored are read into the platform's own shape.
+  const citations = readCitations([{ label: "1" }, { label: "2", versionId: "v2" }]);
+  assert.equal(citations.length, 2);
+  assert.equal(citations[1]?.versionId, "v2");
+  assert.deepEqual(readCitations("not a list"), []);
+  assert.deepEqual(readCitations(null), []);
+  // The coverage an answer recorded comes back as it was recorded.
+  assert.deepEqual(readCoverage({ analysts: 2, firms: 1, reports: 3, first_report: "2026-01-01", last_report: "2026-06-20" }),
+    { analysts: 2, firms: 1, reports: 3, first_report: "2026-01-01", last_report: "2026-06-20" });
+  assert.deepEqual(readCoverage({}), { analysts: 0, firms: 0, reports: 0, first_report: null, last_report: null },
+    "a coverage that was never recorded is empty, not made up");
+  assert.deepEqual(readFreshness([{ pageSlug: "view-company-example", tier: "fresh", lastReport: "2026-06-20" }]),
+    [{ pageSlug: "view-company-example", tier: "fresh", lastReport: "2026-06-20" }]);
+  assert.deepEqual(readFreshness(null), []);
+  assert.deepEqual(readPages(["view-company-example", 7, ""]), ["view-company-example"]);
 });
 
 
