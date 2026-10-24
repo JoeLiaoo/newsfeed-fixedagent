@@ -26,8 +26,8 @@
 - [P3-04 双用户微信推送连通性抽测](logs/2026-10-23-P3-04-live-push-smoke.md)：两条测试通知均被 iLink 接受，后续由用户确认两台手机均收到。
 - [P3-04 双用户手机端收件确认](logs/2026-10-23-P3-04-handset-receipt.md)：用户已确认两台手机均收到连通性测试通知。
 - [员工端已投 GP 直投项目清单](logs/2026-10-24-gp-projects-employee-list.md)：员工登录后查看已审核投资，过滤已撤回项目和暂停 GP；PR #52 已合并（`57d2135`），CI 全通过，尚未部署；GP 同步及业务验收状态不变。
-- [员工端关注赛道匹配的 GP 投资 digest](logs/2026-10-24-P3-employee-gp-digest.md)：员工在项目信息中浏览与个人关注重合的已核实 GP 投资；[PR #54](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/54) 首轮审查修复后仍为 Open，未合并、未部署，P3 验收状态不变；见[复审记录](logs/2026-10-24-PR54-review-r1.md)。
-- [PR #54 首轮复审修复](logs/2026-10-24-PR54-review-r1.md)：拒绝无效筛选/分页参数并补充鉴权、精确匹配与数据范围回归覆盖；该轮本地数据库未运行；后续追加分页竞态及 fixture 修复见[复审日志](logs/2026-10-24-pr54-review-r2.md)，最终 CI 待核对，未部署。
+- [员工端关注赛道匹配的 GP 投资 digest](logs/2026-10-24-P3-employee-gp-digest.md)：员工在项目信息中浏览与个人关注重合的已核实 GP 投资；[PR #54](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/54) 已合并（`ba1aedc`），CI 全通过，未部署，P3 验收状态不变；见[复审记录](logs/2026-10-24-PR54-review-r1.md)。
+- [PR #54 首轮复审修复](logs/2026-10-24-PR54-review-r1.md)：拒绝无效筛选/分页参数并补充鉴权、精确匹配与数据范围回归覆盖；该轮本地数据库未运行；PR #54 后续已合并（`ba1aedc`），追加分页竞态及 fixture 修复见[复审日志](logs/2026-10-24-pr54-review-r2.md)，最终 CI 全通过，未部署。
 - [PR #19 合并与火山云发布](logs/2026-10-23-P4-pr19-deployment.md)：合并提交、备份、镜像构建、健康检查及真实扫码验收边界。
 - [PR #22 合并与火山云发布](logs/2026-10-23-P4-pr22-deployment.md)：新标签页扫码反馈及互动状态提示的发布、备份和健康检查。
 - [PR #29 注册提示与火山云发布](logs/2026-10-23-P4-pr29-deployment.md)：注册页说明、合并提交、备份和健康检查。
@@ -108,4 +108,4 @@
 
 - [PR #53 复审与筛选竞态修复](logs/2026-10-24-pr53-review-r2.md)：PR #53 已合并（`a04969a`）；筛选竞态修复及最终 CI 通过，未部署。
 
-- [PR #54 复审与分页请求隔离](logs/2026-10-24-pr54-review-r2.md)：统一初始、追加和重试请求的取消／版本守卫，保留当前视图结果；验证和合并状态见日志。
+- [PR #54 复审与分页请求隔离](logs/2026-10-24-pr54-review-r2.md)：PR #54 已合并（`ba1aedc`）；分页竞态及 fixture 已修复，最终 CI 全通过，未部署。
