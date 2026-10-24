@@ -2,7 +2,7 @@
 
 - Agent：pi（MiniMax-M3.1-Flash）
 - 对应任务：维护任务（不对应 P0–P5 的新增勾选）；落实 `docs/PLAN.md` 4.2 的 `/account/artifacts` 路由
-- 完成状态：代码与定向自动化检查完成；本次复基后 CI 待跑，真实员工试用与部署未做
+- 完成状态：代码与定向自动化检查完成；[PR #59](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/59) 复基后 CI 待跑，真实员工试用与部署未做
 
 ## 本次改动
 
@@ -24,22 +24,17 @@
   - ****沿用 PR #57 的专家历史分页。** 专家详情页继续按 `expertSlug` 分页读取，避免用单次 100 条上限代替可持续翻页。
   - **筛选参数非法就报错，不静默兜底。** `limit`／`offset` 只接受数字文本并夹到区间内，其余（如重复参数、小数、负数）返回 400 `invalid_query`；`state` 只接受平台写下的六种状态，可写多个，返回 400 `invalid_state`。错误码只描述能力，不含任何供应商品牌名。
   - **产物库页面不承载操作，只承载查看与下载。** 提交、重试、取消仍留在专家详情页，产物库只回答「我做过什么、产物在哪」。
-  - PR #57 已先合入（`65b10d9`）。本分支复基后保留其专家详情分页，再扩展列表接口的状态筛选、200 字备注预览与跨专家产物库；复基后的任务列表与产物库自动化测试由 CI 执行。
+  - PR #57 已先合入（`65b10d9`）。本 PR 复基后保留其专家详情分页，再扩展列表接口的状态筛选、200 字备注预览与跨专家产物库；复基后的 CI 检查结果以新 head 为准。
 
 ## 最小验证
 
-- 执行的检查及结果：
-  - `npm run typecheck`：通过。
-  - `npm run build -w @aihot/web`：通过。
-  - `node --import ./tests/standalone.ts --test modules/membership/tests/task-query.standalone.test.ts`：4 项通过（默认 20 条、夹取区间、非法参数 400、分页游标）。
-  - `DATABASE_URL=… node --test-global-setup=tests/databases.ts --import ./tests/databases.ts --test modules/membership/tests/*.test.ts`：127 项通过（含新增的接口测试：401、非法参数 400、只返回本人任务、过期任务不出现、首页 20 条与 `hasMore`／`nextOffset`、第二页 5 条且不重复、`expertSlug` 与 `state` 筛选、产物与材料归属）。
-  - `node --import ./tests/standalone.ts --test --test-skip-pattern='every table and column' tests/architecture.test.ts`：13 项通过。
-  - `node --test apps/web/tests/nav-groups.test.ts`：5 项通过（未改侧栏一级入口）。
-  - `node scripts/check-doc-links.ts`：384 条本地链接全部存在。
-- 未执行或需用户试用的检查：
-  - 未在浏览器里登录实机查看产物库页面（布局、下载按钮、翻页）——只做了类型检查与构建，没有人工点过页面。
-  - 未用真实任务验证产物与材料在页面上的下载链接。
-  - 未做部署，也未在生产数据上跑过。
+- 复基后执行的检查及结果：
+  - `node --import ./tests/standalone.ts --test modules/membership/tests/task-query.standalone.test.ts modules/membership/tests/expert-task-page.standalone.test.ts`：6/6 通过。
+  - `npx --no-install tsc -p modules`：通过。
+  - `node scripts/check-doc-links.ts`：493 个本地 Markdown 链接全部存在；`git diff --check` 通过。
+  - `npm run typecheck -w @aihot/web`：本机缺少 `@radix-ui/react-dropdown-menu` 与 `@radix-ui/react-toggle-group`，导致仓库既有菜单与标签页类型报错；本地 web 完整类型检查未通过，等待 PR CI 在干净安装环境验证。
+  - 数据库集成测试未能在本机启动：当前未设置 throwaway `DATABASE_URL`；新增用例已加入 GitHub PostgreSQL 检查，结果待新 head CI。
+- 未执行或需用户试用的检查：未在浏览器里登录实机查看产物库页面；未用真实任务验证下载；未部署；未在生产数据上运行。
 
 ## 风险与交接
 
