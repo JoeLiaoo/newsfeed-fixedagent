@@ -10,7 +10,7 @@ import { Label } from "@aihot/web/components/member-ui/label";
 import { renderMarkdown } from "@aihot/web/lib/markdown";
 import { pageMeta, siteUrl } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { TASK_ERRORS, TASK_STAGE_LABELS, TASK_STATE_LABELS } from "../knowledge/catalog.ts";
+import { FRESHNESS_LABELS, TASK_ERRORS, TASK_STAGE_LABELS, TASK_STATE_LABELS, type FreshnessTier } from "../knowledge/catalog.ts";
 
 export const handle: Screen = { tab: "me", name: "知识库" };
 export const meta = () => pageMeta({ title: "知识库", path: "/knowledge", noindex: true });
@@ -25,7 +25,8 @@ type Overview = {
 };
 type DocumentRow = {
   id: string; title: string; uploaderId: string; uploaderName: string; createdAt: string; versionNo: number;
-  fileName: string; format: string; byteSize: number; sourceAuthor: string | null; sourceOrg: string | null; sourceDate: string | null;
+  fileName: string; format: string; byteSize: number; sourceTitle: string | null; sourceAuthor: string | null; sourceOrg: string | null; sourceDate: string | null; sourceKind: string | null;
+  versionCreatedAt: string; freshness: FreshnessTier;
   extractionStatus: string; extractionNote: string | null; taskState: string | null; taskStage: string | null;
   errorCode: string | null; errorMessage: string | null;
 };
@@ -68,8 +69,11 @@ export default function KnowledgeBasePage() {
   const [base, setBase] = useState<Base | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
+  const [documentNextOffset, setDocumentNextOffset] = useState<number | null>(null);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [pages, setPages] = useState<PageRow[]>([]);
+  const [pageNextOffset, setPageNextOffset] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
@@ -94,9 +98,13 @@ export default function KnowledgeBasePage() {
     if (!baseResponse.ok) { setMissing(true); setMessage("该知识库不存在，或你无权查看。"); setLoading(false); return; }
     setBase((await baseResponse.json() as { base: Base }).base);
     setOverview((await overviewResponse.json() as { overview: Overview }).overview);
-    setDocuments((await documentsResponse.json() as { documents: DocumentRow[] }).documents);
+    const documentResult = await documentsResponse.json() as { documents: DocumentRow[]; nextOffset: number | null };
+    setDocuments(documentResult.documents);
+    setDocumentNextOffset(documentResult.nextOffset);
     setTasks((await tasksResponse.json() as { tasks: TaskRow[] }).tasks);
-    setPages((await pagesResponse.json() as { pages: PageRow[] }).pages);
+    const pageResult = await pagesResponse.json() as { pages: PageRow[]; nextOffset: number | null };
+    setPages(pageResult.pages);
+    setPageNextOffset(pageResult.nextOffset);
   }, [baseId]);
 
   useEffect(() => { void load(search).catch(() => setMessage("加载失败，请刷新重试。")).finally(() => setLoading(false)); }, [load, search]);  useEffect(() => {
@@ -147,6 +155,26 @@ export default function KnowledgeBasePage() {
       await load(search);
     } catch { setMessage("操作失败，请刷新后重试。"); }
     finally { setBusy(false); }
+  }
+
+  async function loadMore(kind: "documents" | "pages") {
+    const offset = kind === "documents" ? documentNextOffset : pageNextOffset;
+    if (offset === null) return;
+    setLoadingMore(true);
+    try {
+      const response = await fetch(`${ENDPOINT}${kind}?baseId=${encodeURIComponent(baseId)}&query=${encodeURIComponent(search)}&offset=${offset}`);
+      if (!response.ok) throw new Error("knowledge_list_failed");
+      if (kind === "documents") {
+        const result = await response.json() as { documents: DocumentRow[]; nextOffset: number | null };
+        setDocuments(current => [...current, ...result.documents]);
+        setDocumentNextOffset(result.nextOffset);
+      } else {
+        const result = await response.json() as { pages: PageRow[]; nextOffset: number | null };
+        setPages(current => [...current, ...result.pages]);
+        setPageNextOffset(result.nextOffset);
+      }
+    } catch { setMessage("加载更多失败，请重试。"); }
+    finally { setLoadingMore(false); }
   }
 
   async function withdraw(documentId: string) {
@@ -270,6 +298,7 @@ export default function KnowledgeBasePage() {
               </div>
               <p className="mt-1 text-xs text-ink-3">v{page.revision} · 分析师 {page.coverage?.analysts ?? 0} · 机构 {page.coverage?.firms ?? 0} · 引用 {page.citationCount} · 最近材料 {page.coverage?.last_report ?? "日期未知"}</p>
             </li>)}</ul>}
+            {pageNextOffset !== null && <Button type="button" variant="outline" size="sm" disabled={loadingMore} onClick={() => void loadMore("pages")}>{loadingMore ? "加载中…" : "加载更多知识页"}</Button>}
           </div>
           <div className="grid gap-2">
             <h3 className="text-sm font-semibold text-ink">材料 {documents.length}</h3>
@@ -279,9 +308,10 @@ export default function KnowledgeBasePage() {
                 <span className="flex flex-wrap items-center gap-1">
                   <Badge variant="secondary">v{document.versionNo}</Badge>
                   <Badge variant={STATE_VARIANT[document.taskState ?? ""] ?? "secondary"}>{TASK_STATE_LABELS[document.taskState ?? ""] ?? "未构建"}</Badge>
+                  <Badge variant={FRESHNESS_VARIANT[document.freshness] ?? "secondary"}>{FRESHNESS_LABELS[document.freshness] ?? "时效未知"}</Badge>
                 </span>
               </div>
-              <p className="mt-1 text-xs text-ink-3">{document.sourceOrg ?? "机构未知"} · {document.sourceAuthor ?? "作者未知"} · {document.sourceDate ?? "日期未知"} · {document.uploaderName} · {document.fileName}</p>
+              <p className="mt-1 text-xs text-ink-3">{document.sourceOrg ?? "机构未知"} · {document.sourceAuthor ?? "分析师未知"} · {document.sourceDate ?? "材料日期未知"} · {document.sourceKind ?? "类型未知"} · {document.uploaderName} · 入库 {new Date(document.versionCreatedAt).toLocaleString("zh-CN")}</p>
               {document.extractionStatus === "unavailable" && <p className="mt-1 text-xs text-hot">{document.extractionNote ?? "未能提取文本"}</p>}
               {document.errorCode && <p className="mt-1 text-xs text-hot">{TASK_ERRORS[document.errorCode] ?? document.errorMessage ?? document.errorCode}</p>}
               <div className="mt-2 flex flex-wrap gap-3">
@@ -293,6 +323,7 @@ export default function KnowledgeBasePage() {
                     : null}
               </div>
             </li>)}</ul>}
+            {documentNextOffset !== null && <Button type="button" variant="outline" size="sm" disabled={loadingMore} onClick={() => void loadMore("documents")}>{loadingMore ? "加载中…" : "加载更多材料"}</Button>}
           </div>
         </CardContent>
       </Card>

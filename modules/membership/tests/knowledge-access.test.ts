@@ -198,6 +198,24 @@ test("the shared library is open to approved employees and closed to everyone el
   assert.equal(contributions.length, 2, "两份材料各留一份贡献");
   assert.ok(contributions.every(row => row.status === "active"));
 
+  const targetResponse = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages/view-company-example", headers: { cookie: cookies[1]!, ...common } });
+  assert.equal(targetResponse.statusCode, 200);
+  const target = await targetResponse.json() as { materials: Array<{ documentId: string; sourceAuthor: string | null; sourceOrg: string | null; sourceDate: string | null; freshness: string }>; revisions: Array<{ revision: number }> };
+  assert.equal(target.materials.length, 2, "target detail exposes both independent materials");
+  assert.deepEqual(new Set(target.materials.map(material => material.documentId)), new Set([uploaded.documentId, second.documentId]));
+  assert.equal(target.revisions.length, 2, "target detail exposes each published revision");
+  assert.ok(target.materials.some(material => material.sourceAuthor === "张三" && material.sourceOrg === "某券商" && material.sourceDate === "2026-06-20"));
+
+  // Missing upload metadata remains null in the employee API; presentation supplies the visible 未知 label.
+  await sql`UPDATE member_wiki_document_versions SET source_title=NULL, source_author=NULL, source_org=NULL, source_date=NULL, source_kind=NULL WHERE id=${second.versionId}`;
+  const unknownTarget = await (await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages/view-company-example", headers: { cookie: cookies[1]!, ...common } })).json() as typeof target;
+  const unknownMaterial = unknownTarget.materials.find(material => material.documentId === second.documentId)!;
+  assert.equal(unknownMaterial.sourceAuthor, null);
+  assert.equal(unknownMaterial.sourceOrg, null);
+  assert.equal(unknownMaterial.sourceDate, null);
+  assert.equal(unknownMaterial.freshness, "undated");
+  await sql`UPDATE member_wiki_document_versions SET source_title='另一券商', source_author='王五', source_org='另一券商', source_date='2026-07-01', source_kind='点评' WHERE id=${second.versionId}`;
+
   // Two builds that publish at the same time keep both materials' contributions.
   const third = await app.inject({
     method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[0]!, ...common },
@@ -214,6 +232,13 @@ test("the shared library is open to approved employees and closed to everyone el
   await Promise.all([runWikiTask(thirdTask), runWikiTask(fourthTask)]);
   const concurrent = await sql`SELECT count(*)::int AS count FROM member_wiki_contributions WHERE status='active'`;
   assert.equal(concurrent[0]?.count, 4, "并发的构建各留一份贡献，谁也没有覆盖谁");
+  const firstWindow = await (await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/documents?limit=2", headers: { cookie: cookies[0]!, ...common } })).json() as { documents: unknown[]; hasMore: boolean; nextOffset: number | null };
+  assert.equal(firstWindow.documents.length, 2);
+  assert.equal(firstWindow.hasMore, true);
+  assert.equal(firstWindow.nextOffset, 2);
+  const secondWindow = await (await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/documents?limit=2&offset=${firstWindow.nextOffset}`, headers: { cookie: cookies[0]!, ...common } })).json() as { documents: unknown[]; hasMore: boolean; nextOffset: number | null };
+  assert.ok(secondWindow.documents.length > 0);
+  assert.ok(secondWindow.nextOffset === null || secondWindow.nextOffset > firstWindow.nextOffset);
   const concurrentBody = await sql`SELECT body_md FROM member_wiki_page_revisions ORDER BY revision DESC LIMIT 1`;
   assert.match(concurrentBody[0]!.body_md, /另一券商/);
 

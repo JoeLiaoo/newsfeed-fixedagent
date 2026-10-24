@@ -146,6 +146,9 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
   // The pages of the base are listed under that base, and the other base has none.
   const ownPages = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/pages?baseId=${base.id}`, headers: { cookie: cookies[0]!, ...common } });
   assert.equal((await ownPages.json() as { pages: unknown[] }).pages.length, 1);
+  const ownTarget = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/pages/${base.id}-${PAGE_SLUG}`, headers: { cookie: cookies[1]!, ...common } });
+  assert.equal(ownTarget.statusCode, 200);
+  assert.equal((await ownTarget.json() as { materials: unknown[] }).materials.length, 1, "target detail only returns materials from its own base");
   const sharedPages = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/pages?baseId=${DEFAULT_BASE_ID}`, headers: { cookie: cookies[0]!, ...common } });
   assert.equal((await sharedPages.json() as { pages: unknown[] }).pages.length, 0, "the shared base has no page of its own yet");
   assert.equal((await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages", headers: { cookie: cookies[0]!, ...common } })).statusCode, 200, "no base named means the shared base");
