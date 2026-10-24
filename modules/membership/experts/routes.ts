@@ -7,6 +7,7 @@ import { EXPERT_QUEUE } from "./queue.ts";
 import { parseSkillUpload, expertSlug, executionMode } from "./import.ts";
 import { BUILTIN_EXPERT, COMING_SOON_EXPERT, COMING_SOON_EXPERT_STATUS, EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG } from "./catalog.ts";
 import { parseTaskMaterials, MAX_TOTAL_MATERIAL_BYTES } from "./materials.ts";
+import { expertTaskPagination, parseExpertTaskPage } from "./task-page.ts";
 import { getTaskArtifact } from "./worker.ts";
 import { panoramaCheckpointJsonl } from "./panorama-checkpoint.ts";
 
@@ -85,18 +86,27 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     return reply.code(201).send({ expert: { slug, name: skill.name, description: skill.description, version: skill.version, status, executionMode: executionMode(skill.manifest), missingDependencies: skill.missingDependencies } });
   });
 
+  /** The caller's own task history, one expert and one page at a time. */
   app.get("/api/v1/membership/expert-tasks", async (req, reply) => {
     noStore(reply);
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
-    const tasks = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
+    const page = parseExpertTaskPage(req.query as { limit?: unknown; offset?: unknown; expertSlug?: unknown });
+    if (!page) return reply.code(400).send({ error: "invalid_query" });
+    // The rows are the caller's own, so a detail page reads one expert's history without ever
+    // reaching another employee's tasks; the expert filter narrows that history further.
+    const slugFilter = page.expertSlug ? sql`AND t.expert_slug = ${page.expertSlug}` : sql``;
+    const rows = await sql<{ id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string; notes?: string }; result: unknown; errorCode: string | null; errorMessage: string | null; executionAttempts: number; createdAt: Date; updatedAt: Date; hasArtifact: boolean; hasCheckpoint: boolean; materials: Array<{ id: string; filename: string; byteSize: number; sha256: string; extractionStatus: string; extractionNote: string | null }> }[]>`
+      SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
         t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
         EXISTS(SELECT 1 FROM member_expert_panorama_checkpoints p WHERE p.task_id=t.id AND p.user_id=${user.id}) AS "hasCheckpoint",
         COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
-      WHERE t.user_id=${user.id} AND t.expires_at > now() ORDER BY t.created_at DESC LIMIT 50`;
-    return { tasks };
+      WHERE t.user_id=${user.id} AND t.expires_at > now() ${slugFilter}
+      ORDER BY t.created_at DESC, t.id DESC LIMIT ${page.limit + 1} OFFSET ${page.offset}`;
+    const tasks = rows.slice(0, page.limit);
+    return { tasks, pagination: expertTaskPagination(page.limit, page.offset, rows.length) };
   });
 
   app.post("/api/v1/membership/expert-tasks", { bodyLimit: Math.ceil(MAX_TOTAL_MATERIAL_BYTES * 4 / 3) + 512 * 1024 }, async (req, reply) => {
