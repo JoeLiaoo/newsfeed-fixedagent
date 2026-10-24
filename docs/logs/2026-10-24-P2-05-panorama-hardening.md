@@ -25,6 +25,7 @@
   - `node --import ./tests/standalone.ts --test modules/membership/tests/panorama.standalone.test.ts`：16 项通过，含查询失败脱敏/不完整状态、恢复读取不花实际调用预算、恰好达到单节点上限不误报。
   - `npm run typecheck`：通过。
   - `node scripts/check-doc-links.ts`：检查 357 个本地 Markdown 链接，通过。
+  - PR #51 head `56d1b2d8fd8d0fceb3e4a0b209d9758b89cf4d9d` 的 GitHub `links`、`postgres-integration`、`quality` 检查均通过。
 - 未执行或需用户试用的检查：PostgreSQL 集成测试因 `DATABASE_URL` 未设置且测试要求指向 `*_test` 或 `*_ci` 临时库而未运行；生产登录目录播种、真实 MCP 全景图、员工下载/阅读和真实样例结果未验收。
 
 ## 风险与交接
