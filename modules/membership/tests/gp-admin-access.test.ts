@@ -21,9 +21,9 @@ test("GP admin APIs require admins and paginate filtered observations in stable 
   await sql`UPDATE member_users SET status='active',role=CASE WHEN username=${adminName} THEN 'admin' ELSE 'member' END WHERE username IN (${adminName},${memberName})`;
   const [admin]=await sql<{id:string}[]>`SELECT id FROM member_users WHERE username=${adminName}`;
   const gp=randomUUID();
-  await sql`INSERT INTO member_gp_watchlist(id,canonical_name,source_ref,status,entity_role)
-    VALUES(${gp},${"队列主体-"+suffix},'https://example.org/identity','candidate','gp'),
-          (${randomUUID()},${"队列主体乙-"+suffix},'https://example.org/identity-b','candidate','gp')`;
+  await sql`INSERT INTO member_gp_watchlist(id,canonical_name,aliases,source_ref,status,entity_role,entity_id,reviewed_by,reviewed_at)
+    VALUES(${gp},${"队列主体-"+suffix},ARRAY['人工核对别名'],'https://example.org/identity','candidate','gp','confirmed-entity',${admin!.id},now()),
+          (${randomUUID()},${"队列主体乙-"+suffix},ARRAY[]::text[],'https://example.org/identity-b','candidate','gp',NULL,NULL,NULL)`;
   const observed=[randomUUID(),randomUUID()],baseline=randomUUID();
   await sql`INSERT INTO member_gp_investments(id,gp_id,investee_key,investee_name,raw_evidence,status,first_seen_at)
     VALUES(${observed[0]},${gp},${"obs-a-"+suffix},'观察甲',${sql.json({})},'observed','2026-10-20T00:00:00Z'),
@@ -36,6 +36,14 @@ test("GP admin APIs require admins and paginate filtered observations in stable 
     return (Array.isArray(cookie)?cookie[0]!:cookie!).split(";",1)[0]!;
   };
   const adminCookie=await login(adminName),memberCookie=await login(memberName);
+  for(const path of ["/api/v1/membership/admin/gps","/api/v1/membership/admin/gp-observations"]){
+    assert.ok([401,403].includes((await app.inject({method:"GET",url:path})).statusCode));
+    assert.equal((await app.inject({method:"GET",url:path,headers:{cookie:memberCookie}})).statusCode,403);
+  }
+  const partialPause=await app.inject({method:"PATCH",url:`/api/v1/membership/admin/gps/${gp}`,headers:{cookie:adminCookie,host:"newsfeed.test",origin:"http://newsfeed.test"},payload:{status:"paused"}});
+  assert.equal(partialPause.statusCode,400);
+  const [unchangedGp]=await sql<{aliases:string[];source_ref:string;entity_role:string;status:string}[]>`SELECT aliases,source_ref,entity_role,status FROM member_gp_watchlist WHERE id=${gp}`;
+  assert.deepEqual(unchangedGp,{aliases:["人工核对别名"],source_ref:"https://example.org/identity",entity_role:"gp",status:"candidate"});
   const forbidden=await app.inject({method:"GET",url:"/api/v1/membership/admin/gp-observations",headers:{cookie:memberCookie}});
   assert.equal(forbidden.statusCode,403);
   const gps=await app.inject({method:"GET",url:"/api/v1/membership/admin/gps?status=candidate&limit=1",headers:{cookie:adminCookie}});
@@ -54,10 +62,15 @@ test("GP admin APIs require admins and paginate filtered observations in stable 
   const filtered=await app.inject({method:"GET",url:"/api/v1/membership/admin/gp-observations?status=baseline",headers:{cookie:adminCookie}});
   assert.deepEqual(((await filtered.json()) as {observations:Array<{id:string}>}).observations.map(row=>row.id),[baseline]);
   assert.equal((await app.inject({method:"GET",url:"/api/v1/membership/admin/gp-observations?status=unknown",headers:{cookie:adminCookie}})).statusCode,400);
+  assert.equal((await app.inject({method:"GET",url:"/api/v1/membership/admin/gp-observations?status=",headers:{cookie:adminCookie}})).statusCode,400);
+  assert.equal((await app.inject({method:"GET",url:"/api/v1/membership/admin/gps?status=",headers:{cookie:adminCookie}})).statusCode,400);
 
   const reject=await app.inject({method:"PATCH",url:`/api/v1/membership/admin/gp-observations/${observed[0]}`,headers:{cookie:adminCookie,host:"newsfeed.test",origin:"http://newsfeed.test"},payload:{tags:["光伏"],status:"verified",eventDate:"2026-02-30",sourceUrl:"https://example.org/evidence"}});
   assert.equal(reject.statusCode,400);
   assert.equal((await reject.json() as {error:string}).error,"event_evidence_required");
+  const missingEvidence=await app.inject({method:"PATCH",url:`/api/v1/membership/admin/gp-observations/${observed[0]}`,headers:{cookie:adminCookie,host:"newsfeed.test",origin:"http://newsfeed.test"},payload:{tags:["光伏"],status:"verified",eventDate:"2026-02-28",sourceUrl:"https://"}});
+  assert.equal(missingEvidence.statusCode,400);
+  assert.equal((await missingEvidence.json() as {error:string}).error,"event_evidence_required");
   const approve=await app.inject({method:"PATCH",url:`/api/v1/membership/admin/gp-observations/${observed[0]}`,headers:{cookie:adminCookie,host:"newsfeed.test",origin:"http://newsfeed.test"},payload:{tags:["光伏"],status:"verified",eventDate:"2026-02-28",sourceUrl:"https://example.org/evidence"}});
   assert.equal(approve.statusCode,200);
   const [approved]=await sql<{status:string;approved_event_date:string;approved_source_url:string}[]>`SELECT status,approved_event_date::text,approved_source_url FROM member_gp_investments WHERE id=${observed[0]}`;
