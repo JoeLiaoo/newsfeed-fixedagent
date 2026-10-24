@@ -1,4 +1,4 @@
-import { useCallback,useEffect,useState,type FormEvent } from "react";
+import { useEffect,useState,type FormEvent } from "react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Button } from "@aihot/web/components/member-ui/button";
 import { Card,CardContent,CardHeader,CardTitle } from "@aihot/web/components/member-ui/card";
@@ -7,11 +7,11 @@ import { Checkbox } from "@aihot/web/components/member-ui/checkbox";
 import { Label } from "@aihot/web/components/member-ui/label";
 import { beijingStamp } from "@aihot/contracts/time";
 import { DIRECTIONS } from "../catalog.ts";
+import { createAdminPageLoader } from "./gp-admin-state.ts";
 const GP_TAGS = DIRECTIONS.filter(d => d.name !== "战略配售").flatMap(d => [...d.tags]);
 const PAGE_SIZE=25;
 type GP={id:string;canonical_name:string;aliases:string[];entity_id:string|null;credit_code:string|null;entity_role:string;status:string;source_ref:string;last_synced_at:string|null;last_error:string|null};
 type Observation={id:string;gp_name:string;investee_name:string;status:string;sector_tags:string[];sector_reason:string|null;data_date:string|null;provider_updated_at:string|null;investment_date:string|null;first_seen_at:string;snapshot_captured_at:string|null;approved_source_url:string|null;approved_event_date:string|null};
-type PageInfo={limit:number;offset:number;nextOffset:number|null};
 const prefix="/api/v1/membership/admin";
 const GP_STATES=[{id:"candidate",label:"候选"},{id:"active",label:"启用"},{id:"paused",label:"暂停"}] as const;
 const OBS_STATES=[{id:"observed",label:"待核"},{id:"verified",label:"已核实"},{id:"baseline",label:"历史基线"},{id:"retracted",label:"已撤回"}] as const;
@@ -19,34 +19,36 @@ const OBS_STATES=[{id:"observed",label:"待核"},{id:"verified",label:"已核实
 export default function GpAdminPage(){
   const [gps,setGps]=useState<GP[]>([]),[gpsState,setGpsState]=useState("candidate"),[gpsOffset,setGpsOffset]=useState(0),[gpsNext,setGpsNext]=useState<number|null>(null);
   const [rows,setRows]=useState<Observation[]>([]),[obsState,setObsState]=useState("observed"),[obsOffset,setObsOffset]=useState(0),[obsNext,setObsNext]=useState<number|null>(null);
-  const [error,setError]=useState(""),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[loadingGps,setLoadingGps]=useState(false),[loadingObs,setLoadingObs]=useState(false);
+  const [gpsError,setGpsError]=useState(""),[obsError,setObsError]=useState("");
+  const [message,setMessage]=useState(""),[busy,setBusy]=useState(false),[loadingGps,setLoadingGps]=useState(false),[loadingObs,setLoadingObs]=useState(false);
+  const [gpsRefresh,setGpsRefresh]=useState(0),[obsRefresh,setObsRefresh]=useState(0);
   const [syncState,setSyncState]=useState<Record<string,string>>({});
-  const loadGps=useCallback(async(status:string,offset:number)=>{
-    setLoadingGps(true);setError("");
-    try{const response=await fetch(`${prefix}/gps?status=${status}&limit=${PAGE_SIZE}&offset=${offset}`);if(!response.ok)throw new Error("读取候选名单失败。");
-      const page=await response.json() as {gps:GP[];pagination:PageInfo};setGps(page.gps);setGpsNext(page.pagination.nextOffset);
-    }catch(e){setError(e instanceof Error?e.message:"读取候选名单失败。");setGps([]);setGpsNext(null);}finally{setLoadingGps(false);}
-  },[]);
-  const loadObservations=useCallback(async(status:string,offset:number)=>{
-    setLoadingObs(true);setError("");
-    try{const response=await fetch(`${prefix}/gp-observations?status=${status}&limit=${PAGE_SIZE}&offset=${offset}`);if(!response.ok)throw new Error("读取观察队列失败。");
-      const page=await response.json() as {observations:Observation[];pagination:PageInfo};setRows(page.observations);setObsNext(page.pagination.nextOffset);
-    }catch(e){setError(e instanceof Error?e.message:"读取观察队列失败。");setRows([]);setObsNext(null);}finally{setLoadingObs(false);}
-  },[]);
-  useEffect(()=>{void loadGps(gpsState,gpsOffset);},[gpsState,gpsOffset,loadGps]);
-  useEffect(()=>{void loadObservations(obsState,obsOffset);},[obsState,obsOffset,loadObservations]);
+  const [gpsLoader]=useState(()=>createAdminPageLoader<GP>("gps","读取候选名单失败。",state=>{
+    setGps(state.rows);setGpsNext(state.nextOffset);setLoadingGps(state.loading);setGpsError(state.error);
+  }));
+  const [obsLoader]=useState(()=>createAdminPageLoader<Observation>("observations","读取观察队列失败。",state=>{
+    setRows(state.rows);setObsNext(state.nextOffset);setLoadingObs(state.loading);setObsError(state.error);
+  }));
+  useEffect(()=>{
+    void gpsLoader.load(`${prefix}/gps?status=${gpsState}&limit=${PAGE_SIZE}&offset=${gpsOffset}`);
+    return ()=>gpsLoader.cancel();
+  },[gpsState,gpsOffset,gpsRefresh,gpsLoader]);
+  useEffect(()=>{
+    void obsLoader.load(`${prefix}/gp-observations?status=${obsState}&limit=${PAGE_SIZE}&offset=${obsOffset}`);
+    return ()=>obsLoader.cancel();
+  },[obsState,obsOffset,obsRefresh,obsLoader]);
   async function saveGp(id:string,input:Record<string,unknown>){
     setBusy(true);setMessage("");
     try{const response=await fetch(prefix+"/gps/"+encodeURIComponent(id),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(input)});
       setMessage(response.ok?"已保存主体核查结果。":response.status===409?"主体身份在已有快照后不可修改。":"保存失败，请检查主体身份、GP 角色和依据。");
-      if(response.ok)await loadGps(gpsState,gpsOffset);
+      if(response.ok)setGpsRefresh(value=>value+1);
     }catch{setMessage("网络异常，保存未完成。");}finally{setBusy(false);}
   }
   async function create(event:FormEvent<HTMLFormElement>){
     event.preventDefault();setBusy(true);const form=event.currentTarget,values=new FormData(form);
     try{const response=await fetch(prefix+"/gps",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:values.get("name"),sourceRef:values.get("sourceRef")})});
       setMessage(response.ok?"已添加待核候选。":response.status===409?"该主体已在名单中。":"添加失败，请检查名称和依据。");
-      if(response.ok){form.reset();setGpsState("candidate");setGpsOffset(0);await loadGps("candidate",0);}
+      if(response.ok){form.reset();setGpsState("candidate");setGpsOffset(0);setGpsRefresh(value=>value+1);}
     }catch{setMessage("网络异常，添加未完成。");}finally{setBusy(false);}
   }
   async function sync(id:string){
@@ -61,12 +63,11 @@ export default function GpAdminPage(){
     event.preventDefault();setBusy(true);setMessage("");const data=new FormData(event.currentTarget);
     try{const response=await fetch(prefix+"/gp-observations/"+encodeURIComponent(id),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({tags:data.getAll("tags"),status:data.get("status"),reason:data.get("reason"),eventDate:data.get("eventDate"),sourceUrl:data.get("sourceUrl")})});
       setMessage(response.ok?"审核记录已保存。":response.status===400?"审核失败：核准投资须提供有效日期、HTTPS 证据和赛道。":"审核未保存，请重试。");
-      if(response.ok)await loadObservations(obsState,obsOffset);
+      if(response.ok)setObsRefresh(value=>value+1);
     }catch{setMessage("网络异常，审核未完成。");}finally{setBusy(false);}
   }
   return <main className="mx-auto w-full max-w-5xl px-5 py-8">
     <h1 className="mb-5 text-2xl font-semibold">GP 投资动向</h1>
-    {error&&<Alert role="alert" className="mb-4">{error} <Button size="sm" variant="outline" onClick={()=>{void loadGps(gpsState,gpsOffset);void loadObservations(obsState,obsOffset);}}>重试</Button></Alert>}
     {message&&<Alert role="status" className="mb-4">{message}</Alert>}
     <Card className="mb-6"><CardHeader><CardTitle>新增监测候选</CardTitle></CardHeader><CardContent>
       <form onSubmit={create} className="grid gap-3 sm:grid-cols-2">
@@ -78,16 +79,18 @@ export default function GpAdminPage(){
     <Card className="mb-6"><CardHeader><CardTitle>监测名单</CardTitle><div className="flex flex-wrap gap-2" aria-label="监测名单状态">
       {GP_STATES.map(tab=><Button key={tab.id} type="button" size="sm" variant={gpsState===tab.id?"default":"outline"} aria-pressed={gpsState===tab.id} onClick={()=>{setGpsState(tab.id);setGpsOffset(0);}}>{tab.label}</Button>)}
     </div></CardHeader><CardContent className="grid gap-4">
+      {gpsError&&<Alert role="alert">{gpsError} <Button size="sm" variant="outline" onClick={()=>setGpsRefresh(value=>value+1)}>重试</Button></Alert>}
       {loadingGps&&<p role="status" className="text-sm text-ink-3">正在加载监测名单…</p>}
-      {!loadingGps&&!gps.length&&!error&&<p className="text-sm text-ink-3">此状态下暂无主体。</p>}
+      {!loadingGps&&!gps.length&&!gpsError&&<p className="text-sm text-ink-3">此状态下暂无主体。</p>}
       {gps.map(gp=><GpRow key={gp.id} gp={gp} busy={busy} syncMessage={syncState[gp.id]} onSave={input=>saveGp(gp.id,input)} onSync={()=>void sync(gp.id)}/>)}
       <Pager offset={gpsOffset} next={gpsNext} loading={loadingGps} onChange={setGpsOffset}/>
     </CardContent></Card>
     <Card><CardHeader><CardTitle>新增关系核验</CardTitle><div className="flex flex-wrap gap-2" aria-label="观察记录状态">
       {OBS_STATES.map(tab=><Button key={tab.id} type="button" size="sm" variant={obsState===tab.id?"default":"outline"} aria-pressed={obsState===tab.id} onClick={()=>{setObsState(tab.id);setObsOffset(0);}}>{tab.label}</Button>)}
     </div></CardHeader><CardContent className="grid gap-4">
+      {obsError&&<Alert role="alert">{obsError} <Button size="sm" variant="outline" onClick={()=>setObsRefresh(value=>value+1)}>重试</Button></Alert>}
       {loadingObs&&<p role="status" className="text-sm text-ink-3">正在加载观察队列…</p>}
-      {!loadingObs&&!rows.length&&!error&&<p className="text-sm text-ink-3">此状态下暂无观察记录。</p>}
+      {!loadingObs&&!rows.length&&!obsError&&<p className="text-sm text-ink-3">此状态下暂无观察记录。</p>}
       {rows.map(row=><form key={row.id} onSubmit={e=>void review(e,row.id)} className="grid gap-3 rounded-control border border-line-soft p-4">
         <div className="font-medium">{row.gp_name} → {row.investee_name}</div>
         <p className="text-sm text-ink-3">{row.status} · 首次发现 {beijingStamp(row.first_seen_at)} · 入库快照 {row.snapshot_captured_at?beijingStamp(row.snapshot_captured_at):"未关联"}</p>
