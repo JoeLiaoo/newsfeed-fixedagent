@@ -14,6 +14,24 @@ const safeOrigin=(req:FastifyRequest)=>{
 };
 
 export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
+  app.get("/api/v1/membership/gp-projects",async(req,reply)=>{
+    reply.header("Cache-Control","private, no-store").header("Vary","Cookie");
+    const user=await authenticate(req);
+    if(!user) return reply.code(401).send({error:"login_required"});
+    const query=req.query as {limit?:string;offset?:string};
+    const requestedLimit=Number(query.limit??50),requestedOffset=Number(query.offset??0);
+    const limit=Number.isInteger(requestedLimit)?Math.min(100,Math.max(1,requestedLimit)):50;
+    const offset=Number.isInteger(requestedOffset)?Math.min(100_000,Math.max(0,requestedOffset)):0;
+    const rows=await sql`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.sector_tags,
+      i.approved_event_date::text AS event_date,'verified'::text AS status,i.approved_source_url AS source_url
+      FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
+      WHERE i.status='verified' AND g.status='active' AND g.entity_role='gp'
+      ORDER BY i.approved_event_date DESC NULLS LAST,i.approved_at DESC NULLS LAST,i.id
+      LIMIT ${limit+1} OFFSET ${offset}`;
+    const hasMore=rows.length>limit;
+    return {investments:rows.slice(0,limit),pagination:{limit,offset,nextOffset:hasMore?offset+limit:null}};
+  });
+
   async function admin(req:FastifyRequest,reply:FastifyReply) {
     reply.header("Cache-Control","private, no-store").header("Vary","Cookie");
     const user=await authenticate(req);
