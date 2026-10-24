@@ -85,7 +85,7 @@ test("mock Xinhua pagination reports all pages and flags a provider that repeats
 test("skill dependencies are structured and unsupported tools and skills block text-only execution", () => {
   const skill = parseSkillMarkdown(`---\nname: Research\ndescription: Research task\ndependencies:\n  tools:\n    - get_company_profile\n  skills:\n    - investment-review@^1.0.0\n---\nPlease research.\n`);
   assert.deepEqual(skill.manifest, { tools: ["get_company_profile"], skills: ["investment-review@^1.0.0"] });
-  assert.deepEqual(skill.missingDependencies, ["工具依赖（纯文本模式不可用）：get_company_profile", "未发布的技能依赖：investment-review@^1.0.0"]);
+  assert.deepEqual(skill.missingDependencies, ["新华财经适配需要同时声明主体检索、企业画像和直接投资三个工具", "未发布的技能依赖：investment-review@^1.0.0"]);
   const cycle = parseSkillMarkdown(`---\nname: Research\ndescription: Research task\nskills:\n  - research@1.0.0\n---\n`);
   assert.deepEqual(cycle.missingDependencies, ["循环技能依赖：research@1.0.0"]);
   assert.throws(() => parseSkillMarkdown(`---\nname: Unknown\ndescription: Unknown dependency\nrequires:\n  mcp: any-tool\n---\n`), /skill_dependencies_invalid/);
@@ -109,7 +109,7 @@ test("ZIP import carries SKILL frontmatter dependencies into the normalized pack
   const zipped=parseSkillUpload("tool-research.zip",Buffer.from(archive).toString("base64"));
   assert.deepEqual(zipped.manifest,single.manifest);
   assert.deepEqual(zipped.missingDependencies,single.missingDependencies);
-  assert.deepEqual(zipped.missingDependencies,["工具依赖（纯文本模式不可用）：get_direct_investment"]);
+  assert.deepEqual(zipped.missingDependencies,["新华财经适配需要同时声明主体检索、企业画像和直接投资三个工具"]);
   const unsafe=zipSync({"manifest.json":strToU8('{"unknownDependencyField":[]}'),"SKILL.md":strToU8(skill)});
   assert.throws(()=>parseSkillUpload("unknown.zip",Buffer.from(unsafe).toString("base64")),/manifest_dependencies_invalid/);
 });

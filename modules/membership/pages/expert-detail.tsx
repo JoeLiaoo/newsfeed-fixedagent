@@ -125,7 +125,7 @@ export default function ExpertDetailPage() {
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-1 text-2xl font-semibold tracking-tight text-ink">{expert?.name ?? "专家"}</h1>
         {expert && <Badge variant={expert.status === "available" ? "success" : "warning"}>{expert.status === "available" ? "可运行" : "缺少依赖"}</Badge>}
-        {expert && <Badge variant="secondary">{expert.execution_mode === "text_only" ? "纯文本模式（DeepSeek）" : "新华财经适配试运行"}</Badge>}
+        {expert && <Badge variant="secondary">{expert.execution_mode === "text_only" ? "纯文本模式（DeepSeek）" : "新华财经 · 一层投资"}</Badge>}
       </div>
       {expert && <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-3">{expert.description}</p>}
       {expert && expert.missing_dependencies.length > 0 && <p className="mt-1 text-xs text-ink-3">缺少依赖：{expert.missing_dependencies.join("、")}</p>}

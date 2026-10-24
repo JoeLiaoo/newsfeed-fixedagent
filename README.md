@@ -66,7 +66,7 @@ node scripts/check-doc-links.ts
 - [建设需求基线](docs/PLAN.md)
 - [实施状态和剩余验收](docs/IMPLEMENTATION.md)
 - [可视化进度汇报](docs/PROGRESS-REPORT.md)
-- [P2 首个专家适配矩阵](docs/P2-EXPERT-ADAPTER.md)
+- [P2 企业一层对外投资核查](docs/P2-EXPERT-ADAPTER.md)
 - [共享投研知识库运行手册](docs/KNOWLEDGE-OPS.md)
 - [P3 GP 与微信联调](docs/P3-OPERATIONS.md)
 - [微信扫码绑定设计与部署后验收](docs/P3-ILINK-QR-DESIGN.md)

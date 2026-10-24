@@ -96,7 +96,7 @@ export async function collectProviderPages<Row>(options: {
 
 /** Provider inventory rows need a stable identity; names alone are not sufficient for a baseline. */
 export function investmentRowIdentity(row: Record<string, unknown>): string | null {
-  for (const key of ["record_id", "investment_id", "investee_id", "company_id", "comp_id_iwudao", "comp_id", "credit_code", "unified_social_credit_code"]) {
+  for (const key of ["record_id", "investment_id", "investee_id", "company_id", "comp_id", "credit_code", "unified_social_credit_code"]) {
     const value = row[key];
     if (typeof value === "string" && value.trim()) return `${key}:${value.trim()}`;
     if (typeof value === "number" && Number.isFinite(value)) return `${key}:${value}`;

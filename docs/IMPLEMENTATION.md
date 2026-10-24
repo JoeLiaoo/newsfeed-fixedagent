@@ -1,7 +1,7 @@
 # 分步骤实施计划
 
 需求基线日期：2026-10-21（Asia/Shanghai） · 状态核对：2026-10-24
-依据：`docs/PLAN.md` v0.74；当前开发先用 DeepSeek API 与新华财经 MCP。
+依据：`docs/PLAN.md` v0.75；当前开发先用 DeepSeek API 与新华财经 MCP。
 
 阶段勾选的阅读视图见[项目进度汇报](PROGRESS-REPORT.md)；本文件仍是任务状态的唯一依据。
 
@@ -48,13 +48,13 @@ P1 出口：两位不同关注赛道的员工可看到各自日报；新增信�
 | 状态 | ID | 工作及完成标准 | 日志 |
 |---|---|---|---|
 | [x] | P2-01 | 定义 ZIP／单文件 `SKILL.md` 导入结构，检查格式、安全和平台已接入 MCP／skill 依赖；缺失时说明原因 | [P2 expert](logs/2026-10-21-P2-expert.md) |
-| [x] | P2-02 | 建立基于 `reference/SKILL.md` 的新华财经适配版，逐条标注可执行规则与缺口；用“上海天之际创业投资合伙企业（有限合伙）”“杭州市国有资本投资运营有限公司”作为输入样例 | [适配矩阵](P2-EXPERT-ADAPTER.md)、[P2 expert](logs/2026-10-21-P2-expert.md) |
+| [x] | P2-02 | 建立企业一层对外投资核查专家，标注查询范围与未核事项；用“上海天之际创业投资合伙企业（有限合伙）”“杭州市国有资本投资运营有限公司”作为输入样例 | [适配矩阵](P2-EXPERT-ADAPTER.md)、[P2 expert](logs/2026-10-21-P2-expert.md) |
 | [x] | P2-03 | 接入 DeepSeek、受限 MCP、异步任务、状态、错误及产物下载；上传材料与产物七天清理，用户间隔离 | [P2 expert](logs/2026-10-21-P2-expert.md) |
-| [x] | P2-04 | 展示首个专家试运行状态与已知限制；失败不得显示成功，输出保留来源和未核实项 | [P2 expert](logs/2026-10-21-P2-expert.md)、[Issue #26 专家候选修复](logs/2026-10-23-i26-sources-xinhua-fix.md) |
+| [x] | P2-04 | 展示首个专家的一层查询范围与已知限制；失败不得显示成功，输出保留来源和未核实项 | [P2 expert](logs/2026-10-21-P2-expert.md)、[Issue #26 专家候选修复](logs/2026-10-23-i26-sources-xinhua-fix.md) |
 
-P2 已交付专家导入、依赖状态、持久化队列、实体确认、任务状态及 Markdown 产物链路。首个专家为新华财经适配试运行版，只查询一层直接投资；独立真实 MCP 调用已得到候选、主体画像和 13 条一层直接投资记录，见 [Issue #26 现场记录](logs/2026-10-23-i26-sources-xinhua-fix.md)。这不能证明生产上的完整专家任务已成功；完整穿透规则、持续连通和标准报告质量仍须真实环境联调，不能宣称原悟道技能已完整执行。2026-10-23 按 [Issue #26](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/26) 修正主体候选与画像调用：画像改用宽时间窗口（服务商默认的滚动三年窗口会把成立较早的主体排除），候选检索无匹配时尝试去掉企业形式后的短名，并把“未匹配到主体”“返回行缺少主体 ID”“响应结构无法解析”分成不同错误。修复已随 PR #32 合并，并随 2026-10-24 的 `4a91199` 发布上线；完整任务的真实验收记录仍缺。
+P2 已交付专家导入、依赖状态、持久化队列、实体确认、任务状态及 Markdown 产物链路。首个专家是新华财经企业一层对外投资核查，只查询一层直接投资；独立真实 MCP 调用已得到候选、主体画像和 13 条一层直接投资记录，见 [Issue #26 现场记录](logs/2026-10-23-i26-sources-xinhua-fix.md)。这不能证明生产上的完整专家任务已成功；持续连通和报告质量仍须真实环境联调，不能宣称已完成集团逐层穿透。2026-10-23 按 [Issue #26](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/26) 修正主体候选与画像调用：画像改用宽时间窗口（服务商默认的滚动三年窗口会把成立较早的主体排除），候选检索无匹配时尝试去掉企业形式后的短名，并把“未匹配到主体”“返回行缺少主体 ID”“响应结构无法解析”分成不同错误。修复已随 PR #32 合并，并随 2026-10-24 的 `4a91199` 发布上线；完整任务的真实验收记录仍缺。
 
-2026-10-24 针对 [Issue #41](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/41) 与 [#42](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/42) 增加任务私有材料上传、本人下载与提前删除、七天清理，以及自定义专家对平台固定新华财经三工具的受控调用。未接入的悟道、其他工具和专项 skill 仍阻止运行；新增链路尚待真实环境验收，见 [P2 适配说明](P2-EXPERT-ADAPTER.md) 与[工作日志](logs/2026-10-24-P2-P5-backend-hardening.md)。
+2026-10-24 针对 [Issue #41](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/41) 与 [#42](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/42) 增加任务私有材料上传、本人下载与提前删除、七天清理，以及自定义专家对平台固定新华财经三工具的受控调用。未适配的其他工具和未发布专项 skill 仍阻止运行；新增链路尚待真实环境验收，见 [P2 适配说明](P2-EXPERT-ADAPTER.md) 与[工作日志](logs/2026-10-24-P2-P5-backend-hardening.md)。
 
 专家目录、任务提交、导入、状态与产物页面已使用相同的组件体系，见 [P1/P2 前端组件整改](logs/2026-10-21-P1-P2-ui.md)。
 

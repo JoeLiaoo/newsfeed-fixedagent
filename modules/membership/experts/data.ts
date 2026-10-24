@@ -139,7 +139,7 @@ export function candidateSearchOutcome(raw: unknown): { present: boolean; rows: 
 /** The candidate rows the provider returned, with the fields this adapter reads. */
 export function mapCompanyCandidates(rows: Record<string, unknown>[], fallbackName: string): EntityCandidate[] {
   return rows.map(row => ({
-    id: textField(row, "company_id", "comp_id_iwudao", "comp_id") ?? "",
+    id: textField(row, "company_id", "comp_id") ?? "",
     name: textField(row, "company_name", "comp_name", "name") ?? fallbackName,
     status: textField(row, "company_status_name", "company_status", "status"),
     creditCode: textField(row, "credit_code", "unified_social_credit_code"),
@@ -199,7 +199,7 @@ export function mapInvestmentEvidence(rows: Record<string, unknown>[], source: s
 }
 
 export function verifySelectedEntity(entity: EntityCandidate, profile: Record<string, unknown>): { ok: true } | { ok: false; reason: string } {
-  const profileId = textField(profile, "company_id", "comp_id_iwudao", "comp_id", "id");
+  const profileId = textField(profile, "company_id", "comp_id", "id");
   const profileCode = textField(profile, "credit_code", "unified_social_credit_code");
   const profileName = textField(profile, "company_name", "comp_name", "name");
   if (profileId && profileId !== entity.id) return { ok: false, reason: "entity_id_mismatch" };
