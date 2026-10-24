@@ -16,6 +16,18 @@ export const XINHUA_BASE_TOOLS = ["fuzzy_search_company_list", "get_company_prof
 export const XINHUA_USED_TOOLS = XINHUA_ALLOWED_TOOLS;
 
 export const EXPERT_SLUG = "external-investment-landscape-xinhua-adapter";
+
+/**
+ * The status of an expert the platform no longer offers as a catalog entry. `blocked` would mean
+ * missing dependencies and would show the wrong badge; `hidden` means the row and its worker stay,
+ * so tasks that were created before the hiding keep running, but no employee sees the entry and no
+ * new task starts on it.
+ */
+export const HIDDEN_EXPERT_STATUS = "hidden";
+
+/** The builtins the employee platform keeps but does not offer as a catalog entry. */
+export const HIDDEN_BUILTIN_SLUGS = new Set<string>([EXPERT_SLUG]);
+
 export const EXPERT_SKILL = `# 企业一层对外投资核查
 
 本专家使用平台已授权的企业信息查询能力与文本整理能力。当前按已确认主体读取工商画像和一层直接投资，生成可复核的底稿。
@@ -27,6 +39,11 @@ export const EXPERT_SKILL = `# 企业一层对外投资核查
 控股/参股判断、关联方合并、投资类主体例外、上市公司识别、基金备案、公司制基金识别、有限合伙 GP/管理人、历史退出、基金组合披露、退出性质及全谱系断点续跑等能力，当前数据与规则引擎未完整支持时逐项标记缺口，不得推断通过。
 `;
 
+/**
+ * The one-layer builtin. It keeps its row, its skill text and its worker, so tasks that were created
+ * before it was hidden keep running, but the employee catalog does not offer it as an entry and no
+ * new task starts on it (Joe, 2026-10-24).
+ */
 export const BUILTIN_EXPERT = {
   slug: EXPERT_SLUG,
   name: "企业一层对外投资核查",

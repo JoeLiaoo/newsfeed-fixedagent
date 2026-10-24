@@ -5,7 +5,7 @@ import { enqueueOn } from "@aihot/backend/jobs/queue";
 import type { MemberSession } from "../server.ts";
 import { EXPERT_QUEUE } from "./queue.ts";
 import { parseSkillUpload, expertSlug, executionMode } from "./import.ts";
-import { BUILTIN_EXPERT, EXPERT_SLUG, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG } from "./catalog.ts";
+import { BUILTIN_EXPERT, EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG } from "./catalog.ts";
 import { parseTaskMaterials, MAX_TOTAL_MATERIAL_BYTES } from "./materials.ts";
 import { getTaskArtifact } from "./worker.ts";
 import { panoramaCheckpointJsonl } from "./panorama-checkpoint.ts";
@@ -28,10 +28,14 @@ function body(req: FastifyRequest): Record<string, unknown> {
 }
 
 async function seedBuiltin() {
+  // The one-layer expert keeps its row, its skill text and its worker, but the employee platform no
+  // longer offers it: its status is `hidden`, so the catalog drops it and no new task starts on it.
+  // The conflict branch writes the status back, so an already deployed `available` row flips on the
+  // next seed.
   await sql`INSERT INTO member_experts(slug, owner_id, name, description, version, skill_md, manifest, status, missing_dependencies)
-    VALUES (${BUILTIN_EXPERT.slug}, NULL, ${BUILTIN_EXPERT.name}, ${BUILTIN_EXPERT.description}, ${BUILTIN_EXPERT.version}, ${BUILTIN_EXPERT.skillMd}, ${sql.json({ tools: ["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"] })}, 'available', ${sql.array(BUILTIN_EXPERT.missingDependencies)}::text[])
+    VALUES (${BUILTIN_EXPERT.slug}, NULL, ${BUILTIN_EXPERT.name}, ${BUILTIN_EXPERT.description}, ${BUILTIN_EXPERT.version}, ${BUILTIN_EXPERT.skillMd}, ${sql.json({ tools: ["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"] })}, ${HIDDEN_EXPERT_STATUS}, ${sql.array(BUILTIN_EXPERT.missingDependencies)}::text[])
     ON CONFLICT(slug) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, version=EXCLUDED.version,
-      skill_md=EXCLUDED.skill_md, manifest=EXCLUDED.manifest, missing_dependencies=EXCLUDED.missing_dependencies`;
+      skill_md=EXCLUDED.skill_md, manifest=EXCLUDED.manifest, status=EXCLUDED.status, missing_dependencies=EXCLUDED.missing_dependencies`;
   await sql`INSERT INTO member_experts(slug, owner_id, name, description, version, skill_md, manifest, status, missing_dependencies)
     VALUES (${PANORAMA_EXPERT.slug}, NULL, ${PANORAMA_EXPERT.name}, ${PANORAMA_EXPERT.description}, ${PANORAMA_EXPERT.version}, ${PANORAMA_EXPERT.skillMd}, ${sql.json({ tools: ["fuzzy_search_company_list", "get_company_profile", "get_direct_investment", "get_company_shareholder", "get_company_can_rev", "get_history_company_name", "get_company_annual_report_base_info", "get_company_annual_report_investment_info"] })}, 'available', ${sql.array(PANORAMA_EXPERT.missingDependencies)}::text[])
     ON CONFLICT(slug) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, version=EXCLUDED.version,
@@ -48,7 +52,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     await seedBuiltin();
     const experts = await sql<{ slug: string; name: string; description: string; version: string; status: string; missing_dependencies: string[]; execution_mode: string; created_at: Date }[]>`
       SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${PANORAMA_EXPERT_SLUG} THEN 'xinhua_panorama' WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
-      WHERE status = 'available' OR owner_id = ${user.id} OR ${user.role === "admin"}
+      WHERE status <> ${HIDDEN_EXPERT_STATUS} AND (status = 'available' OR owner_id = ${user.id} OR ${user.role === "admin"})
       ORDER BY (slug = ${PANORAMA_EXPERT_SLUG}) DESC, (slug = ${EXPERT_SLUG}) DESC, created_at DESC`;
     return { experts };
   });
@@ -101,7 +105,9 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "expert_material_invalid" }); }
     const experts = typeof slug === "string" ? await sql<{ status: string; manifest: { tools?: string[] } }[]>`SELECT status, manifest FROM member_experts WHERE slug=${slug}` : [];
     const expert = experts[0];
-    if (!expert || expert.status !== "available") return reply.code(404).send({ error: expert ? "expert_dependencies_missing" : "expert_not_found" });
+    // A hidden builtin is not offered as a catalog entry, so it reads as absent: it starts no task.
+    const hidden = (typeof slug === "string" && HIDDEN_BUILTIN_SLUGS.has(slug)) || expert?.status === HIDDEN_EXPERT_STATUS;
+    if (hidden || !expert || expert.status !== "available") return reply.code(404).send({ error: hidden || !expert ? "expert_not_found" : "expert_dependencies_missing" });
     const mode = slug === EXPERT_SLUG ? "xinhua_trial" : slug === PANORAMA_EXPERT_SLUG ? "xinhua_panorama" : executionMode(expert.manifest);
     if (mode === "xinhua_trial" && companyName.length < 2) return reply.code(400).send({ error: "company_name_required" });
     if (mode === "xinhua_panorama" && companyName.length < 2) return reply.code(400).send({ error: "company_name_required" });

@@ -8,7 +8,7 @@ import { buildApp } from "../../../apps/api/src/app.ts";
 import { SERVER_MODULES } from "../../../site/modules/server.ts";
 import { tag } from "../../../tests/setup.ts";
 import { createPanoramaCheckpoint, panoramaCheckpointJsonl } from "../experts/panorama-checkpoint.ts";
-import { PANORAMA_EXPERT_SLUG } from "../experts/catalog.ts";
+import { PANORAMA_EXPERT_SLUG, EXPERT_SLUG } from "../experts/catalog.ts";
 
 test("the panorama expert is published, needs a confirmed entity and keeps its collection ledger", async t => {
   installModules(SERVER_MODULES);
@@ -30,7 +30,7 @@ test("the panorama expert is published, needs a confirmed entity and keeps its c
   assert.equal(panorama.execution_mode, "xinhua_panorama");
   assert.equal(panorama.status, "available");
   assert.ok(panorama.name.includes("对外投资全景图"));
-  assert.ok(experts.some(expert => expert.execution_mode === "xinhua_trial"), "一层对外投资核查仍然可用");
+  assert.ok(!experts.some(expert => expert.slug === EXPERT_SLUG), "一层对外投资核查已从目录隐藏");
 
   const withoutName = await app.inject({ method: "POST", url: "/api/v1/membership/expert-tasks", headers: { cookie, ...common, "idempotency-key": randomUUID() }, payload: { slug: PANORAMA_EXPERT_SLUG } });
   assert.equal(withoutName.statusCode, 400);

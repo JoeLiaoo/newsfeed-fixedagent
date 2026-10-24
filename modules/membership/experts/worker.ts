@@ -3,7 +3,7 @@ import { z } from "zod";
 import { chatJson } from "@aihot/backend/providers/llm";
 import { redactMembershipTaskResponses } from "@aihot/backend/providers/receipts";
 import { sql, type Db } from "@aihot/backend/db";
-import { BUILTIN_EXPERT, EXPERT_SLUG, PANORAMA_EXPERT_SLUG, PANORAMA_TOOL_LABELS, XINHUA_BASE_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
+import { BUILTIN_EXPERT, EXPERT_SLUG, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, PANORAMA_TOOL_LABELS, XINHUA_BASE_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
 import { ExpertProviderError, withXinhua, type XinhuaCall } from "./xinhua.ts";
 import { candidateSearchOutcome, mapCompanyCandidates, mapInvestmentEvidence, parseInvestmentPage, querySelectedCompanyProfile, relaxedCompanyKeywords, textField, type EntityCandidate } from "./data.ts";
 import { collectProviderPages, investmentRowIdentity } from "../provider-pages.ts";
@@ -256,7 +256,7 @@ async function panoramaNarrative(task: TaskRow, run: PanoramaRunResult, options:
 }
 
 async function runCustom(task: TaskRow, leaseToken: string) {
-  const rows = await sql<{ skill_md: string; name: string; manifest: { tools?: string[] } }[]>`SELECT skill_md, name, manifest FROM member_experts WHERE slug = ${task.expert_slug} AND status = 'available'`;
+  const rows = await sql<{ skill_md: string; name: string; manifest: { tools?: string[] } }[]>`SELECT skill_md, name, manifest FROM member_experts WHERE slug = ${task.expert_slug} AND status IN ('available', ${HIDDEN_EXPERT_STATUS})`;
   if (!rows[0]) throw new Error("expert_unavailable");
   const notes = typeof task.input.notes === "string" ? task.input.notes : "";
   const materials = await taskMaterials(task, leaseToken);
@@ -297,7 +297,9 @@ export async function runExpertTask(taskId: string) {
   try {
     let report: string;
     const experts = await sql<{ manifest: { tools?: string[] }; status: string }[]>`SELECT manifest,status FROM member_experts WHERE slug=${task.expert_slug}`;
-    if (!experts[0] || experts[0].status !== "available") throw new Error("expert_unavailable");
+    // A hidden expert still runs the tasks it was given before it was hidden; only new tasks are
+    // refused, and the refusal happens where the task is created.
+    if (!experts[0] || (experts[0].status !== "available" && experts[0].status !== HIDDEN_EXPERT_STATUS)) throw new Error("expert_unavailable");
     const toolMode = task.expert_slug === EXPERT_SLUG || task.expert_slug === PANORAMA_EXPERT_SLUG || executionMode(experts[0].manifest) === "xinhua_trial" || executionMode(experts[0].manifest) === "xinhua_panorama";
     if (toolMode && !task.selected_entity) {
       await sql`UPDATE member_expert_tasks SET stage='entity_search',updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
