@@ -243,7 +243,7 @@ export default function KnowledgeBasePage() {
             </div>
             <p className="mt-1 text-xs text-ink-3">{TASK_STAGE_LABELS[task.stage] ?? task.stage} · v{task.versionNo} · {task.fileName} · {task.uploaderName} · {new Date(task.createdAt).toLocaleString("zh-CN")} · 尝试 {task.attemptCount} 次</p>
             {task.errorCode && <p className="mt-2 text-sm text-hot">{TASK_ERRORS[task.errorCode] ?? task.errorMessage ?? task.errorCode}</p>}
-            {task.state === "failed" && <div className="mt-3"><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void retry(task.id)}>重试</Button></div>}
+            {task.state === "failed" && task.attemptCount < 5 && <div className="mt-3"><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void retry(task.id)}>重试</Button></div>}
           </li>)}</ul>}
         </CardContent>
       </Card>

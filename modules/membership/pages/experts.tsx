@@ -50,7 +50,7 @@ export default function ExpertsPage() {
               <span className="text-sm leading-relaxed text-ink-3">{expert.description}</span>
               <span className="mt-auto flex flex-wrap items-center gap-2 pt-3 text-xs text-ink-3">
                 <Badge variant={expert.status === "available" ? "success" : "warning"}>{expert.status === "available" ? "可运行" : "缺少依赖"}</Badge>
-                <span>{expert.execution_mode === "text_only" ? "纯文本模式（DeepSeek）" : "新华财经适配试运行"} · v{expert.version}</span>
+                <span>{expert.execution_mode === "text_only" ? "纯文本模式（DeepSeek）" : "新华财经 · 一层投资"} · v{expert.version}</span>
                 {expert.missing_dependencies.length > 0 && <span>· {expert.missing_dependencies.join("、")}</span>}
               </span>
             </IntentLink>

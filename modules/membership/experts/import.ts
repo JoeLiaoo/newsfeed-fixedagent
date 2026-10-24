@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { unzipSync } from "fflate";
-import { XINHUA_ALLOWED_TOOLS } from "./catalog.ts";
+import { XINHUA_USED_TOOLS } from "./catalog.ts";
 
 const MAX_ARCHIVE_BYTES = 1_000_000;
 const MAX_UNPACKED_BYTES = 2_000_000;
@@ -116,16 +116,22 @@ function dependencies(text: string, manifest: Record<string, unknown>) {
   const dependencyPattern = /^[a-z0-9][a-z0-9._:/-]{0,119}(?:@(?:\^|~|>=|<=|=)?\d+\.\d+\.\d+)?$/i;
   if ([...explicitTools, ...explicitSkills].some(dependency => !dependencyPattern.test(dependency))) throw new Error("manifest_dependencies_invalid");
   const metadata = parseFrontmatter(text);
-  const platformTools = new Set<string>(XINHUA_ALLOWED_TOOLS);
+  const platformTools = new Set<string>(XINHUA_USED_TOOLS);
+  const hasCompleteAdapter = XINHUA_USED_TOOLS.every(name => explicitTools.includes(name));
   const required = new Set([
-    ...explicitTools.map(name => platformTools.has(name) ? `工具依赖（纯文本模式不可用）：${name}` : `未知工具依赖：${name}`),
+    ...explicitTools.filter(name => !platformTools.has(name)).map(name => `尚未适配的工具依赖：${name}`),
+    ...(explicitTools.length && !hasCompleteAdapter ? ["新华财经适配需要同时声明主体检索、企业画像和直接投资三个工具"] : []),
     ...explicitSkills.map(name => name.split("@")[0]!.toLowerCase() === metadata.name.toLowerCase() ? `循环技能依赖：${name}` : `未发布的技能依赖：${name}`),
   ]);
-  if (/悟道|wudao_mcp_gateway/i.test(text)) required.add("悟道 MCP (wudao_mcp_gateway)");
-  if (/skills?\/(?:10|11|12)\b|10\/11\/12 专项 skill/i.test(text)) required.add("reference/SKILL.md 所引用的 10/11/12 专项 skill");
+  if (/悟道|wudao_mcp_gateway/i.test(text)) required.add("未适配的 MCP 工具依赖");
+  if (/skills?\/(?:10|11|12)\b|10\/11\/12 专项 skill/i.test(text)) required.add("未发布的专项 skill");
   if (/企查查|qichacha/i.test(text)) required.add("企查查 MCP（尚未接入）");
   if (/天眼查|tianyancha/i.test(text)) required.add("天眼查 MCP（已停用）");
   return [...required];
+}
+
+export function executionMode(manifest: { tools?: string[] }): "xinhua_trial" | "text_only" {
+  return XINHUA_USED_TOOLS.every(name => manifest.tools?.includes(name)) ? "xinhua_trial" : "text_only";
 }
 
 export function parseSkillMarkdown(text: string): ImportedSkill {

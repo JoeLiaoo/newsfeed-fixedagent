@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseSkillMarkdown, parseSkillUpload } from "../experts/import.ts";
+import { parseSkillMarkdown, parseSkillUpload, executionMode } from "../experts/import.ts";
+import { parseTaskMaterials, materialContext, MAX_MATERIAL_BYTES } from "../experts/materials.ts";
 import { strToU8, zipSync } from "fflate";
 import { mapInvestmentEvidence, parseInvestmentPage, querySelectedCompanyProfile, verifySelectedEntity } from "../experts/data.ts";
 import { investmentEvidence } from "../experts/worker.ts";
@@ -85,7 +86,7 @@ test("mock Xinhua pagination reports all pages and flags a provider that repeats
 test("skill dependencies are structured and unsupported tools and skills block text-only execution", () => {
   const skill = parseSkillMarkdown(`---\nname: Research\ndescription: Research task\ndependencies:\n  tools:\n    - get_company_profile\n  skills:\n    - investment-review@^1.0.0\n---\nPlease research.\n`);
   assert.deepEqual(skill.manifest, { tools: ["get_company_profile"], skills: ["investment-review@^1.0.0"] });
-  assert.deepEqual(skill.missingDependencies, ["工具依赖（纯文本模式不可用）：get_company_profile", "未发布的技能依赖：investment-review@^1.0.0"]);
+  assert.deepEqual(skill.missingDependencies, ["新华财经适配需要同时声明主体检索、企业画像和直接投资三个工具", "未发布的技能依赖：investment-review@^1.0.0"]);
   const cycle = parseSkillMarkdown(`---\nname: Research\ndescription: Research task\nskills:\n  - research@1.0.0\n---\n`);
   assert.deepEqual(cycle.missingDependencies, ["循环技能依赖：research@1.0.0"]);
   assert.throws(() => parseSkillMarkdown(`---\nname: Unknown\ndescription: Unknown dependency\nrequires:\n  mcp: any-tool\n---\n`), /skill_dependencies_invalid/);
@@ -109,7 +110,35 @@ test("ZIP import carries SKILL frontmatter dependencies into the normalized pack
   const zipped=parseSkillUpload("tool-research.zip",Buffer.from(archive).toString("base64"));
   assert.deepEqual(zipped.manifest,single.manifest);
   assert.deepEqual(zipped.missingDependencies,single.missingDependencies);
-  assert.deepEqual(zipped.missingDependencies,["工具依赖（纯文本模式不可用）：get_direct_investment"]);
+  assert.deepEqual(zipped.missingDependencies,["新华财经适配需要同时声明主体检索、企业画像和直接投资三个工具"]);
   const unsafe=zipSync({"manifest.json":strToU8('{"unknownDependencyField":[]}'),"SKILL.md":strToU8(skill)});
   assert.throws(()=>parseSkillUpload("unknown.zip",Buffer.from(unsafe).toString("base64")),/manifest_dependencies_invalid/);
+});
+
+test("only the complete authorized tool adapter can run; extra tools and skills remain blocked", () => {
+  const header = "---\nname: Shared research\ndescription: Controlled tools\n";
+  const tools = "tools:\n  - fuzzy_search_company_list\n  - get_company_profile\n  - get_direct_investment\n";
+  const complete = parseSkillMarkdown(`${header}${tools}---\nUse the provided evidence.`);
+  assert.deepEqual(complete.missingDependencies, []);
+  assert.equal(executionMode(complete.manifest), "xinhua_trial");
+  for (const extra of ["  - arbitrary_network_tool\n", "skills:\n  - unpublished-research\n"]) {
+    assert.ok(parseSkillMarkdown(`${header}${tools}${extra}---\nResearch.`).missingDependencies.length);
+  }
+});
+
+test("task materials reject unsafe uploads and extract bounded text as data", async () => {
+  const upload = (fileName: string, bytes: Buffer) => ({ fileName, base64: bytes.toString("base64") });
+  const markdown = Buffer.from("# User evidence\n\n" + "fixture text ".repeat(1500));
+  const [parsed] = parseTaskMaterials([upload("evidence.md", markdown)]);
+  const [context] = await materialContext([{ ...parsed!, body: parsed!.bytes }]);
+  assert.ok(context!.text.length > 0 && context!.text.length <= 12_000);
+  assert.equal(context!.sha256, parsed!.sha256);
+  assert.equal(parseTaskMaterials([upload("maximum.md", Buffer.alloc(MAX_MATERIAL_BYTES, 97))])[0]?.bytes.length, MAX_MATERIAL_BYTES);
+  assert.throws(() => parseTaskMaterials([{ fileName: "bad.md", base64: "a=b=" }]), /expert_material_invalid/);
+  assert.throws(() => parseTaskMaterials([upload("../evidence.md", markdown)]), /expert_material_invalid/);
+  assert.throws(() => parseTaskMaterials([upload("evidence.md", markdown), upload("copy.md", markdown)]), /expert_material_duplicate/);
+  assert.throws(() => parseTaskMaterials([upload("empty.md", Buffer.alloc(0))]), /expert_material_too_large/);
+  assert.throws(() => parseTaskMaterials([upload("large.md", Buffer.alloc(MAX_MATERIAL_BYTES + 1, 97))]), /expert_material_too_large/);
+  assert.throws(() => parseTaskMaterials([upload("image.pdf", Buffer.from([0, 1, 2, 3]))]), /expert_material_format_unsupported/);
+  assert.throws(() => parseTaskMaterials(Array(4).fill(upload("evidence.md", markdown))), /expert_material_count_invalid/);
 });

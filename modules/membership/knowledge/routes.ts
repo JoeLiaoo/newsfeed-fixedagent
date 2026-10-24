@@ -8,7 +8,7 @@ import type { MemberSession } from "../server.ts";
 import { WIKI_QUEUE } from "./queue.ts";
 import { answerQuestion } from "./answer.ts";
 import { routePages, type RoutableCitation, type RoutablePage } from "./routing.ts";
-import { FORMAT_MEDIA_TYPES, freshnessTier, FRESHNESS_LABELS, TASK_ERRORS, maxFileBytes } from "./catalog.ts";
+import { FORMAT_MEDIA_TYPES, freshnessTier, FRESHNESS_LABELS, MAX_WIKI_ATTEMPTS, TASK_ERRORS, maxFileBytes } from "./catalog.ts";
 import { DEFAULT_BASE_ID, MAX_BASES, ensureDefaultBase, newBaseId, resolveBase } from "./bases.ts";
 import { checksum, versionBody } from "./worker.ts";
 import { withdrawDocumentPages } from "./publish.ts";
@@ -38,7 +38,9 @@ function text(value: unknown, max: number): string | null {
 }
 
 function isDate(value: string | null): value is string {
-  return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if (!value || !/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 /**
@@ -214,8 +216,9 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const author = text(payload.author, 120);
     const organization = text(payload.organization, 120);
     const kind = text(payload.kind, 60);
-    const date = text(payload.date, 10);
-    if (date && !isDate(date)) return reply.code(400).send({ error: "knowledge_date_invalid", message: "材料日期需为 YYYY-MM-DD。" });
+    const date = typeof payload.date === "string" ? payload.date.trim() || null : null;
+    if (date && !isDate(date)) return reply.code(400).send({ error: "knowledge_date_invalid", message: "材料日期需为真实有效的 YYYY-MM-DD 日期。" });
+    if (payload.date !== undefined && payload.date !== null && typeof payload.date !== "string") return reply.code(400).send({ error: "knowledge_date_invalid", message: "材料日期需为真实有效的 YYYY-MM-DD 日期。" });
     const requestedDocument = text(payload.documentId, 64);
     const base = await resolveBase(text(payload.baseId, 64));
     if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
@@ -319,7 +322,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const changed = await sql.begin(async tx => {
       await tx`SELECT id FROM member_users WHERE id=${user.id} FOR UPDATE`;
       const rows = await tx`UPDATE member_wiki_tasks SET state='queued', stage='queued', error_code=NULL, error_message=NULL, updated_at=now(), finished_at=NULL, lease_token=NULL, lease_expires_at=NULL
-        WHERE id=${id} AND uploader_id=${user.id} AND state='failed' AND attempt_count < 5 RETURNING id`;
+        WHERE id=${id} AND uploader_id=${user.id} AND state='failed' AND attempt_count < ${MAX_WIKI_ATTEMPTS} RETURNING id`;
       if (!rows.length) return false;
       await enqueueOn(WIKI_QUEUE, { taskId: id }, { singletonKey: `${id}-${Date.now()}` }, tx);
       await tx`INSERT INTO member_wiki_audit_events(id, actor_id, event_type, task_id, detail) VALUES (${randomUUID()}, ${user.id}, 'knowledge.build.retried', ${id}, ${tx.json({})})`;
