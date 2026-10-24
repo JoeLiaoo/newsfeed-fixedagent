@@ -49,3 +49,10 @@
 - `node --import ./tests/standalone.ts --test modules/membership/tests/gp-core.standalone.test.ts`：9 项通过。
 - `node scripts/check-doc-links.ts`：358 个本地链接通过。
 - `git diff --check`：通过。
+
+
+## 自动复审验证补充
+
+- 复审确认冲突更新保护条件同时覆盖别名、来源与角色，保留作者的别名归一化和日期展示改动。
+- 新增真实导入脚本的 PostgreSQL 回归：首次导入 9 项均待核；未复核候选可更新；已复核候选、active、paused 和已有快照实体整行不变；再次重跑幂等。
+- 本地无 PostgreSQL，新增数据库用例交由 PR 的 PostgreSQL CI 执行；待最新 head CI 通过后合并。业务现场验收与生产部署仍未执行，P3 勾选不变。
