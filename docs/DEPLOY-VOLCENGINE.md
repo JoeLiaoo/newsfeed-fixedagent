@@ -120,6 +120,14 @@
 
 本轮只在一次性本地库完成 `pg_dump`/`pg_restore` 演练；生产实例、真实数据和员工会话未检查，以上条目仍是待执行步骤。
 
+### 主线（PR #50–#54）发布（2026-10-24）
+
+- `main` 尖端提交 `8e20afbdb6d3dc5a8f1553ba4db021c1ef65d79e` 已发布到 `/opt/citic-newsfeed/releases/8e20afbdb6d3dc5a8f1553ba4db021c1ef65d79e`。该提交包含已合并的 PR #50（全景图与 GP 候选加固）、#51（全景图加固）、#52（员工端已投 GP 直投项目清单 `/projects/invested-gp`）、#53（GP 管理队列加固）与 #54（关注赛道匹配的 GP 投资 digest）；未合并任何开放 PR。
+- 发布前确认线上仍为 PR #48 的 `9e116bd2f14bb495c022db4995356509d406c47a`；发布前备份 `.env.before-release-8e20afb-20261024` 与 `backups/db-before-8e20afb-20261024.dump`，权限均为 `0600`，转储经 `pg_restore --list` 检查可读（未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变。
+- **本轮无新增迁移**：setup 输出 `database is up to date`，`schema_migrations` 仍为 164 条、最大 `0190`；信源未重复写入。迁移先于新代码上线，setup 退出码 0 之后才重建 web、API、worker。
+- web、API、worker 运行 `citic-newsfeed:8e20afbdb6d3dc5a8f1553ba4db021c1ef65d79e`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200；`/projects/invested-gp`、`/experts` 按会话鉴权 302 跳转登录页，`/api/v1/membership/gp-projects` 未登录返回 401 `login_required`。
+- **未验收**：生产库 `member_gp_investments` 与 `member_gp_watchlist` 均为 0 行，员工登录后的已投 GP 清单预计为空，GP 数据落地与员工验收待完成。详见[主线发布日志](logs/2026-10-24-P4-main-gp-projects-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
