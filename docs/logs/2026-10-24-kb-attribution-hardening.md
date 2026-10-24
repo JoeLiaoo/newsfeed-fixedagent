@@ -60,4 +60,4 @@
 - 下一步：
   - 复审本 PR；本 PR 不合并、不部署。
   - 合并后按常规发布流程发 api 与 web（无新增迁移），再用两份不同机构、不同日期的真实材料跑一次构建，核对：两份材料在目标页并列、缺失项显示「未知」、时效按材料自己的日期给出。
-  - PR：见本节末尾（推送后补记）。
+  - PR：[#55](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/55)（`feat/kb-attribution-harden-v1` → `main`，代码提交 `6af2b75`）。本 PR 不合并、不部署。
