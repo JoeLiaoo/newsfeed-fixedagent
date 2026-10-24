@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { sql } from "@aihot/backend/db";
 import { enqueueOn } from "@aihot/backend/jobs/queue";
 import { GP_QUEUE } from "./queue.ts";
-import { GP_TAGS, canReviewInvestment, validSectorTags } from "./core.ts";
+import { GP_TAGS, canReviewInvestment, normalizeAliases, validSectorTags } from "./core.ts";
 import type { MemberSession } from "../server.ts";
 
 type Auth = (req:FastifyRequest)=>Promise<MemberSession|null>;
@@ -31,8 +31,9 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const input=body(req);
     const name=typeof input.name==="string" ? input.name.trim() : "";
     const source=typeof input.sourceRef==="string" ? input.sourceRef.trim() : "";
-    const aliases=Array.isArray(input.aliases)&&input.aliases.length<=20&&input.aliases.every(v=>typeof v==="string"&&v.length<=180) ? input.aliases as string[] : [];
+    const aliases=normalizeAliases(input.aliases ?? []);
     if(name.length<3||name.length>180||source.length<8||source.length>1000) return reply.code(400).send({error:"invalid_gp_candidate"});
+    if(!aliases) return reply.code(400).send({error:"invalid_aliases"});
     const inserted=await sql`INSERT INTO member_gp_watchlist(id,canonical_name,aliases,source_ref) VALUES(${randomUUID()},${name},${aliases},${source}) ON CONFLICT(canonical_name) DO NOTHING RETURNING id`;
     return inserted.length ? {id:inserted[0].id} : reply.code(409).send({error:"duplicate_gp"});
   });
@@ -43,7 +44,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const entityId=typeof input.entityId==="string"?input.entityId.trim():"";
     const creditCode=typeof input.creditCode==="string"?input.creditCode.trim():"";
     const source=typeof input.sourceRef==="string"?input.sourceRef.trim():"";
-    const aliases=Array.isArray(input.aliases)&&input.aliases.length<=20&&input.aliases.every(v=>typeof v==="string"&&v.length<=180)?[...new Set(input.aliases as string[])]:null;
+    const aliases=normalizeAliases(input.aliases);
     if(!aliases) return reply.code(400).send({error:"invalid_aliases"});
     if(!["candidate","active","paused"].includes(String(status))||!["manager","gp","fund"].includes(String(role))||
        entityId.length>128||creditCode.length>32||source.length<8||source.length>1000||
@@ -70,7 +71,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
   });
   app.get("/api/v1/membership/admin/gp-observations",async(req,reply)=>{
     if(!await admin(req,reply)) return;
-    const observations=await sql`SELECT i.id,i.gp_id,g.canonical_name AS gp_name,i.investee_name,i.first_seen_at,i.investment_date,i.data_date,s.captured_at AS snapshot_captured_at,
+    const observations=await sql`SELECT i.id,i.gp_id,g.canonical_name AS gp_name,i.investee_name,i.first_seen_at,i.investment_date,i.provider_updated_at,i.data_date,s.captured_at AS snapshot_captured_at,
       i.status,i.sector_tags,i.sector_reason,i.classification_state,i.approved_event_date,i.approved_source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       LEFT JOIN member_gp_snapshots s ON s.id=i.source_snapshot_id ORDER BY i.first_seen_at DESC LIMIT 300`;

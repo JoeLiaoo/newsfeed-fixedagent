@@ -1,5 +1,6 @@
 import { after,test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { sql,closeDb } from "@aihot/backend/db";
 
@@ -50,4 +51,35 @@ test("P3 PostgreSQL migration creates durable identity, evidence and delivery le
   const [cursor]=await sql<{last_at:Date}[]>`SELECT max(window_end_at) AS last_at
     FROM member_notification_outbox WHERE user_id=${user} AND kind='gp'`;
   assert.equal(cursor.last_at.toISOString(),"2026-10-22T01:00:00.000Z");
+});
+
+
+test("candidate reseeding updates only unreviewed candidates and preserves verified evidence", async () => {
+  const seed = () => execFileSync(process.execPath, ["scripts/seed-gp-candidates.ts"], { env: process.env, stdio: "pipe" });
+  seed();
+  const initial = await sql`SELECT * FROM member_gp_watchlist WHERE id LIKE 'candidate-%' ORDER BY id`;
+  assert.equal(initial.length, 9);
+  assert.ok(initial.every(row => row.status === "candidate"));
+  const reviewer = randomUUID();
+  await sql`INSERT INTO member_users(id,username,real_name,password_hash,status,role)
+    VALUES(${reviewer},${"seed-review-"+reviewer},'Test Admin','test-hash','active','admin')`;
+  // Candidate 1 is still unreviewed; 2 is reviewed, 3 active, 4 paused, 5 has a snapshot.
+  await sql`UPDATE member_gp_watchlist SET aliases=ARRAY['Manual alias'],source_ref='https://example.org/manual',entity_role='fund'
+    WHERE id IN ('candidate-001','candidate-002','candidate-003','candidate-004','candidate-005')`;
+  await sql`UPDATE member_gp_watchlist SET reviewed_by=${reviewer},reviewed_at=now() WHERE id='candidate-002'`;
+  await sql`UPDATE member_gp_watchlist SET status='active',entity_role='gp',entity_id='confirmed',reviewed_by=${reviewer},reviewed_at=now() WHERE id='candidate-003'`;
+  await sql`UPDATE member_gp_watchlist SET status='paused' WHERE id='candidate-004'`;
+  await sql`INSERT INTO member_gp_snapshots(id,gp_id,complete,fetched_count,row_count) VALUES(${randomUUID()},'candidate-005',true,0,0)`;
+  const before = await sql`SELECT * FROM member_gp_watchlist WHERE id IN ('candidate-002','candidate-003','candidate-004','candidate-005') ORDER BY id`;
+  seed();
+  const [updated] = await sql`SELECT * FROM member_gp_watchlist WHERE id='candidate-001'`;
+  assert.deepEqual(updated.aliases, initial[0].aliases);
+  assert.equal(updated.source_ref, initial[0].source_ref);
+  assert.equal(updated.entity_role, initial[0].entity_role);
+  assert.equal(updated.status, 'candidate');
+  const after = await sql`SELECT * FROM member_gp_watchlist WHERE id IN ('candidate-002','candidate-003','candidate-004','candidate-005') ORDER BY id`;
+  assert.deepEqual(after, before, 'Reviewed fields, reviewer and historical states must be preserved');
+  const once = await sql`SELECT * FROM member_gp_watchlist WHERE id LIKE 'candidate-%' ORDER BY id`;
+  seed();
+  assert.deepEqual(await sql`SELECT * FROM member_gp_watchlist WHERE id LIKE 'candidate-%' ORDER BY id`, once);
 });

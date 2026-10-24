@@ -1,11 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeInvestment,uniqueInvestments,validSectorTags,matchInterests,offDay,splitMessageLines,canReviewInvestment,dueNotificationKinds } from "../gp/core.ts";
+import { normalizeInvestment,normalizeAliases,uniqueInvestments,validSectorTags,matchInterests,offDay,splitMessageLines,canReviewInvestment,dueNotificationKinds } from "../gp/core.ts";
 
 test("data source update time is not treated as deal date",()=>{
   const row=normalizeInvestment({company_name:"Example",company_id:"abc",include_date:"2026-10-22"});
   assert.equal(row?.investmentDate,null);
   assert.equal(row?.updatedAt,"2026-10-22");
+});
+test("discovery, provider update, and actual investment dates remain separate",()=>{
+  const row=normalizeInvestment({company_name:"Example",data_date:"2026-10-20",update_time:"2026-10-22",invest_date:"2024-03-01"});
+  assert.equal(row?.dataDate,"2026-10-20");
+  assert.equal(row?.updatedAt,"2026-10-22");
+  assert.equal(row?.investmentDate,"2024-03-01");
+  const missingDealDate=normalizeInvestment({company_name:"Example",data_date:"2026-10-20",update_time:"2026-10-22"});
+  assert.equal(missingDealDate?.investmentDate,null);
+});
+test("candidate aliases are trimmed and deduplicated across Unicode and spacing variants",()=>{
+  assert.deepEqual(normalizeAliases(["  元禾璞华  ","元禾 璞华","ＡＢＣ","ABC"," "]),["元禾璞华","ＡＢＣ"]);
+  assert.equal(normalizeAliases(["x".repeat(181)]),null);
 });
 test("duplicate investees collapse, unidentifiable evidence fails completeness",()=>{
   const result=uniqueInvestments([{company_name:"甲",company_id:"1"},{company_name:"甲",company_id:"1"},{update_time:"today"}]);

@@ -10,7 +10,7 @@ import { DIRECTIONS } from "../catalog.ts";
 const GP_TAGS = DIRECTIONS.filter(d => d.name !== "战略配售").flatMap(d => [...d.tags]);
 
 type GP={id:string;canonical_name:string;aliases:string[];entity_id:string|null;credit_code:string|null;entity_role:string;status:string;source_ref:string;last_synced_at:string|null;last_error:string|null};
-type Observation={id:string;gp_name:string;investee_name:string;status:string;sector_tags:string[];sector_reason:string|null;data_date:string|null;first_seen_at:string;snapshot_captured_at:string|null;approved_source_url:string|null;approved_event_date:string|null};
+type Observation={id:string;gp_name:string;investee_name:string;status:string;sector_tags:string[];sector_reason:string|null;data_date:string|null;provider_updated_at:string|null;investment_date:string|null;first_seen_at:string;snapshot_captured_at:string|null;approved_source_url:string|null;approved_event_date:string|null};
 const prefix="/api/v1/membership/admin";
 
 export default function GpAdminPage(){
@@ -72,7 +72,8 @@ export default function GpAdminPage(){
     <Card><CardHeader><CardTitle>新增关系核验</CardTitle></CardHeader><CardContent className="grid gap-4">
       {rows.map(row=><form key={row.id} onSubmit={e=>void review(e,row.id)} className="grid gap-3 rounded-control border border-line-soft p-4">
         <div className="font-medium">{row.gp_name} → {row.investee_name}</div>
-        <p className="text-sm text-ink-3">{row.status} · 首次发现 {beijingStamp(row.first_seen_at)} · 快照 {row.snapshot_captured_at?beijingStamp(row.snapshot_captured_at):"未关联"} · 数据日期 {row.data_date||"未提供"}</p>
+        <p className="text-sm text-ink-3">{row.status} · 首次发现 {beijingStamp(row.first_seen_at)} · 入库快照 {row.snapshot_captured_at?beijingStamp(row.snapshot_captured_at):"未关联"}</p>
+        <p className="text-sm text-ink-3">接口数据日期 {row.data_date||"未提供"} · 接口更新时间 {row.provider_updated_at||"未提供"} · 投资日期 {row.investment_date||"来源未提供"}</p>
         <fieldset className="flex flex-wrap gap-3"><legend className="mb-1 text-sm">细分赛道</legend>
           {GP_TAGS.map(tag=><label key={tag} className="inline-flex items-center gap-1 text-xs"><Checkbox name="tags" value={tag} defaultChecked={row.sector_tags.includes(tag)}/>{tag}</label>)}
         </fieldset>
