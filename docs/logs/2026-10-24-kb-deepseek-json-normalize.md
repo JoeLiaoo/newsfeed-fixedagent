@@ -48,4 +48,4 @@
 - 下一步：
   - 合并后按常规发布流程发 api 与 worker（无新增迁移），确认默认库在页面上显示为「知识库示例」。
   - 用一份真实材料跑一次构建，确认 DeepSeek 在 json 模式下不再返回空草稿。
-  - PR：<待补链接>。
+  - PR：[#46](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/46)（`fix/knowledge-deepseek-json-normalize` → `main`）。
