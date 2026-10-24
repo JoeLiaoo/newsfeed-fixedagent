@@ -2,7 +2,7 @@
 
 - Agent：Codex
 - 对应任务：维护任务（不对应 P0–P5 验收项）
-- 完成状态：代码与本地验证完成；PR 状态待回填
+- 完成状态：PR #53 已打开；GitHub 检查进行中
 
 ## 本次改动
 
@@ -18,4 +18,4 @@
 ## 风险与交接
 
 - 已知限制／缺失依赖：列表使用 offset 分页；高并发新增/更新时跨页内容可能变化。同步接口返回“已排队”只证明队列接受请求，不代表同步成功；结果详情仍通过名单的最近同步时间与错误码查看。
-- 下一步：提交并推送分支，开启 PR 到 `main`；不合并、不部署。CI 结果及 PR URL 在提交后补记。
+- 下一步：PR [#53](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/53) 已指向 `main`，开启时 head 为 `da006fe8bf0aef2c63f42ce8003a387a2cf907c0`；`quality` 排队，`links` 与 `postgres-integration` 运行中。等待最终 PR head 的检查结果；不合并、不部署。
