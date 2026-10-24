@@ -41,8 +41,13 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
   }
   app.get("/api/v1/membership/admin/gps",async(req,reply)=>{
     if(!await admin(req,reply)) return;
-    const gps=await sql`SELECT id,canonical_name,aliases,entity_id,credit_code,entity_role,status,source_ref,reviewed_at,last_synced_at,last_error FROM member_gp_watchlist ORDER BY created_at,id`;
-    return {gps};
+    const query=req.query as {limit?:string;offset?:string;status?:string};
+    const {limit,offset}=pageParams(query);
+    const status=query.status;
+    if(status&&!['candidate','active','paused'].includes(status)) return reply.code(400).send({error:'invalid_status'});
+    const rows=await sql`SELECT id,canonical_name,aliases,entity_id,credit_code,entity_role,status,source_ref,reviewed_at,last_synced_at,last_error FROM member_gp_watchlist
+      WHERE (${status??null}::text IS NULL OR status=${status??null}) ORDER BY created_at,id LIMIT ${limit+1} OFFSET ${offset}`;
+    return {gps:rows.slice(0,limit),pagination:pagination(limit,offset,rows.length)};
   });
   app.post("/api/v1/membership/admin/gps",async(req,reply)=>{
     if(!await admin(req,reply)) return;
@@ -89,11 +94,16 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
   });
   app.get("/api/v1/membership/admin/gp-observations",async(req,reply)=>{
     if(!await admin(req,reply)) return;
+    const query=req.query as {limit?:string;offset?:string;status?:string};
+    const {limit,offset}=pageParams(query);
+    const status=query.status;
+    if(status&&!['observed','verified','baseline','retracted'].includes(status)) return reply.code(400).send({error:'invalid_status'});
     const observations=await sql`SELECT i.id,i.gp_id,g.canonical_name AS gp_name,i.investee_name,i.first_seen_at,i.investment_date,i.provider_updated_at,i.data_date,s.captured_at AS snapshot_captured_at,
       i.status,i.sector_tags,i.sector_reason,i.classification_state,i.approved_event_date,i.approved_source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
-      LEFT JOIN member_gp_snapshots s ON s.id=i.source_snapshot_id ORDER BY i.first_seen_at DESC LIMIT 300`;
-    return {observations,allowedTags:GP_TAGS};
+      LEFT JOIN member_gp_snapshots s ON s.id=i.source_snapshot_id
+      WHERE (${status??null}::text IS NULL OR i.status=${status??null}) ORDER BY i.first_seen_at DESC,i.id DESC LIMIT ${limit+1} OFFSET ${offset}`;
+    return {observations:observations.slice(0,limit),pagination:pagination(limit,offset,observations.length),allowedTags:GP_TAGS};
   });
   app.patch("/api/v1/membership/admin/gp-observations/:id",async(req,reply)=>{
     const user=await admin(req,reply);if(!user) return;
@@ -105,7 +115,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const reason=typeof input.reason==="string"?input.reason.slice(0,1000):"";
     if(!tags||!["baseline","observed","verified","retracted"].includes(String(status))) return reply.code(400).send({error:"invalid_review"});
     // A new-investment assertion requires separately checked evidence; snapshots alone never qualify.
-    if(status==="verified"&&(!tags.length||!/^20\d\d-\d\d-\d\d$/.test(date)||!/^https:\/\//.test(source)))
+    if(status==="verified"&&(!tags.length||!isCalendarDate(date)||!/^https:\/\//.test(source)))
        return reply.code(400).send({error:"event_evidence_required"});
     const id=(req.params as {id:string}).id;
     const outcome=await sql.begin(async tx=>{
@@ -136,4 +146,20 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     });
     return outcome==="ok"?{ok:true}:reply.code(outcome==="not_found"?404:409).send({error:outcome});
   });
+}
+
+function pageParams(query:{limit?:string;offset?:string}) {
+  const requestedLimit=Number(query.limit??25),requestedOffset=Number(query.offset??0);
+  return {
+    limit:Number.isInteger(requestedLimit)?Math.min(100,Math.max(1,requestedLimit)):25,
+    offset:Number.isInteger(requestedOffset)?Math.min(100_000,Math.max(0,requestedOffset)):0,
+  };
+}
+function pagination(limit:number,offset:number,rowCount:number) {
+  return {limit,offset,nextOffset:rowCount>limit?offset+limit:null};
+}
+function isCalendarDate(value:string) {
+  if(!/^20\d\d-\d\d-\d\d$/.test(value)) return false;
+  const parsed=new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime())&&parsed.toISOString().slice(0,10)===value;
 }
