@@ -90,8 +90,8 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
     cookies.push((Array.isArray(setCookie) ? setCookie[0]! : setCookie!).split(";", 1)[0]!);
   }
   const answerGet = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[0]!, ...common } });
-  assert.equal(answerGet.statusCode, 405);
-  assert.equal(answerGet.headers.allow, "POST");
+  assert.equal(answerGet.statusCode, 200);
+  assert.deepEqual((await answerGet.json() as { answers: unknown[] }).answers, [], "a new employee has no answer history");
 
   // A visitor is turned away before any route runs.
   assert.equal((await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/bases", headers: common })).statusCode, 401);

@@ -9,6 +9,7 @@ import { WIKI_QUEUE } from "./queue.ts";
 import { answerQuestion } from "./answer.ts";
 import { routePages, type RoutableCitation, type RoutablePage } from "./routing.ts";
 import { FORMAT_MEDIA_TYPES, freshnessTier, FRESHNESS_LABELS, MAX_WIKI_ATTEMPTS, TASK_ERRORS, maxFileBytes } from "./catalog.ts";
+import { enrichAllCitations, enrichCitations, readCitations, readCoverage, readFreshness, readPages, toAnswerCitation, type AnswerRecord } from "./history.ts";
 import { DEFAULT_BASE_ID, MAX_BASES, baseSlugOf, ensureDefaultBase, newBaseId, resolveBase } from "./bases.ts";
 import { checksum, versionBody } from "./worker.ts";
 import { withdrawDocumentPages } from "./publish.ts";
@@ -499,9 +500,52 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       .send(material.body);
   });
 
-  app.get("/api/v1/membership/knowledge/answers", async (_req, reply) => {
+  /**
+   * The answers this employee asked in one base, newest first. An answer belongs to the base whose
+   * pages it rests on: the pages it used are recorded with it, so a base's history is the answers
+   * that read that base's pages. Only the caller's own answers are returned: an answer is the
+   * employee's own record of what they asked.
+   */
+  app.get("/api/v1/membership/knowledge/answers", async (req, reply) => {
     noStore(reply);
-    return reply.code(405).header("Allow", "POST").send({ error: "method_not_allowed", message: "请在知识库页面提交问题。" });
+    const user = await authenticate(req);
+    if (!user) return reply.code(401).send({ error: "login_required" });
+    const base = await baseOf(req);
+    if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
+    const query = typeof req.query === "object" && req.query ? req.query as { limit?: unknown; offset?: unknown } : {};
+    const isCount = (value: unknown) => value === undefined || (typeof value === "string" && /^\d+$/.test(value) && Number.isSafeInteger(Number(value)));
+    if (!isCount(query.limit) || !isCount(query.offset)) return reply.code(400).send({ error: "invalid_query" });
+    const limit = Math.min(100, Math.max(1, Number(query.limit ?? 20)));
+    const offset = Math.min(100_000, Math.max(0, Number(query.offset ?? 0)));
+    const rows = await sql<{
+      id: string; question: string; answerMd: string; citations: unknown; coverage: unknown; freshness: unknown; pages: unknown; createdAt: Date | string;
+    }[]>`
+      SELECT a.id, a.question, a.answer_md AS "answerMd", a.citations, a.coverage, a.freshness, a.pages, a.created_at AS "createdAt"
+      FROM member_wiki_answers a
+      WHERE a.asked_by = ${user.id}
+        AND EXISTS (
+          SELECT 1 FROM member_wiki_pages p
+          WHERE p.base_id = ${base.id}
+            AND p.slug = ANY (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(a.pages) = 'array' THEN a.pages ELSE '[]'::jsonb END))
+        )
+      ORDER BY a.created_at DESC, a.id DESC
+      LIMIT ${limit + 1} OFFSET ${offset}`;
+    const hasMore = rows.length > limit;
+    const page = rows.slice(0, limit);
+    // The material behind the citations of the whole page is read once, not once per answer.
+    const groups = page.map(row => readCitations(row.citations));
+    const enriched = await enrichAllCitations(groups);
+    const answers: AnswerRecord[] = page.map((row, index) => ({
+      id: row.id,
+      question: row.question,
+      answerMd: row.answerMd,
+      citations: enriched[index] ?? [],
+      coverage: readCoverage(row.coverage),
+      freshness: readFreshness(row.freshness),
+      pages: readPages(row.pages),
+      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt ?? ""),
+    }));
+    return { answers, pagination: { limit, offset, hasMore, nextOffset: hasMore ? offset + limit : null } };
   });
 
   /** Asking the library a question. It answers from the published pages only. */
@@ -605,7 +649,9 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     });
     if (!saved) return reply.code(409).send({ error: "knowledge_answer_unverified", message: "知识页已更新或撤回，请重新提问。" });
     return {
-      answer: { id, question, answerMd: bodyText, citations, coverage: answer.coverage, freshness: answer.freshness, pages: [...usedPages], references: routed.map(entry => ({ slug: entry.page.slug, score: entry.score })) },
+      // The citations carry the material they may be read in, so a fresh answer and an answer read
+      // back from the history offer the same way back to the evidence.
+      answer: { id, question, answerMd: bodyText, citations: await enrichCitations(citations.map(toAnswerCitation)), coverage: answer.coverage, freshness: answer.freshness, pages: [...usedPages], references: routed.map(entry => ({ slug: entry.page.slug, score: entry.score })) },
     };
   });
 }
