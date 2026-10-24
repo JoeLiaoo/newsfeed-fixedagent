@@ -51,6 +51,28 @@ async function seedBuiltin() {
 
 function taskId() { return randomBytes(16).toString("hex"); }
 
+/**
+ * The columns one expert task row carries. The list and the single task read the same row, so an
+ * employee sees the same state, result and downloads on both.
+ */
+function taskColumns(userId: string) {
+  return sql`
+    t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
+    t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts",
+    t.created_at AS "createdAt", t.updated_at AS "updatedAt", t.expires_at AS "expiresAt",
+    EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${userId} AND a.expires_at > now()) AS "hasArtifact",
+    EXISTS(SELECT 1 FROM member_expert_panorama_checkpoints p WHERE p.task_id=t.id AND p.user_id=${userId}) AS "hasCheckpoint",
+    COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${userId} AND m.expires_at > now()), '[]'::json) AS materials`;
+}
+
+type ExpertTaskRow = {
+  id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string; notes?: string };
+  result: { candidates?: Array<{ id: string; name: string; status: string | null; creditCode: string | null; address: string | null; startDate: string | null }>; preview?: string; approximate?: boolean; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null;
+  errorCode: string | null; errorMessage: string | null; executionAttempts: number;
+  createdAt: string; updatedAt: string; expiresAt: string; hasArtifact: boolean; hasCheckpoint: boolean;
+  materials: Array<{ id: string; filename: string; byteSize: number; sha256: string; extractionStatus: string; extractionNote: string | null }>;
+};
+
 export function registerExpertRoutes(app: FastifyInstance, authenticate: Authenticate) {
   app.get("/api/v1/membership/experts", async (req, reply) => {
     noStore(reply);
@@ -89,14 +111,23 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     noStore(reply);
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
-    const tasks = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
-        t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
-        EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
-        EXISTS(SELECT 1 FROM member_expert_panorama_checkpoints p WHERE p.task_id=t.id AND p.user_id=${user.id}) AS "hasCheckpoint",
-        COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
+    const tasks = await sql<ExpertTaskRow[]>`SELECT ${taskColumns(user.id)}
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
       WHERE t.user_id=${user.id} AND t.expires_at > now() ORDER BY t.created_at DESC LIMIT 50`;
     return { tasks };
+  });
+
+  app.get("/api/v1/membership/expert-tasks/:id", async (req, reply) => {
+    noStore(reply);
+    const user = await authenticate(req);
+    if (!user) return reply.code(401).send({ error: "login_required" });
+    const id = (req.params as { id: string }).id;
+    // Only the employee's own task is readable; another employee's task is missing, not forbidden.
+    const tasks = await sql<ExpertTaskRow[]>`SELECT ${taskColumns(user.id)}
+      FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
+      WHERE t.id=${id} AND t.user_id=${user.id} AND t.expires_at > now()`;
+    if (!tasks[0]) return reply.code(404).send({ error: "task_not_found" });
+    return { task: tasks[0] };
   });
 
   app.post("/api/v1/membership/expert-tasks", { bodyLimit: Math.ceil(MAX_TOTAL_MATERIAL_BYTES * 4 / 3) + 512 * 1024 }, async (req, reply) => {
