@@ -20,6 +20,10 @@ export type TrustedCitation = {
   anchor: string | null;
   citationId: string;
   versionId: string;
+  /** The material the citation may be read in, and the file itself: the way back to the evidence. */
+  documentId: string;
+  documentTitle: string;
+  fileName: string;
 };
 
 export type TrustedAnswer = {
@@ -144,6 +148,9 @@ export function verifyAnswer(answer: AnswerResult, pages: RoutablePage[], now = 
       anchor: found.citation.anchor,
       citationId: claim.citationId,
       versionId: found.citation.versionId,
+      documentId: found.citation.documentId,
+      documentTitle: found.citation.documentTitle,
+      fileName: found.citation.fileName,
     });
   }
   if (!citations.length || [...usedLabels].some(label => !seen.has(label))) return fail();

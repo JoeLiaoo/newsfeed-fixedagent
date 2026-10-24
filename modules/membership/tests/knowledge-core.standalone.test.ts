@@ -332,7 +332,7 @@ test("answer provenance rejects mixed or unbound citations and derives freshness
   const pages = [{
     slug: page.slug, title: page.title, pageType: page.pageType, targetName: page.targetName,
     track: page.track, bodyMd: "published", coverage: { ...coverageOf(page), last_report: "2026-10-01" }, revisionId: "r1",
-    citations: [{ id: "old", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2024-01-01", anchor: null, sourceTitle: "old", versionId: "v-old" }],
+    citations: [{ id: "old", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2024-01-01", anchor: null, sourceTitle: "old", versionId: "v-old", documentId: "doc-old", documentTitle: "旧材料", fileName: "old.md" }],
   }];
   const citation = { label: "1", pageSlug: page.slug, citationId: "old" };
   const valid = { answer: "历史观点[^1]", citations: [citation] };

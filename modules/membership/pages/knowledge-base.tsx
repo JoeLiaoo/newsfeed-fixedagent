@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router";
-import { ArrowLeft, FileUp, MessageSquare, RefreshCw, Search } from "lucide-react";
+import { ArrowLeft, Download, FileUp, MessageSquare, RefreshCw, Search } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
@@ -16,6 +16,10 @@ export const handle: Screen = { tab: "me", name: "知识库" };
 export const meta = () => pageMeta({ title: "知识库", path: "/knowledge", noindex: true });
 
 const ENDPOINT = "/api/v1/membership/knowledge/";
+/** How many builds one page of the build list holds. */
+const TASK_PAGE_SIZE = 20;
+/** What the page says when the library holds no published page at all. */
+const NO_PUBLISHED_PAGES = "本库尚无已发布知识页，先上传材料并等待构建完成。";
 
 type Base = { id: string; name: string; description: string; status: string; createdAt: string; updatedAt: string };
 type Overview = {
@@ -38,7 +42,11 @@ type PageRow = {
   revision: number; coverage: { analysts: number; firms: number; reports: number; last_report: string | null } | null;
   citationCount: number; issueCount: number; freshness: string; freshnessLabel: string;
 };
-type AnswerCitation = { label: string; pageSlug: string; title: string; analyst: string | null; organization: string | null; publishedOn: string | null; anchor: string | null };
+type AnswerCitation = {
+  label: string; pageSlug: string; title: string; analyst: string | null; organization: string | null;
+  publishedOn: string | null; anchor: string | null; citationId: string; versionId: string;
+  documentId: string; documentTitle: string; fileName: string;
+};
 type Answer = {
   id: string; question: string; answerMd: string; citations: AnswerCitation[];
   coverage: { analysts: number; firms: number; reports: number; first_report: string | null; last_report: string | null };
@@ -69,6 +77,8 @@ export default function KnowledgeBasePage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [taskOffset, setTaskOffset] = useState(0);
+  const [taskNextOffset, setTaskNextOffset] = useState<number | null>(null);
   const [pages, setPages] = useState<PageRow[]>([]);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
@@ -83,11 +93,10 @@ export default function KnowledgeBasePage() {
 
   const load = useCallback(async (term: string) => {
     const scope = encodeURIComponent(baseId);
-    const [baseResponse, overviewResponse, documentsResponse, tasksResponse, pagesResponse] = await Promise.all([
+    const [baseResponse, overviewResponse, documentsResponse, pagesResponse] = await Promise.all([
       fetch(`${ENDPOINT}bases/${scope}`),
       fetch(`${ENDPOINT}overview?baseId=${scope}`),
       fetch(`${ENDPOINT}documents?baseId=${scope}&query=${encodeURIComponent(term)}`),
-      fetch(`${ENDPOINT}tasks?baseId=${scope}`),
       fetch(`${ENDPOINT}pages?baseId=${scope}&query=${encodeURIComponent(term)}`),
     ]);
     if (!overviewResponse.ok) { location.href = "/login"; return; }
@@ -95,15 +104,24 @@ export default function KnowledgeBasePage() {
     setBase((await baseResponse.json() as { base: Base }).base);
     setOverview((await overviewResponse.json() as { overview: Overview }).overview);
     setDocuments((await documentsResponse.json() as { documents: DocumentRow[] }).documents);
-    setTasks((await tasksResponse.json() as { tasks: TaskRow[] }).tasks);
     setPages((await pagesResponse.json() as { pages: PageRow[] }).pages);
   }, [baseId]);
 
-  useEffect(() => { void load(search).catch(() => setMessage("加载失败，请刷新重试。")).finally(() => setLoading(false)); }, [load, search]);  useEffect(() => {
+  /** The builds of this base, one page at a time. */
+  const loadTasks = useCallback(async () => {
+    const response = await fetch(`${ENDPOINT}tasks?baseId=${encodeURIComponent(baseId)}&limit=${TASK_PAGE_SIZE}&offset=${taskOffset}`);
+    if (!response.ok) return;
+    const result = await response.json() as { tasks: TaskRow[]; nextOffset: number | null };
+    setTasks(result.tasks);
+    setTaskNextOffset(result.nextOffset);
+  }, [baseId, taskOffset]);
+
+  useEffect(() => { void Promise.all([load(search), loadTasks()]).catch(() => setMessage("加载失败，请刷新重试。")).finally(() => setLoading(false)); }, [load, loadTasks, search]);
+  useEffect(() => {
     if (!tasks.some(task => task.state === "queued" || task.state === "running")) return;
-    const timer = setInterval(() => { void load(search).catch(() => undefined); }, 5000);
+    const timer = setInterval(() => { void loadTasks().catch(() => undefined); }, 5000);
     return () => clearInterval(timer);
-  }, [tasks, load, search]);
+  }, [tasks, loadTasks]);
 
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -134,7 +152,7 @@ export default function KnowledgeBasePage() {
       setMessage(result.duplicate ? "这份材料已在共享库中，未重复入库。" : "已进入共享库，正在构建知识页。");
       form.reset();
       setFile(null);
-      await load(search);
+      await Promise.all([load(search), loadTasks()]);
     } catch { setMessage("上传失败，请检查网络后重试。"); }
     finally { setBusy(false); }
   }
@@ -144,7 +162,7 @@ export default function KnowledgeBasePage() {
     try {
       const response = await fetch(`${ENDPOINT}tasks/${taskId}/retry`, { method: "POST" });
       setMessage(response.ok ? "已重新提交构建。" : "该任务当前不可重试。");
-      await load(search);
+      await Promise.all([load(search), loadTasks()]);
     } catch { setMessage("操作失败，请刷新后重试。"); }
     finally { setBusy(false); }
   }
@@ -155,7 +173,7 @@ export default function KnowledgeBasePage() {
       const response = await fetch(`${ENDPOINT}documents/${documentId}/withdraw`, { method: "POST" });
       setMessage(response.ok ? "材料已从共享库撤回，由它生成的知识页同时下架。" : "撤回失败，请刷新后重试。");
       setWithdrawing(null);
-      await load(search);
+      await Promise.all([load(search), loadTasks()]);
     } catch { setMessage("撤回失败，请刷新后重试。"); }
     finally { setBusy(false); }
   }
@@ -169,7 +187,15 @@ export default function KnowledgeBasePage() {
     try {
       const response = await fetch(`${ENDPOINT}answers`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ baseId, question }) });
       const result = await response.json() as { answer?: Answer; error?: string; message?: string };
-      if (!response.ok) { setMessage(result.message ?? "问答失败，请重试。"); return; }
+      if (!response.ok) {
+        // A question the library cannot answer is not a failure: it says plainly that nothing covers it.
+        if (result.error === "knowledge_no_coverage") {
+          setMessage((overview?.pages ?? 0) === 0 ? NO_PUBLISHED_PAGES : (result.message ?? TASK_ERRORS.knowledge_no_coverage));
+          return;
+        }
+        setMessage(result.message ?? "问答失败，请重试。");
+        return;
+      }
       if (!result.answer) { setMessage("问答失败，请重试。"); return; }
       setAnswer(result.answer);
       setMessage("");
@@ -233,7 +259,7 @@ export default function KnowledgeBasePage() {
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>构建状态</CardTitle>
-          <Button type="button" variant="outline" size="sm" onClick={() => void load(search)}><RefreshCw size={14} aria-hidden="true" />刷新</Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => void Promise.all([load(search), loadTasks()])}><RefreshCw size={14} aria-hidden="true" />刷新</Button>
         </CardHeader>
         <CardContent>
           {!tasks.length ? <p className="text-sm text-ink-3">暂无构建任务。</p> : <ul className="grid gap-3">{tasks.map(task => <li key={task.id} className="rounded-card border border-line p-4">
@@ -245,6 +271,13 @@ export default function KnowledgeBasePage() {
             {task.errorCode && <p className="mt-2 text-sm text-hot">{TASK_ERRORS[task.errorCode] ?? task.errorMessage ?? task.errorCode}</p>}
             {task.state === "failed" && task.attemptCount < 5 && <div className="mt-3"><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void retry(task.id)}>重试</Button></div>}
           </li>)}</ul>}
+          <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-sm text-ink-3">
+            <span>第 {Math.floor(taskOffset / TASK_PAGE_SIZE) + 1} 页</span>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" disabled={taskOffset === 0} onClick={() => setTaskOffset(Math.max(0, taskOffset - TASK_PAGE_SIZE))}>上一页</Button>
+              <Button type="button" variant="outline" size="sm" disabled={taskNextOffset === null} onClick={() => setTaskOffset(taskNextOffset ?? taskOffset)}>下一页</Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -311,9 +344,15 @@ export default function KnowledgeBasePage() {
             <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(answer.answerMd, siteUrl()).html }} />
             <div className="grid gap-1 border-t border-line pt-3">
               <h3 className="text-sm font-semibold text-ink">参考资料</h3>
-              {answer.citations.length ? <ul className="grid gap-1 text-xs text-ink-3">{answer.citations.map(citation => <li key={`${citation.pageSlug}-${citation.label}`}>
-                [{citation.label}] <Link to={`/knowledge/targets/${encodeURIComponent(citation.pageSlug)}`} className="text-accent underline-offset-4 hover:underline">{citation.title}</Link>
-                {citation.analyst ? ` · ${citation.analyst}` : ""}{citation.organization ? ` · ${citation.organization}` : ""}{citation.publishedOn ? ` · ${citation.publishedOn}` : ""}
+              {answer.citations.length ? <ul className="grid gap-2">{answer.citations.map(citation => <li key={`${citation.pageSlug}-${citation.label}`} className="rounded-card border border-line p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs text-ink">[{citation.label}] <Link to={`/knowledge/targets/${encodeURIComponent(citation.pageSlug)}`} className="text-accent underline-offset-4 hover:underline">{citation.title}</Link></span>
+                  <span className="flex flex-wrap items-center gap-2">
+                    <Link to={`/knowledge/documents/${encodeURIComponent(citation.documentId)}`} className="text-sm text-accent underline-offset-4 hover:underline">材料</Link>
+                    <Button asChild variant="outline" size="sm"><a href={`${ENDPOINT}versions/${encodeURIComponent(citation.versionId)}/original`}><Download size={14} aria-hidden="true" />原件</a></Button>
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-ink-3">{citation.analyst ?? "分析师未知"} · {citation.organization ?? "机构未知"} · {citation.publishedOn ?? "日期未知"} · {citation.documentTitle}</p>
               </li>)}</ul> : <p className="text-xs text-ink-3">本次回答没有可跳转的引用。</p>}
             </div>
             <p className="text-xs text-ink-4">覆盖：分析师 {answer.coverage.analysts} · 机构 {answer.coverage.firms} · 材料 {answer.coverage.reports} · {answer.coverage.first_report ?? "起始日期未知"} 至 {answer.coverage.last_report ?? "最近日期未知"}</p>
