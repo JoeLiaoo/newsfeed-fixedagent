@@ -7,6 +7,7 @@ import { Card } from "@aihot/web/components/member-ui/card";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
+import { EXPERT_MODE_INPUTS, EXPERT_MODE_LABELS } from "../experts/catalog.ts";
 
 export const handle: Screen = { tab: "me", name: "专家平台" };
 export const meta = () => pageMeta({ title: "专家平台", path: "/experts", noindex: true });
@@ -50,9 +51,10 @@ export default function ExpertsPage() {
               <span className="text-sm leading-relaxed text-ink-3">{expert.description}</span>
               <span className="mt-auto flex flex-wrap items-center gap-2 pt-3 text-xs text-ink-3">
                 <Badge variant={expert.status === "available" ? "success" : "warning"}>{expert.status === "available" ? "可运行" : "缺少依赖"}</Badge>
-                <span>{expert.execution_mode === "text_only" ? "纯文本模式（DeepSeek）" : "新华财经 · 一层投资"} · v{expert.version}</span>
-                {expert.missing_dependencies.length > 0 && <span>· {expert.missing_dependencies.join("、")}</span>}
+                <Badge variant="secondary">{EXPERT_MODE_LABELS[expert.execution_mode] ?? expert.execution_mode}</Badge>
+                <span>{[EXPERT_MODE_INPUTS[expert.execution_mode], `v${expert.version}`].filter(Boolean).join(" · ")}</span>
               </span>
+              {expert.missing_dependencies.length > 0 && <span className="text-xs text-amber-ink">缺少依赖：{expert.missing_dependencies.join("、")}</span>}
             </IntentLink>
           </Card>
         </li>)}</ul>

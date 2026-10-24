@@ -13,7 +13,7 @@ export const XINHUA_USED_TOOLS = ["fuzzy_search_company_list", "get_company_prof
 export const EXPERT_SLUG = "external-investment-landscape-xinhua-adapter";
 export const EXPERT_SKILL = `# 企业一层对外投资核查
 
-本专家使用平台授权的新华财经企业基础信息 MCP 与 DeepSeek。当前按已确认主体读取工商画像和一层直接投资，生成可复核的底稿。
+本专家使用平台已授权的企业信息查询能力与文本整理能力。当前按已确认主体读取工商画像和一层直接投资，生成可复核的底稿。
 
 只使用工具返回的主体、投资关系、比例和日期。不能把入库时间推断成投资发生时间；不能补造金额、轮次、控制关系、基金备案或退出事实。每项结论须保留来源工具和查询时间，未提供的字段写“未提供”。
 
@@ -29,6 +29,21 @@ export const BUILTIN_EXPERT = {
   version: "0.1.0",
   skillMd: EXPERT_SKILL,
   missingDependencies: [],
+};
+
+/**
+ * Employee-facing labels for an execution mode. They name the capability an employee gets, never the
+ * upstream tool or model that runs it; those stay internal (`xinhua_trial`, provider hostnames, env vars).
+ */
+export const EXPERT_MODE_LABELS: Record<"xinhua_trial" | "text_only", string> = {
+  xinhua_trial: "一层对外投资核查",
+  text_only: "文本任务专家",
+};
+
+/** What the employee has to supply in each mode, so the mode label explains itself. */
+export const EXPERT_MODE_INPUTS: Record<"xinhua_trial" | "text_only", string> = {
+  xinhua_trial: "需先确认企业主体",
+  text_only: "直接填写任务要求",
 };
 
 export const SAMPLE_COMPANIES = [

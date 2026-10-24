@@ -11,7 +11,7 @@ import { Textarea } from "@aihot/web/components/member-ui/textarea";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { EXPERT_SLUG, SAMPLE_COMPANIES } from "../experts/catalog.ts";
+import { EXPERT_MODE_INPUTS, EXPERT_MODE_LABELS, EXPERT_SLUG, SAMPLE_COMPANIES } from "../experts/catalog.ts";
 
 export const handle: Screen = { tab: "me", name: "专家" };
 export const meta = () => pageMeta({ title: "专家详情", path: "/experts", noindex: true });
@@ -31,7 +31,7 @@ type Task = {
 const STATE_TEXT: Record<string, string> = { queued: "排队中", waiting_input: "等待选择主体", running: "执行中", succeeded: "已完成", failed: "失败", cancelled: "已取消" };
 const STATE_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "destructive"> = { queued: "warning", waiting_input: "warning", running: "default", succeeded: "success", failed: "destructive", cancelled: "secondary" };
 const ERROR_TEXT: Record<string, string> = {
-  xinhua_not_configured: "新华财经 MCP 尚未配置，请联系管理员。", xinhua_unavailable: "新华财经 MCP 暂时不可用。", xinhua_tool_unavailable: "当前账号缺少所需工具，任务未完成。", xinhua_tool_failed: "新华财经未返回可用结果。", xinhua_no_candidates: "新华财经未匹配到该名称的主体，请核对登记名称或改用更短的关键词。", xinhua_entity_id_missing: "新华财经返回的主体缺少可核验的唯一标识，报告已停止。", xinhua_response_invalid: "新华财经返回内容无法解析，报告已停止。", xinhua_identity_unverified: "未能按唯一 ID 或完整信用代码核验主体，报告已停止。", xinhua_entity_mismatch: "服务商返回的主体与所选企业不一致，报告已停止。", expert_execution_failed: "任务未完成，请检查配置后重试。",
+  xinhua_not_configured: "企业信息查询服务尚未配置，请联系管理员。", xinhua_unavailable: "企业信息查询服务暂时不可用。", xinhua_tool_unavailable: "当前账号缺少所需工具，任务未完成。", xinhua_tool_failed: "企业信息查询未返回可用结果。", xinhua_no_candidates: "未匹配到该名称的企业主体，请核对登记名称或改用更短的关键词。", xinhua_entity_id_missing: "查询返回的主体缺少可核验的唯一标识，报告已停止。", xinhua_response_invalid: "查询返回内容无法解析，报告已停止。", xinhua_identity_unverified: "未能按唯一 ID 或完整信用代码核验主体，报告已停止。", xinhua_entity_mismatch: "查询返回的主体与所选企业不一致，报告已停止。", expert_execution_failed: "任务未完成，请检查配置后重试。",
 };
 
 /** One expert: what it is, the task it takes, and the tasks it has run for this employee. */
@@ -125,10 +125,11 @@ export default function ExpertDetailPage() {
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-1 text-2xl font-semibold tracking-tight text-ink">{expert?.name ?? "专家"}</h1>
         {expert && <Badge variant={expert.status === "available" ? "success" : "warning"}>{expert.status === "available" ? "可运行" : "缺少依赖"}</Badge>}
-        {expert && <Badge variant="secondary">{expert.execution_mode === "text_only" ? "纯文本模式（DeepSeek）" : "新华财经 · 一层投资"}</Badge>}
+        {expert && <Badge variant="secondary">{EXPERT_MODE_LABELS[expert.execution_mode] ?? expert.execution_mode}</Badge>}
       </div>
       {expert && <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-3">{expert.description}</p>}
-      {expert && expert.missing_dependencies.length > 0 && <p className="mt-1 text-xs text-ink-3">缺少依赖：{expert.missing_dependencies.join("、")}</p>}
+      {expert && <p className="mt-1 text-xs text-ink-3">{[EXPERT_MODE_INPUTS[expert.execution_mode], `v${expert.version}`].filter(Boolean).join(" · ")}</p>}
+      {expert && expert.missing_dependencies.length > 0 && <p className="mt-1 text-xs text-amber-ink">缺少依赖：{expert.missing_dependencies.join("、")}</p>}
     </header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
 
