@@ -1,5 +1,7 @@
 # 2026-10-24 · P4 状态补正
 
+- [PR #40](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/40) 已合并，merge `2485311b75e13e9ce0656bd3d4df958ec62f733f`；最终 head `4049b6854f26fd49f1215efc73e3f017dc172e7b` 的 Docs checks 与 P3 checks 均通过。本 PR 仅同步文档，未执行生产发布。
+
 ## 依据
 
 - [P4-02 旧组件退役记录](2026-10-24-P4-02-old-component-retire.md)：旧应用与旧备份按用户后续授权退役，新平台、Hermes、Nginx 及证书续期链路保留；实施表 P4-02 已勾选。
