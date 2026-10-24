@@ -51,3 +51,10 @@
 - 主线专家页面检查未发现 `hasCheckpoint` 或采集台账 JSONL 下载 UI。未部署；真实员工验收仍待完成，P5-02～P5-04 保持未勾选。
 
 PR：[#58](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/58)，分支 `feat/kb-answer-history-v1`。
+
+## 初始 head 的自动检查结果（PR #58）
+
+- `quality`（typecheck、web 构建、standalone 106/106、架构规则、docker build）：通过。
+- `postgres-integration`（含新增的 `knowledge-answer-history.test.ts`，数据库用例 33/33）：通过。
+- `links`（文档链接 386 个）：通过。
+- 这些结果来自复基前的 tip `23557f1`，不代表 2026-10-26 复基 head 的 CI 状态。
