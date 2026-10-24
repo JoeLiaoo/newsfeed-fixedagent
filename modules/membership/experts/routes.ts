@@ -217,8 +217,10 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const id = (req.params as { id: string }).id;
-    const tasks = await sql<{ id: string }[]>`SELECT id FROM member_expert_tasks WHERE id=${id} AND user_id=${user.id} AND expires_at > now()`;
-    if (!tasks[0]) return reply.code(404).send({ error: "task_not_found" });
+    const tasks = await sql<{ id: string; has_checkpoint: boolean }[]>`
+      SELECT t.id, EXISTS(SELECT 1 FROM member_expert_panorama_checkpoints p WHERE p.task_id=t.id AND p.user_id=${user.id}) AS has_checkpoint
+      FROM member_expert_tasks t WHERE t.id=${id} AND t.user_id=${user.id} AND t.expert_slug=${PANORAMA_EXPERT_SLUG} AND t.expires_at > now()`;
+    if (!tasks[0] || !tasks[0].has_checkpoint) return reply.code(404).send({ error: "checkpoint_not_found" });
     const body = Buffer.from(await panoramaCheckpointJsonl(id, user.id), "utf8");
     return reply.header("Content-Type", "application/x-ndjson; charset=utf-8").header("Content-Disposition", `attachment; filename="expert-${id}-checkpoint.jsonl"`).header("X-Content-Type-Options", "nosniff").send(body);
   });

@@ -298,6 +298,20 @@ test("the run stops at its limits and says the result is incomplete", async () =
   assert.ok(markdown.includes("触及上限"), "底稿要写明触及了哪个上限");
 });
 
+test("the depth budget never emits a relation layer beyond its configured depth", async () => {
+  const { run } = await runFixture({ ...DEFAULT_PANORAMA_BUDGET, maxDepth: 1 });
+  assert.equal(run.stats.depth, 1, "第 2 层关系不得出现在只允许 1 层的底稿中");
+  assert.ok(run.stats.limits.includes("层级上限"));
+  assert.ok(run.gaps.some(gap => gap.text.includes("层级上限") && gap.text.includes("未读取主体详情")));
+  assert.equal(run.stats.incomplete, true);
+});
+
+test("relations skipped by the per-subject budget appear in the gap list", async () => {
+  const { run } = await runFixture({ ...DEFAULT_PANORAMA_BUDGET, maxChildrenPerNode: 1 });
+  assert.ok(run.stats.untreated > 0);
+  assert.ok(run.gaps.some(gap => gap.scope === "本方主体" && gap.text.includes("单节点处理上限") && gap.text.includes("未处理")));
+});
+
 test("using exactly the per-subject relationship budget is complete", async () => {
   const { run } = await runFixture({ ...DEFAULT_PANORAMA_BUDGET, maxChildrenPerNode: 4 });
   assert.ok(!run.stats.limits.includes("单节点处理上限"), "刚好处理完预算数量不应误报截断");

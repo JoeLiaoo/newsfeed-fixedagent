@@ -337,24 +337,39 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
       continue;
     }
 
+    // maxDepth counts investment layers below the confirmed root. Once a node at that
+    // depth has a readable outbound list, disclose those rows as untreated without
+    // fetching profiles or emitting a fifth (or later) layer into the report.
+    if (node.depth >= budget.maxDepth) {
+      for (const relation of usable) node.excluded.push({ name: relation.name, reason: "超出本次层级上限" });
+      untreated += usable.length;
+      limits.push("层级上限");
+      recordNodeGap(node, `已达层级上限，该主体另有 ${usable.length} 条对外投资关系未读取主体详情或继续下钻。`);
+      continue;
+    }
+
     const pending: PanoramaNode[] = [];
     let treated = 0;
+    let budgetUntreated = 0;
     for (const relation of usable) {
       if (treated >= budget.maxChildrenPerNode) {
         node.excluded.push({ name: relation.name, reason: "超出本节点处理上限" });
         untreated += 1;
+        budgetUntreated += 1;
         continue;
       }
       if (nodes.size >= budget.maxNodes) {
         limits.push("主体数上限");
         node.excluded.push({ name: relation.name, reason: "超出本次主体数上限" });
         untreated += 1;
+        budgetUntreated += 1;
         continue;
       }
       if (calls >= budget.maxCalls) {
         limits.push("调用次数上限");
         node.excluded.push({ name: relation.name, reason: "超出本次调用次数上限" });
         untreated += 1;
+        budgetUntreated += 1;
         break;
       }
       treated += 1;
@@ -374,6 +389,15 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
       if (edge.verdict.drill && !child.exited) pending.push(child);
     }
     if (treated >= budget.maxChildrenPerNode && usable.length > budget.maxChildrenPerNode) limits.push("单节点处理上限");
+    if (budgetUntreated) {
+      const reasons = [...new Set(node.excluded.flatMap(row => {
+        if (row.reason === "超出本节点处理上限") return ["单节点处理上限"];
+        if (row.reason === "超出本次主体数上限") return ["主体数上限"];
+        if (row.reason === "超出本次调用次数上限") return ["调用次数上限"];
+        return [];
+      }))];
+      recordNodeGap(node, `${budgetUntreated} 条关系因${reasons.join("、")}未处理。`);
+    }
     // One branch is finished before the next one starts.
     for (const child of pending.reverse()) stack.push(child);
   }
