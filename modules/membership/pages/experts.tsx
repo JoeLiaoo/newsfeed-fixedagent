@@ -7,7 +7,7 @@ import { Card } from "@aihot/web/components/member-ui/card";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { COMING_SOON_EXPERT_STATUS, EXPERT_MODE_INPUTS, EXPERT_MODE_LABELS, expertStatusBadge } from "../experts/catalog.ts";
+import { expertStatusBadge } from "../experts/catalog.ts";
 
 export const handle: Screen = { tab: "me", name: "专家平台" };
 export const meta = () => pageMeta({ title: "专家平台", path: "/experts", noindex: true });
@@ -51,12 +51,7 @@ export default function ExpertsPage() {
             <IntentLink to={`/experts/${encodeURIComponent(expert.slug)}`} className="flex h-full flex-col gap-2 p-5">
               <span className="font-semibold text-ink">{expert.name}</span>
               <span className="text-sm leading-relaxed text-ink-3">{expert.description}</span>
-              <span className="mt-auto flex flex-wrap items-center gap-2 pt-3 text-xs text-ink-3">
-                <Badge variant={badge.variant}>{badge.label}</Badge>
-                {expert.status === COMING_SOON_EXPERT_STATUS
-                  ? <span>v{expert.version}</span>
-                  : <><Badge variant="secondary">{EXPERT_MODE_LABELS[expert.execution_mode] ?? expert.execution_mode}</Badge><span>{[EXPERT_MODE_INPUTS[expert.execution_mode], `v${expert.version}`].filter(Boolean).join(" · ")}</span></>}
-              </span>
+              {expert.status !== "available" && <span className="mt-auto pt-3"><Badge variant={badge.variant}>{badge.label}</Badge></span>}
               {expert.missing_dependencies.length > 0 && <span className="text-xs text-amber-ink">缺少依赖：{expert.missing_dependencies.join("、")}</span>}
             </IntentLink>
           </Card>

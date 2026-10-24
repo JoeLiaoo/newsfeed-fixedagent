@@ -11,7 +11,7 @@ import { Textarea } from "@aihot/web/components/member-ui/textarea";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { COMING_SOON_EXPERT_STATUS, EXPERT_MODE_INPUTS, EXPERT_MODE_LABELS, BUILTIN_SLUGS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, modeNeedsEntity, expertStatusBadge } from "../experts/catalog.ts";
+import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, modeNeedsEntity, expertStatusBadge } from "../experts/catalog.ts";
 
 export const handle: Screen = { tab: "me", name: "专家" };
 export const meta = () => pageMeta({ title: "专家详情", path: "/experts", noindex: true });
@@ -125,14 +125,12 @@ export default function ExpertDetailPage() {
       <Button asChild variant="outline" size="sm" className="mb-4"><IntentLink to="/experts"><ArrowLeft size={14} aria-hidden="true" />专家平台</IntentLink></Button>
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-1 text-2xl font-semibold tracking-tight text-ink">{expert?.name ?? "专家"}</h1>
-        {expert && <Badge variant={badge.variant}>{badge.label}</Badge>}
-        {expert && expert.status !== COMING_SOON_EXPERT_STATUS && <Badge variant="secondary">{EXPERT_MODE_LABELS[expert.execution_mode] ?? expert.execution_mode}</Badge>}
+        {expert.status !== "available" && <Badge variant={badge.variant}>{badge.label}</Badge>}
       </div>
-      {expert && <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-3">{expert.description}</p>}
-      {expert && <p className="mt-1 text-xs text-ink-3">{expert.status === COMING_SOON_EXPERT_STATUS ? `v${expert.version}` : [EXPERT_MODE_INPUTS[expert.execution_mode], `v${expert.version}`].filter(Boolean).join(" · ")}</p>}
-      {expert && expert.missing_dependencies.length > 0 && <p className="mt-1 text-xs text-amber-ink">缺少依赖：{expert.missing_dependencies.join("、")}</p>}
+      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-3">{expert.description}</p>
+      {expert.missing_dependencies.length > 0 && <p className="mt-1 text-xs text-amber-ink">缺少依赖：{expert.missing_dependencies.join("、")}</p>}
     </header>
-    {expert && expert.status === COMING_SOON_EXPERT_STATUS && <Alert className="mb-5" role="status">开发中，敬请期待。该专家仍在接入数据源，开放后可在详情页直接提交任务。</Alert>}
+    {expert.status === COMING_SOON_EXPERT_STATUS && <Alert className="mb-5" role="status">数据源接入中，暂不能提交任务。</Alert>}
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
 
     <div className="grid gap-6">

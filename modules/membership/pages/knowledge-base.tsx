@@ -192,8 +192,6 @@ export default function KnowledgeBasePage() {
       <Button asChild variant="outline" size="sm" className="mb-4"><Link to="/knowledge"><ArrowLeft size={14} aria-hidden="true" />知识库</Link></Button>
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-2 text-2xl font-semibold tracking-tight text-ink">{base?.name ?? "知识库"}</h1>
-        <Badge variant="secondary">材料 {overview?.documents ?? 0}</Badge>
-        <Badge variant="secondary">知识页 {overview?.pages ?? 0}</Badge>
         {(overview?.running ?? 0) + (overview?.queued ?? 0) > 0 && <Badge variant="warning">构建中 {(overview?.running ?? 0) + (overview?.queued ?? 0)}</Badge>}
         {(overview?.failed ?? 0) > 0 && <Badge variant="destructive">失败 {overview?.failed}</Badge>}
         {(overview?.openIssues ?? 0) > 0 && <Badge variant="warning">质量问题 {overview?.openIssues}</Badge>}
@@ -241,7 +239,7 @@ export default function KnowledgeBasePage() {
               <span className="font-medium text-ink">{task.documentTitle}</span>
               <Badge variant={STATE_VARIANT[task.state] ?? "secondary"}>{TASK_STATE_LABELS[task.state] ?? task.state}</Badge>
             </div>
-            <p className="mt-1 text-xs text-ink-3">{TASK_STAGE_LABELS[task.stage] ?? task.stage} · v{task.versionNo} · {task.fileName} · {task.uploaderName} · {new Date(task.createdAt).toLocaleString("zh-CN")} · 尝试 {task.attemptCount} 次</p>
+            <p className="mt-1 text-xs text-ink-3">{task.state === "running" ? `${TASK_STAGE_LABELS[task.stage] ?? task.stage} · ` : ""}{new Date(task.createdAt).toLocaleString("zh-CN")}</p>
             {task.errorCode && <p className="mt-2 text-sm text-hot">{TASK_ERRORS[task.errorCode] ?? task.errorMessage ?? task.errorCode}</p>}
             {task.state === "failed" && task.attemptCount < 5 && <div className="mt-3"><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void retry(task.id)}>重试</Button></div>}
           </li>)}</ul>}
@@ -268,7 +266,7 @@ export default function KnowledgeBasePage() {
                   {page.issueCount > 0 && <Badge variant="warning">质量问题 {page.issueCount}</Badge>}
                 </span>
               </div>
-              <p className="mt-1 text-xs text-ink-3">v{page.revision} · 分析师 {page.coverage?.analysts ?? 0} · 机构 {page.coverage?.firms ?? 0} · 引用 {page.citationCount} · 最近材料 {page.coverage?.last_report ?? "日期未知"}</p>
+              <p className="mt-1 text-xs text-ink-3">最近材料 {page.coverage?.last_report ?? "日期未知"}</p>
             </li>)}</ul>}
           </div>
           <div className="grid gap-2">
@@ -277,11 +275,10 @@ export default function KnowledgeBasePage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-medium text-ink">{document.title}</span>
                 <span className="flex flex-wrap items-center gap-1">
-                  <Badge variant="secondary">v{document.versionNo}</Badge>
                   <Badge variant={STATE_VARIANT[document.taskState ?? ""] ?? "secondary"}>{TASK_STATE_LABELS[document.taskState ?? ""] ?? "未构建"}</Badge>
                 </span>
               </div>
-              <p className="mt-1 text-xs text-ink-3">{document.sourceOrg ?? "机构未知"} · {document.sourceAuthor ?? "作者未知"} · {document.sourceDate ?? "日期未知"} · {document.uploaderName} · {document.fileName}</p>
+              <p className="mt-1 text-xs text-ink-3">{document.sourceOrg ?? "机构未知"} · {document.sourceAuthor ?? "作者未知"} · {document.sourceDate ?? "日期未知"}</p>
               {document.extractionStatus === "unavailable" && <p className="mt-1 text-xs text-hot">{document.extractionNote ?? "未能提取文本"}</p>}
               {document.errorCode && <p className="mt-1 text-xs text-hot">{TASK_ERRORS[document.errorCode] ?? document.errorMessage ?? document.errorCode}</p>}
               <div className="mt-2 flex flex-wrap gap-3">
