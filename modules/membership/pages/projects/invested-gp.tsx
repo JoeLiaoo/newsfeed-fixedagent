@@ -58,7 +58,6 @@ export default function InvestedGpProjectsPage() {
                   <p className="break-words text-base font-semibold text-ink">{item.investee_name}</p>
                   <p className="mt-1 break-words text-sm text-ink-3">{item.gp_name}</p>
                 </div>
-                <div><Badge variant="success">已核实</Badge></div>
                 <div className="flex flex-wrap gap-2">
                   {item.sector_tags.length
                     ? item.sector_tags.map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)

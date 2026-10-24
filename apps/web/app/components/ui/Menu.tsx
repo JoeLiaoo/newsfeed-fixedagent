@@ -1,67 +1,42 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Presence } from "./Presence";
+import type { ReactNode } from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 
-/** A small dropdown anchored to a trigger; closes on outside click, Escape or choosing an entry. */
-export function Menu({ trigger, label, children }: { trigger: ReactNode; label: string; children: (close: () => void) => ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("pointerdown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+/** A shared action menu with keyboard navigation and managed focus. */
+export function Menu({ trigger, label, children }: { trigger: ReactNode; label: string; children: ReactNode }) {
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger
         aria-label={label}
         title={label}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className={`inline-flex size-8 items-center justify-center rounded-control transition-colors ${open ? "bg-bg-sunk text-ink" : "text-ink-3 hover:bg-bg-sunk hover:text-ink"}`}
+        className="inline-flex size-8 items-center justify-center rounded-control text-ink-3 transition-colors hover:bg-bg-sunk hover:text-ink data-[state=open]:bg-bg-sunk data-[state=open]:text-ink"
       >
         {trigger}
-      </button>
-      <Presence show={open} enter="anim-drop-in" exit="anim-drop-out" duration={140}>
-        <div
-          role="menu"
-          className="absolute top-10 z-50 min-w-[168px] overflow-hidden rounded-tile border border-line bg-raised py-1 shadow-[var(--shadow-pop)] right-0 origin-top-right"
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={8}
+          className="z-50 min-w-[168px] overflow-hidden rounded-tile border border-line bg-raised py-1 shadow-[var(--shadow-pop)]"
         >
-          {children(() => setOpen(false))}
-        </div>
-      </Presence>
-    </div>
+          {children}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 
 /** One entry of a Menu (a button or a link). */
 export function MenuItem({ icon, children, onSelect, href, download }: { icon?: ReactNode; children: ReactNode; onSelect?: () => void; href?: string; download?: boolean }) {
-  const cls = "flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-ink-2 transition-colors hover:bg-bg-sunk hover:text-ink";
+  const cls = "flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left text-[13px] text-ink-2 outline-none transition-colors data-[highlighted]:bg-bg-sunk data-[highlighted]:text-ink";
   const inner = (
     <>
-      {icon && <span className="text-ink-4">{icon}</span>}
+      {icon && <span aria-hidden="true" className="text-ink-4">{icon}</span>}
       {children}
     </>
   );
-  if (href) {
-    return (
-      <a role="menuitem" href={href} download={download} onClick={onSelect} className={cls}>
-        {inner}
-      </a>
-    );
-  }
   return (
-    <button role="menuitem" type="button" onClick={onSelect} className={cls}>
-      {inner}
-    </button>
+    <DropdownMenu.Item asChild onSelect={onSelect}>
+      {href ? <a href={href} download={download} className={cls}>{inner}</a> : <button type="button" className={cls}>{inner}</button>}
+    </DropdownMenu.Item>
   );
 }

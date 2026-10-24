@@ -1,42 +1,8 @@
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import * as ToggleGroup from "@radix-ui/react-toggle-group";
+import { motion, useReducedMotion } from "motion/react";
 import { Link } from "react-router";
 import { IntentLink } from "./IntentLink";
-import { useEntrance } from "../../lib/hydration";
-import { reducedMotion } from "../../lib/motion";
-
-/** Where each switch's thumb sat when it last left, relative to its track. */
-const thumbs = new Map<string, { left: number; width: number; at: number }>();
-
-function placeOf(el: HTMLElement) {
-  const tab = el.parentElement!.getBoundingClientRect();
-  const track = el.closest("[data-pill-track]")?.getBoundingClientRect();
-  return { left: tab.left - (track?.left ?? 0), width: tab.width, at: Date.now() };
-}
-
-/**
- * The white thumb inside the chosen option. It is rendered in place (so it is right without
- * JavaScript) and, when the choice moves, glides over from where the previous thumb was.
- */
-function Thumb({ id }: { id: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const entrance = useEntrance();
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const now = placeOf(el);
-    const prev = thumbs.get(id);
-    if (entrance && !reducedMotion() && prev && now.at - prev.at < 1000 && (prev.left !== now.left || prev.width !== now.width) && el.animate) {
-      el.animate(
-        [{ transform: `translateX(${prev.left - now.left}px)`, width: `${prev.width}px` }, { transform: "translateX(0)", width: `${now.width}px` }],
-        { duration: 300, easing: "cubic-bezier(0.25, 1, 0.5, 1)" },
-      );
-    }
-    return () => {
-      thumbs.set(id, placeOf(el));
-    };
-  }, [id, entrance]);
-  return <span ref={ref} className="absolute inset-0 rounded-full bg-surface shadow-[var(--shadow-thumb)] ring-1 ring-line dark:bg-raised" />;
-}
 
 export interface TabItem {
   key: string;
@@ -77,40 +43,38 @@ export function PillTabs({
   className?: string;
 }) {
   const links = items.some((t) => t.to);
-  const Track = links ? "nav" : "div";
+  const reduceMotion = useReducedMotion();
+  const trackClass = `${fill ? "grid w-full" : "inline-flex w-max"} gap-0.5 rounded-full bg-well p-0.5 lg:p-[3px] ring-1 ring-inset ring-line-soft`;
+  const trackStyle = fill ? { gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` } : undefined;
+  const options = items.map((t) => {
+    const on = t.key === active;
+    const inner = (
+      <>
+        {on && <motion.span layoutId={layoutId} transition={{ duration: reduceMotion ? 0 : 0.3, ease: [0.25, 1, 0.5, 1] }} className="absolute inset-0 rounded-full bg-surface shadow-[var(--shadow-thumb)] ring-1 ring-line dark:bg-raised" />}
+        <span className="relative inline-flex items-center gap-1">
+          {t.label}
+          {t.count !== undefined && t.count !== null && <span className={`num text-[0.86em] font-normal ${on ? "text-ink-3" : "text-ink-4"}`}>{t.count}</span>}
+        </span>
+      </>
+    );
+    const cls = `relative inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded-full font-medium outline-offset-1 transition-colors duration-150 active:scale-[0.98] ${SIZES[size]} ${on ? "text-ink" : "text-ink-3 hover:text-ink"}`;
+    const TabLink = t.prefetchOnPress ? IntentLink : Link;
+    return t.to ? (
+      <TabLink key={t.key} to={t.to} replace={t.replace} preventScrollReset={!t.resetScroll} aria-current={on ? "page" : undefined} className={cls}>
+        {inner}
+      </TabLink>
+    ) : (
+      <ToggleGroup.Item key={t.key} value={t.key} className={cls}>
+        {inner}
+      </ToggleGroup.Item>
+    );
+  });
   return (
     <div className={`scrollbar-none max-w-full overflow-x-auto ${fill ? "w-full" : ""} ${className}`}>
-      <Track
-        data-pill-track=""
-        aria-label={label}
-        role={links ? undefined : "tablist"}
-        className={`${fill ? "grid w-full" : "inline-flex w-max"} gap-0.5 rounded-full bg-well p-0.5 lg:p-[3px] ring-1 ring-inset ring-line-soft`}
-        style={fill ? { gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` } : undefined}
-      >
-        {items.map((t) => {
-          const on = t.key === active;
-          const inner = (
-            <>
-              {on && <Thumb id={layoutId} />}
-              <span className="relative inline-flex items-center gap-1">
-                {t.label}
-                {t.count !== undefined && t.count !== null && <span className={`num text-[0.86em] font-normal ${on ? "text-ink-3" : "text-ink-4"}`}>{t.count}</span>}
-              </span>
-            </>
-          );
-          const cls = `relative inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded-full font-medium outline-offset-1 transition-colors duration-150 active:scale-[0.98] ${SIZES[size]} ${on ? "text-ink" : "text-ink-3 hover:text-ink"}`;
-          const TabLink = t.prefetchOnPress ? IntentLink : Link;
-          return t.to ? (
-            <TabLink key={t.key} to={t.to} replace={t.replace} preventScrollReset={!t.resetScroll} aria-current={on ? "page" : undefined} className={cls}>
-              {inner}
-            </TabLink>
-          ) : (
-            <button key={t.key} type="button" role="tab" aria-selected={on} onClick={() => onSelect?.(t.key)} className={cls}>
-              {inner}
-            </button>
-          );
-        })}
-      </Track>
+      {links ? <nav aria-label={label} className={trackClass} style={trackStyle}>{options}</nav> :
+        <ToggleGroup.Root type="single" value={active} onValueChange={(key) => { if (key) onSelect?.(key); }} aria-label={label} className={trackClass} style={trackStyle}>
+          {options}
+        </ToggleGroup.Root>}
     </div>
   );
 }

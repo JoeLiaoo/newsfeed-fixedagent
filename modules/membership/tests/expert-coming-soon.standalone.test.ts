@@ -25,8 +25,8 @@ test("the catalog and the detail page show the planned state and take no task", 
   const list = readFileSync(new URL("../pages/experts.tsx", import.meta.url), "utf8");
   const detail = readFileSync(new URL("../pages/expert-detail.tsx", import.meta.url), "utf8");
   const routes = readFileSync(new URL("../experts/routes.ts", import.meta.url), "utf8");
-  assert.ok(list.includes("COMING_SOON_EXPERT_STATUS"), "目录卡片按状态区分开发中");
-  assert.ok(detail.includes("开发中，敬请期待"), "详情页醒目说明开发中");
+  assert.ok(list.includes('expert.status !== "available"') && list.includes("expertStatusBadge"), "目录对不可运行专家显示状态徽标");
+  assert.ok(detail.includes("数据源接入中，暂不能提交任务"), "详情页明确说明不可提交任务");
   assert.ok(detail.includes('expert.status === "available" && <Card>'), "提交任务的表单只对可运行的专家显示");
   assert.ok(routes.includes("status IN ('available', ${COMING_SOON_EXPERT_STATUS})"), "目录对所有角色返回开发中的条目");
   assert.ok(routes.includes("expert_coming_soon"), "新建任务按开发中拒绝");

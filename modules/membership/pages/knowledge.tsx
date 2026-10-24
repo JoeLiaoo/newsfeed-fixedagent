@@ -49,8 +49,7 @@ export default function KnowledgePage() {
               <span className="font-semibold text-ink">{base.name}</span>
               {base.description && <span className="text-sm leading-relaxed text-ink-3">{base.description}</span>}
               <span className="mt-auto flex flex-wrap items-center gap-2 pt-3 text-xs text-ink-3">
-                <Badge variant="secondary">材料 {base.documents}</Badge>
-                <Badge variant="secondary">知识页 {base.pages}</Badge>
+                <span>材料 {base.documents} · 知识页 {base.pages}</span>
                 {base.building > 0 && <Badge variant="warning">构建中 {base.building}</Badge>}
                 {base.failed > 0 && <Badge variant="destructive">失败 {base.failed}</Badge>}
               </span>

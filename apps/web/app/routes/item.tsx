@@ -24,7 +24,7 @@ import { ActionsSheet, ReaderToolbar, type ActionRow } from "../features/item/Re
 import { OutlineSheet } from "../components/ui/OutlineSheet";
 import { scrollToAnchor } from "../lib/motion";
 import { takePreview } from "../features/item/preview";
-import { IconArrowLeft, IconCopy, IconDownload, IconExternal, IconImage, IconMenu, IconMore, IconShare } from "../components/icons";
+import { ArrowLeft, Copy, Download, Ellipsis, ExternalLink, Image, Menu as MenuIcon, Share2 } from "lucide-react";
 import { BarButton, PhoneBar } from "../components/shell/PhoneBar";
 import { isPhone, type Screen } from "../components/shell/screens";
 
@@ -331,36 +331,32 @@ function ItemView({ item }: { item: SiteItemDetail }) {
   // In the left rail (a flex column) it keeps its own height and width.
   const backButton = (
     <button type="button" onClick={back} className="-ml-1.5 inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-full px-1.5 text-[13px] text-ink-3 transition-colors hover:text-ink">
-      <IconArrowLeft size={16} /> 返回
+      <ArrowLeft size={16} aria-hidden="true" /> 返回
     </button>
   );
   const moreMenu = (
-    <Menu label="更多操作" trigger={<IconMenu size={17} />}>
-      {(close) => (
-        <>
-          <MenuItem icon={<IconShare size={15} />} onSelect={() => { close(); void share(); }}>分享链接</MenuItem>
-          <MenuItem icon={<IconImage size={15} />} onSelect={() => { close(); openPoster(); }}>生成分享海报</MenuItem>
-          <MenuItem icon={<IconCopy size={15} />} onSelect={() => { close(); void copyLink(); }}>复制链接</MenuItem>
-          {item.markdownAvailable &&
-            (inWeChat() ? (
-              <MenuItem icon={<IconDownload size={15} />} onSelect={() => { close(); void copyMarkdown(); }}>复制 Markdown</MenuItem>
-            ) : (
-              <MenuItem icon={<IconDownload size={15} />} href={`/items/${item.id}/markdown`} download onSelect={close}>
-                导出 Markdown
-              </MenuItem>
-            ))}
-        </>
-      )}
+    <Menu label="更多操作" trigger={<MenuIcon size={17} aria-hidden="true" />}>
+      <MenuItem icon={<Share2 size={15} />} onSelect={() => void share()}>分享链接</MenuItem>
+      <MenuItem icon={<Image size={15} />} onSelect={openPoster}>生成分享海报</MenuItem>
+      <MenuItem icon={<Copy size={15} />} onSelect={() => void copyLink()}>复制链接</MenuItem>
+      {item.markdownAvailable &&
+        (inWeChat() ? (
+          <MenuItem icon={<Download size={15} />} onSelect={() => void copyMarkdown()}>复制 Markdown</MenuItem>
+        ) : (
+          <MenuItem icon={<Download size={15} />} href={`/items/${item.id}/markdown`} download>
+            导出 Markdown
+          </MenuItem>
+        ))}
     </Menu>
   );
   // Phones: the same actions as a sheet from the bar (分享 and 原文 are on the toolbar).
   const phoneActions: ActionRow[] = [
-    { key: "poster", label: "生成分享海报", icon: <IconImage size={20} />, onSelect: openPoster },
-    { key: "copy", label: "复制链接", icon: <IconCopy size={20} />, onSelect: () => void copyLink() },
+    { key: "poster", label: "生成分享海报", icon: <Image size={20} />, onSelect: openPoster },
+    { key: "copy", label: "复制链接", icon: <Copy size={20} />, onSelect: () => void copyLink() },
     ...(item.markdownAvailable
       ? [inWeChat()
-        ? { key: "markdown", label: "复制 Markdown", icon: <IconDownload size={20} />, onSelect: () => void copyMarkdown() }
-        : { key: "markdown", label: "导出 Markdown", icon: <IconDownload size={20} />, href: `/items/${item.id}/markdown`, download: true }]
+        ? { key: "markdown", label: "复制 Markdown", icon: <Download size={20} />, onSelect: () => void copyMarkdown() }
+        : { key: "markdown", label: "导出 Markdown", icon: <Download size={20} />, href: `/items/${item.id}/markdown`, download: true }]
       : []),
   ];
   // Desktop actions head the right rail, one row as tall as 返回 at the head of the left one.
@@ -372,7 +368,7 @@ function ItemView({ item }: { item: SiteItemDetail }) {
         rel="noopener noreferrer"
         className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-full border border-line-strong bg-surface px-3.5 text-[12.5px] font-medium text-ink-2 transition-colors hover:border-ink-4 hover:text-ink"
       >
-        {originalLabel} <IconExternal size={13} />
+        {originalLabel} <ExternalLink size={13} aria-hidden="true" />
       </a>
       <StarButton item={item} size={32} />
       {moreMenu}
@@ -448,7 +444,7 @@ function ItemView({ item }: { item: SiteItemDetail }) {
         title={isX ? item.x!.authorName : item.title}
         actions={
           <BarButton label="更多操作" onClick={() => setActionsOpen(true)}>
-            <IconMore size={22} />
+            <Ellipsis size={22} aria-hidden="true" />
           </BarButton>
         }
       />
