@@ -7,6 +7,7 @@ import { EXPERT_QUEUE } from "./queue.ts";
 import { parseSkillUpload, expertSlug, executionMode } from "./import.ts";
 import { BUILTIN_EXPERT, COMING_SOON_EXPERT, COMING_SOON_EXPERT_STATUS, EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG } from "./catalog.ts";
 import { parseTaskMaterials, MAX_TOTAL_MATERIAL_BYTES } from "./materials.ts";
+import { parseTaskPage, taskPagination, type TaskPageQuery } from "./task-query.ts";
 import { getTaskArtifact } from "./worker.ts";
 import { panoramaCheckpointJsonl } from "./panorama-checkpoint.ts";
 
@@ -51,6 +52,9 @@ async function seedBuiltin() {
 
 function taskId() { return randomBytes(16).toString("hex"); }
 
+/** How much of a task's notes a list row carries: enough to recognise the task, not the whole brief. */
+const NOTES_PREVIEW = 200;
+
 export function registerExpertRoutes(app: FastifyInstance, authenticate: Authenticate) {
   app.get("/api/v1/membership/experts", async (req, reply) => {
     noStore(reply);
@@ -85,18 +89,31 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     return reply.code(201).send({ expert: { slug, name: skill.name, description: skill.description, version: skill.version, status, executionMode: executionMode(skill.manifest), missingDependencies: skill.missingDependencies } });
   });
 
+  /**
+   * The caller's own task history, one page at a time. The rows are the caller's own, so a list page
+   * and an expert's own history never reach another employee's tasks; the expert and state filters
+   * only narrow that history further.
+   */
   app.get("/api/v1/membership/expert-tasks", async (req, reply) => {
     noStore(reply);
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
-    const tasks = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
+    const parsed = parseTaskPage(req.query as TaskPageQuery);
+    if (!parsed.ok) return reply.code(400).send({ error: parsed.error });
+    const { limit, offset, expertSlug, states } = parsed.page;
+    // The filters only narrow the caller's own history; without one, the page reads every expert.
+    const slugFilter = expertSlug ? sql`AND t.expert_slug = ${expertSlug}` : sql``;
+    const stateFilter = states.length ? sql`AND t.state = ANY(${sql.array(states)}::text[])` : sql``;
+    const tasks = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage,
+        json_build_object('companyName', t.input->>'companyName', 'notes', left(coalesce(t.input->>'notes',''), ${NOTES_PREVIEW}), 'notesTruncated', length(coalesce(t.input->>'notes','')) > ${NOTES_PREVIEW}) AS input,
         t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
         EXISTS(SELECT 1 FROM member_expert_panorama_checkpoints p WHERE p.task_id=t.id AND p.user_id=${user.id}) AS "hasCheckpoint",
         COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
-      WHERE t.user_id=${user.id} AND t.expires_at > now() ORDER BY t.created_at DESC LIMIT 50`;
-    return { tasks };
+      WHERE t.user_id=${user.id} AND t.expires_at > now() ${slugFilter} ${stateFilter}
+      ORDER BY t.created_at DESC, t.id DESC LIMIT ${limit + 1} OFFSET ${offset}`;
+    return { tasks: tasks.slice(0, limit), pagination: taskPagination(limit, offset, tasks.length) };
   });
 
   app.post("/api/v1/membership/expert-tasks", { bodyLimit: Math.ceil(MAX_TOTAL_MATERIAL_BYTES * 4 / 3) + 512 * 1024 }, async (req, reply) => {

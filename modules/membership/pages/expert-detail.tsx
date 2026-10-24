@@ -12,6 +12,7 @@ import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { COMING_SOON_EXPERT_STATUS, EXPERT_MODE_INPUTS, EXPERT_MODE_LABELS, BUILTIN_SLUGS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, modeNeedsEntity, expertStatusBadge } from "../experts/catalog.ts";
+import { TASK_STATE_TEXT, TASK_STATE_VARIANT } from "../experts/task-state.ts";
 
 export const handle: Screen = { tab: "me", name: "专家" };
 export const meta = () => pageMeta({ title: "专家详情", path: "/experts", noindex: true });
@@ -22,14 +23,15 @@ type Expert = {
 };
 type Candidate = { id: string; name: string; status: string | null; creditCode: string | null; address: string | null; startDate: string | null };
 type Task = {
-  id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string; notes?: string };
+  id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName: string | null; notes: string; notesTruncated: boolean };
   result: { candidates?: Candidate[]; preview?: string; approximate?: boolean; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null; errorCode: string | null; errorMessage: string | null;
   createdAt: string; hasArtifact: boolean; hasCheckpoint: boolean; executionAttempts: number;
   materials: Array<{ id: string; filename: string; byteSize: number; sha256: string; extractionStatus: string; extractionNote: string | null }>;
 };
 
-const STATE_TEXT: Record<string, string> = { queued: "排队中", waiting_input: "等待选择主体", running: "执行中", succeeded: "已完成", failed: "失败", cancelled: "已取消" };
-const STATE_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "destructive"> = { queued: "warning", waiting_input: "warning", running: "default", succeeded: "success", failed: "destructive", cancelled: "secondary" };
+/** How many of this expert's own task records the page reads at once. */
+const HISTORY_LIMIT = 100;
+
 const ERROR_TEXT: Record<string, string> = {
   xinhua_not_configured: "企业信息查询服务尚未配置，请联系管理员。", xinhua_unavailable: "企业信息查询服务暂时不可用。", xinhua_tool_unavailable: "当前账号缺少所需工具，任务未完成。", xinhua_tool_failed: "企业信息查询未返回可用结果。", xinhua_no_candidates: "未匹配到该名称的企业主体，请核对登记名称或改用更短的关键词。", xinhua_entity_id_missing: "查询返回的主体缺少可核验的唯一标识，报告已停止。", xinhua_response_invalid: "查询返回内容无法解析，报告已停止。", xinhua_identity_unverified: "未能按唯一 ID 或完整信用代码核验主体，报告已停止。", xinhua_entity_mismatch: "查询返回的主体与所选企业不一致，报告已停止。", expert_execution_failed: "任务未完成，请检查配置后重试。",
 };
@@ -47,7 +49,7 @@ export default function ExpertDetailPage() {
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const [expertResponse, taskResponse] = await Promise.all([fetch("/api/v1/membership/experts"), fetch("/api/v1/membership/expert-tasks")]);
+    const [expertResponse, taskResponse] = await Promise.all([fetch("/api/v1/membership/experts"), fetch(`/api/v1/membership/expert-tasks?expertSlug=${encodeURIComponent(slug ?? "")}&limit=${HISTORY_LIMIT}`)]);
     if (!expertResponse.ok || !taskResponse.ok) { location.href = "/login"; return; }
     const expertData = await expertResponse.json() as { experts: Expert[] };
     const taskData = await taskResponse.json() as { tasks: Task[] };
@@ -156,7 +158,7 @@ export default function ExpertDetailPage() {
         <CardHeader className="flex-row items-center justify-between"><div><CardTitle>我的任务</CardTitle></div><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void load()}>刷新</Button></CardHeader>
         <CardContent>
           {!tasks.length ? <p className="text-sm text-ink-3">暂无任务。</p> : <div className="grid gap-4">{tasks.map(task => <article key={task.id} className="rounded-card border border-line p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{task.expertName}</h3><Badge variant={STATE_VARIANT[task.state] ?? "secondary"}>{STATE_TEXT[task.state] ?? task.state}</Badge></div>
+            <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{task.expertName}</h3><Badge variant={TASK_STATE_VARIANT[task.state] ?? "secondary"}>{TASK_STATE_TEXT[task.state] ?? task.state}</Badge></div>
             <p className="mt-2 text-xs text-ink-3">{task.stage} · {new Date(task.createdAt).toLocaleString("zh-CN")} · 执行尝试 {task.executionAttempts}/3 · 到期后自动清理</p>
             {task.errorMessage && <Alert className="mt-3" variant="destructive">{ERROR_TEXT[task.errorCode ?? ""] ?? task.errorMessage}</Alert>}
             {task.expertSlug === PANORAMA_EXPERT_SLUG && task.state === "succeeded" && task.result?.panorama?.incomplete && <Alert className="mt-3">结果不完整：{task.result.panorama.gapCount} 项核实缺口{task.result.panorama.limits.length ? `；达到上限：${task.result.panorama.limits.join("、")}` : ""}。请先查看报告中的缺口与未覆盖关系。</Alert>}
