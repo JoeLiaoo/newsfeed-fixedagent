@@ -42,12 +42,13 @@
   - 数据库测试（本机 PostgreSQL 16，模板库 `newsfeed_test`）：
     `DATABASE_URL=postgres://zhijianliao@127.0.0.1:5432/newsfeed_test node --test-global-setup=tests/databases.ts --import ./tests/databases.ts --test --test-concurrency=2 --test-timeout=180000 modules/membership/tests/knowledge-access.test.ts modules/membership/tests/knowledge-bases.test.ts` —— 2 个用例全过（含本次新增的目标详情、分页、跨库隔离断言）。
   - 独立测试：`node --import ./tests/standalone.ts --test modules/membership/tests/knowledge-core.standalone.test.ts` —— 28 个用例全过；`node --import ./tests/standalone.ts --test --test-skip-pattern='every table and column' tests/architecture.test.ts` —— 13 个用例全过。
-  - 文档链接检查：`node scripts/check-doc-links.ts` —— 通过（补齐本日志后）。
+  - 文档链接检查：`node scripts/check-doc-links.ts` —— 通过（补齐本日志后，377 条链接全部存在）。
   - `git diff --check` —— 通过，无空白错误。
+  - PR #55 的 CI：head `5197cd8` 上 `links`、`postgres-integration`、`quality` 三项检查全过（含本机之外的另一套 PostgreSQL 17 环境里的知识库数据库用例）。
 - 未执行或需用户试用的检查：
   - 未做真实员工验收：两名已批准员工各自上传材料、各自核对「同一标的两份材料并列、各自归因、缺失项显示未知」的真实效果，仍待用户用自己的账号与真实材料复核（P5-02～P5-04 保持 `[ ]`）。
   - 未调用真实模型：本次没有触发任何构建，也不发版、不部署；页面渲染改动（材料时间线、修订列表、加载更多）没有在浏览器里人工点过。
-  - 未跑全量测试套件（按仓库约定只做本次改动所需的最小验证）；CI 的 `postgres-integration` 与 `P3 checks` 会在 PR 上完整跑一遍。
+  - 未跑全量测试套件（按仓库约定只做本次改动所需的最小验证）；CI 的 `postgres-integration` 与 `P3 checks` 在本 PR 的 head 上完整跑了一遍，三项检查全过（见下条）。
 
 ## 风险与交接
 
