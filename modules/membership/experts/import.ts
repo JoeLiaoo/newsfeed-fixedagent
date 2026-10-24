@@ -120,13 +120,13 @@ function dependencies(text: string, manifest: Record<string, unknown>) {
   const hasCompleteAdapter = XINHUA_USED_TOOLS.every(name => explicitTools.includes(name));
   const required = new Set([
     ...explicitTools.filter(name => !platformTools.has(name)).map(name => `尚未适配的工具依赖：${name}`),
-    ...(explicitTools.length && !hasCompleteAdapter ? ["新华财经适配需要同时声明主体检索、企业画像和直接投资三个工具"] : []),
+    ...(explicitTools.length && !hasCompleteAdapter ? ["平台企业信息适配需要同时声明主体检索、企业画像和直接投资三个工具"] : []),
     ...explicitSkills.map(name => name.split("@")[0]!.toLowerCase() === metadata.name.toLowerCase() ? `循环技能依赖：${name}` : `未发布的技能依赖：${name}`),
   ]);
   if (/悟道|wudao_mcp_gateway/i.test(text)) required.add("未适配的 MCP 工具依赖");
   if (/skills?\/(?:10|11|12)\b|10\/11\/12 专项 skill/i.test(text)) required.add("未发布的专项 skill");
-  if (/企查查|qichacha/i.test(text)) required.add("企查查 MCP（尚未接入）");
-  if (/天眼查|tianyancha/i.test(text)) required.add("天眼查 MCP（已停用）");
+  if (/企查查|qichacha/i.test(text)) required.add("第三方企业信息 MCP（尚未接入）");
+  if (/天眼查|tianyancha/i.test(text)) required.add("其他企业信息 MCP（已停用）");
   return [...required];
 }
 
