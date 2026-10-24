@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { CalendarDays, ExternalLink } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
@@ -7,22 +7,10 @@ import { Button } from "@aihot/web/components/member-ui/button";
 import { Card } from "@aihot/web/components/member-ui/card";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
+import { createGpProjectsLoader, initialGpProjectsState } from "./invested-gp-state.ts";
 
 export const handle: Screen = { tab: "me", name: "已投GP直投项目" };
 export const meta = () => pageMeta({ title: "已投GP直投项目", path: "/projects/invested-gp", noindex: true });
-
-type Investment = {
-  id: string;
-  gp_name: string;
-  investee_name: string;
-  sector_tags: string[];
-  event_date: string | null;
-  status: "verified";
-  source_url: string | null;
-};
-
-type Page = { investments: Investment[]; pagination: { limit: number; offset: number; nextOffset: number | null }; interest_tags?: string[] };
-const PAGE_SIZE = 50;
 
 function displayDate(value: string | null) {
   if (!value) return "日期未知";
@@ -33,44 +21,12 @@ function displayDate(value: string | null) {
 export default function InvestedGpProjectsPage() {
   const [searchParams] = useSearchParams();
   const matched = searchParams.get("matched") === "1";
-  const [items, setItems] = useState<Investment[]>([]);
-  const [interestTags, setInterestTags] = useState<string[]>([]);
-  const [nextOffset, setNextOffset] = useState<number | null>(0);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [message, setMessage] = useState("");
-  const [retry, setRetry] = useState<{ offset: number; append: boolean }>({ offset: 0, append: false });
-
-  const load = useCallback(async (offset: number, append = false, signal?: AbortSignal) => {
-    setMessage("");
-    if (append) setLoadingMore(true);
-    else setLoading(true);
-    try {
-      const response = await fetch(`/api/v1/membership/gp-projects?limit=${PAGE_SIZE}&offset=${offset}${matched ? "&matched=1" : ""}`, { signal });
-      if (response.status === 401) { location.href = "/login"; return; }
-      if (!response.ok) throw new Error("request_failed");
-      const page = await response.json() as Page;
-      setItems(current => append ? [...current, ...page.investments] : page.investments);
-      if (!append) setInterestTags(page.interest_tags ?? []);
-      setNextOffset(page.pagination.nextOffset);
-      setRetry({ offset: 0, append: false });
-    } catch {
-      if (signal?.aborted) return;
-      setMessage("项目列表暂时无法加载，请重试。");
-      setRetry({ offset, append });
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-        setLoadingMore(false);
-      }
-    }
-  }, [matched]);
-
+  const [{items,interestTags,nextOffset,loading,loadingMore,message,retry},setPage] = useState(initialGpProjectsState);
+  const [loader] = useState(() => createGpProjectsLoader(setPage, () => { location.href = "/login"; }));
   useEffect(() => {
-    const controller = new AbortController();
-    void load(0, false, controller.signal);
-    return () => controller.abort();
-  }, [load]);
+    void loader.load(matched, 0);
+    return () => loader.cancel();
+  }, [loader, matched]);
 
   return <main className="mx-auto w-full max-w-5xl px-5 py-8">
     <header className="mb-6">
@@ -82,12 +38,12 @@ export default function InvestedGpProjectsPage() {
     </header>
 
     {message && <Alert className="mb-5 flex flex-wrap items-center justify-between gap-3" role="alert">
-      <span>{message}</span><Button variant="outline" onClick={() => void load(retry.offset, retry.append)}>重试</Button>
+      <span>{message}</span><Button variant="outline" onClick={() => void loader.load(matched, retry.offset, retry.append)}>重试</Button>
     </Alert>}
 
     {loading
       ? <p className="text-sm text-ink-3" role="status">正在加载项目…</p>
-        : matched && !interestTags.length
+        : matched && !interestTags.length && !message
           ? <Card className="px-6 py-10">
             <p className="font-medium text-ink">还没有选择关注赛道</p>
             <p className="mt-2 text-sm text-ink-3">选择关注赛道后，这里会显示与之匹配的已核实投资。</p>
@@ -120,7 +76,7 @@ export default function InvestedGpProjectsPage() {
             </li>)}
           </ul>
           {nextOffset !== null && <div className="mt-6 flex justify-center">
-            <Button variant="outline" disabled={loadingMore} onClick={() => void load(nextOffset, true)}>
+            <Button variant="outline" disabled={loadingMore} onClick={() => void loader.load(matched, nextOffset, true)}>
               {loadingMore ? "正在加载…" : "加载更多"}
             </Button>
           </div>}

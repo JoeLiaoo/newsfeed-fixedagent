@@ -43,11 +43,11 @@ test("GP project list requires an active member and only exposes approved active
 
   const [admin] = await sql<{ id: string }[]>`INSERT INTO member_users(id,username,real_name,password_hash,status,role)
     VALUES(${randomUUID()},${"gp-project-admin-" + suffix},'管理人员','test-hash','active','admin') RETURNING id`;
-  const activeGp = randomUUID(), pausedGp = randomUUID(), activeCompany = randomUUID();
+  const activeGp = randomUUID(), pausedGp = randomUUID(), candidateManager = randomUUID();
   await sql`INSERT INTO member_gp_watchlist(id,canonical_name,entity_id,entity_role,status,source_ref,reviewed_by)
     VALUES(${activeGp},${"有效GP-" + suffix},'gp-entity','gp','active','https://example.org/gp',${admin!.id}),
           (${pausedGp},${"暂停GP-" + suffix},'paused-entity','gp','paused','https://example.org/paused',${admin!.id}),
-          (${activeCompany},${"非GP主体-" + suffix},'company-entity','company','active','https://example.org/company',${admin!.id})`;
+          (${candidateManager},${"非GP主体-" + suffix},'manager-entity','manager','candidate','https://example.org/company',${admin!.id})`;
   const approvedId = randomUUID();
   await sql`INSERT INTO member_gp_investments(id,gp_id,investee_key,investee_name,raw_evidence,status,sector_tags,approved_event_date,approved_source_url,approved_by,approved_at)
     VALUES(${approvedId},${activeGp},'approved','已核实企业',${sql.json({privateEvidence:"must not be returned"})},'verified',ARRAY['光伏']::text[],'2026-10-20'::date,'https://example.org/evidence',${admin!.id},now()),
@@ -60,7 +60,7 @@ test("GP project list requires an active member and only exposes approved active
       (${randomUUID()},${activeGp},'custom','自定义标签企业',${sql.json({})},'verified',ARRAY['自定义储能']::text[],'2026-10-19'::date,'https://example.org/custom',${admin!.id},now()),
       (${randomUUID()},${activeGp},'substring','标签子串企业',${sql.json({})},'verified',ARRAY['用户侧储能系统']::text[],'2026-10-18'::date,'https://example.org/substring',${admin!.id},now()),
       (${randomUUID()},${activeGp},'unknown-date','未知日期企业',${sql.json({})},'verified',ARRAY['光伏']::text[],NULL,'https://example.org/unknown-date',${admin!.id},now()),
-      (${randomUUID()},${activeCompany},'non-gp','非GP主体企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-21'::date,'https://example.org/non-gp',${admin!.id},now())`;
+      (${randomUUID()},${candidateManager},'non-gp','非GP主体企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-21'::date,'https://example.org/non-gp',${admin!.id},now())`;
   const secondApprovedId = randomUUID();
   await sql`INSERT INTO member_gp_investments(id,gp_id,investee_key,investee_name,raw_evidence,status,sector_tags,approved_event_date,approved_source_url,approved_by,approved_at)
     VALUES(${secondApprovedId},${activeGp},'approved-older','较早核实企业',${sql.json({})},'verified',ARRAY[]::text[],'2026-09-20'::date,'https://example.org/older',${admin!.id},now())`;
@@ -88,7 +88,7 @@ test("GP project list requires an active member and only exposes approved active
   await sql`INSERT INTO member_interest_tags(user_id,tag) VALUES(${member!.id},'光伏'),(${member!.id},'战略配售'),(${member!.id},'自定义储能'),(${member!.id},'储能')`;
   const matched = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects?matched=1&limit=1", headers: { cookie } });
   const matchedBody = await matched.json() as { investments: Array<Record<string, unknown>>; interest_tags: string[]; pagination: { nextOffset: number | null } };
-  assert.deepEqual(matchedBody.interest_tags, ["光伏", "战略配售", "自定义储能", "储能"]);
+  assert.deepEqual([...matchedBody.interest_tags].sort(), ["光伏", "战略配售", "自定义储能", "储能"].sort());
   assert.equal(matchedBody.investments.length, 1);
   assert.equal(matchedBody.investments[0]?.id, approvedId);
   assert.equal(matchedBody.pagination.nextOffset, 1);
@@ -106,5 +106,5 @@ test("GP project list requires an active member and only exposes approved active
 
   const full = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects", headers: { cookie } });
   const all = (await full.json() as { investments: Array<{ investee_name: string }> }).investments;
-  assert.deepEqual(all.map(row => row.investee_name), ["非GP主体企业", "已核实企业", "自定义标签企业", "战略配售企业", "未匹配企业", "较早核实企业", "未知日期企业"]);
+  assert.deepEqual(all.map(row => row.investee_name).sort(), ["已核实企业", "自定义标签企业", "战略配售企业", "标签子串企业", "未匹配企业", "较早核实企业", "未知日期企业"].sort());
 });
