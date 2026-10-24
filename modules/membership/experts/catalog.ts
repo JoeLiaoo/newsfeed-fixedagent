@@ -26,7 +26,7 @@ export const BUILTIN_EXPERT = {
   slug: EXPERT_SLUG,
   name: "企业一层对外投资核查",
   description: "查询已确认主体的工商画像与一层直接投资，生成带来源和待核事项的底稿。",
-  version: "1.0.0",
+  version: "0.1.0",
   skillMd: EXPERT_SKILL,
   missingDependencies: [],
 };

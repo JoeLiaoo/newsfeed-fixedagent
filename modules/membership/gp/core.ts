@@ -8,7 +8,7 @@ export type Investment = { key: string; name: string; investeeId: string | null;
 export function normalizeInvestment(raw: Record<string,unknown>): Investment | null {
   const name = textField(raw, "company_name", "investee_name", "investee_company_name", "name");
   if (!name) return null;
-  const investeeId = textField(raw, "investee_id", "company_id", "comp_id", "credit_code", "unified_social_credit_code");
+  const investeeId = textField(raw, "investee_id", "company_id", "comp_id", "comp_id_iwudao", "credit_code", "unified_social_credit_code");
   const key = (investeeId ? "id:" + investeeId : "name:" + name.replace(/\s+/g,"").toLowerCase());
   return {
     key: createHash("sha256").update(key).digest("hex"), name, investeeId,
