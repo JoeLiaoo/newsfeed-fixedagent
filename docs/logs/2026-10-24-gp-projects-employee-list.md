@@ -23,3 +23,10 @@
 PR：[PR #52](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/52)，分支 `feat/projects-invested-gp-v1`。
 
 PR 第一次 `quality` 检查发现本页链接使用了设计系统外的 `rounded-sm`；已改为 `rounded-control` 并复跑架构规则通过。后续 CI 以最新 head 为准。
+
+
+## 自动审阅验证补充
+
+- 核对员工会话由服务端限制 active 账号；查询仅返回 verified 投资及 active/gp 主体，私有证据与审核身份不出 API，来源使用审核字段，日期不使用发现或入库时间代填。完整 diff 未发现额外实质问题。
+- 原 CI 显式列出数据库测试文件，遗漏本 PR 新增的 `gp-projects-access.test.ts`；已把此文件加入 PostgreSQL job，以便对最终 head 实际验证新接口，未改动业务实现。
+- 本地架构规则 13/13、357 个文档链接通过。最终 CI 及主分支组合验证结果记入 PR 审阅结论；未执行生产部署与真实员工验收。
