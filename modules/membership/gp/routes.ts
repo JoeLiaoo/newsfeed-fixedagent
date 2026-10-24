@@ -18,11 +18,14 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     reply.header("Cache-Control","private, no-store").header("Vary","Cookie");
     const user=await authenticate(req);
     if(!user) return reply.code(401).send({error:"login_required"});
-    const query=req.query as {limit?:string;offset?:string;matched?:string};
+    const query=req.query as {limit?:unknown;offset?:unknown;matched?:unknown};
+    const validInteger=(value:unknown)=>value===undefined || (typeof value==="string" && /^\d+$/.test(value) && Number.isSafeInteger(Number(value)));
+    if(!validInteger(query.limit)||!validInteger(query.offset)||!(query.matched===undefined||query.matched==="0"||query.matched==="1"))
+      return reply.code(400).send({error:"invalid_query"});
     const matched=query.matched==="1";
     const requestedLimit=Number(query.limit??50),requestedOffset=Number(query.offset??0);
-    const limit=Number.isInteger(requestedLimit)?Math.min(100,Math.max(1,requestedLimit)):50;
-    const offset=Number.isInteger(requestedOffset)?Math.min(100_000,Math.max(0,requestedOffset)):0;
+    const limit=Math.min(100,Math.max(1,requestedLimit));
+    const offset=Math.min(100_000,Math.max(0,requestedOffset));
     const interests=matched?await sql<{tag:string}[]>`SELECT tag FROM member_interest_tags WHERE user_id=${user.id} ORDER BY tag`:[];
     const interestTags=interests.map(row=>row.tag);
     const rows=await sql`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.sector_tags,
