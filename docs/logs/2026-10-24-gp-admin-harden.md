@@ -18,4 +18,5 @@
 ## 风险与交接
 
 - 已知限制／缺失依赖：列表使用 offset 分页；高并发新增/更新时跨页内容可能变化。同步接口返回“已排队”只证明队列接受请求，不代表同步成功；结果详情仍通过名单的最近同步时间与错误码查看。
-- 下一步：PR [#53](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/53) 已指向 `main`，开启时 head 为 `da006fe8bf0aef2c63f42ce8003a387a2cf907c0`；`quality` 排队，`links` 与 `postgres-integration` 运行中。等待最终 PR head 的检查结果；不合并、不部署。
+- PR 验证补记：`dd45869d6d2ff0b02e3ffea30b6524f1432db98c` 的 `quality`、`postgres-integration`、`links` 均通过；PR #53 当前仍为 Open。未合并、不部署，真实同步与业务验收仍待完成。
+- 下一步：按 PR Review 反馈继续处理；P3-01～P3-04 继续保持未勾选。
