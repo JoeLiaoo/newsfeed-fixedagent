@@ -15,6 +15,7 @@ import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_STAGE_LABELS, FRONTIER_PODCAST_EXPERT_SLUG, HTML_PREVIEW_EXPERT_SLUGS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, SECTOR_PEER_EXPERT_SLUG, modeNeedsEntity, expertStatusBadge } from "../experts/catalog.ts";
 import { companyRelationLabel, isBranchType } from "../experts/data.ts";
+import { EXPERT_TASK_PAGE_SIZE } from "../experts/task-page.ts";
 
 export const handle: Screen = { tab: "me", name: "专家" };
 export const meta = () => pageMeta({ title: "专家详情", path: "/experts", noindex: true });
@@ -69,6 +70,9 @@ export default function ExpertDetailPage() {
   const { slug } = useParams();
   const [expert, setExpert] = useState<Expert | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [pageOffset, setPageOffset] = useState(0);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [paging, setPaging] = useState(false);
   const [companyName, setCompanyName] = useState("");
   const [query, setQuery] = useState("");
   const [queryError, setQueryError] = useState("");
@@ -84,22 +88,40 @@ export default function ExpertDetailPage() {
   // first attempt may have created instead of starting a second one.
   const submitKey = useRef<{ signature: string; key: string } | null>(null);
 
-  async function load() {
-    const [expertResponse, taskResponse] = await Promise.all([fetch("/api/v1/membership/experts"), fetch("/api/v1/membership/expert-tasks")]);
-    if (!expertResponse.ok || !taskResponse.ok) { location.href = "/login"; return; }
-    const expertData = await expertResponse.json() as { experts: Expert[] };
-    const taskData = await taskResponse.json() as { tasks: Task[] };
-    setExpert(expertData.experts.find(entry => entry.slug === slug) ?? null);
-    setTasks(taskData.tasks.filter(task => task.expertSlug === slug));
-    setLoading(false);
+  async function loadExpert() {
+    const response = await fetch("/api/v1/membership/experts");
+    if (!response.ok) { location.href = "/login"; return; }
+    const data = await response.json() as { experts: Expert[] };
+    setExpert(data.experts.find(entry => entry.slug === slug) ?? null);
   }
 
-  useEffect(() => { void load().catch(() => { setMessage("加载失败，请刷新重试。"); setLoading(false); }); }, [slug]);
+  /** Read one page of this expert's history; the server also scopes every row to the caller. */
+  async function loadTasks(offset: number) {
+    const response = await fetch(`/api/v1/membership/expert-tasks?expertSlug=${encodeURIComponent(slug ?? "")}&limit=${EXPERT_TASK_PAGE_SIZE}&offset=${offset}`);
+    if (!response.ok) { location.href = "/login"; return; }
+    const data = await response.json() as { tasks: Task[]; pagination: { nextOffset: number | null } };
+    setTasks(data.tasks);
+    setNextOffset(data.pagination.nextOffset ?? null);
+    setPageOffset(offset);
+  }
+
+  async function load(offset: number) {
+    await Promise.all([loadExpert(), loadTasks(offset)]);
+  }
+
+  async function turn(offset: number) {
+    setPaging(true);
+    try { await loadTasks(offset); }
+    catch { setMessage("任务列表加载失败，请重试。"); }
+    finally { setPaging(false); }
+  }
+
+  useEffect(() => { void load(0).catch(() => { setMessage("加载失败，请刷新重试。"); }).finally(() => setLoading(false)); }, [slug]);
   useEffect(() => {
     if (!tasks.some(task => task.state === "queued" || task.state === "running")) return;
-    const timer = setInterval(() => { void load().catch(() => undefined); }, 4000);
+    const timer = setInterval(() => { void loadTasks(pageOffset).catch(() => undefined); }, 4000);
     return () => clearInterval(timer);
-  }, [tasks]);
+  }, [tasks, pageOffset]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -137,7 +159,7 @@ export default function ExpertDetailPage() {
       try { data = JSON.parse(raw) as { error?: string; message?: string }; } catch { data = {}; }
       if (!response.ok) { setMessage(submitErrorText(data, response.status)); return; }
       submitKey.current = null;
-      setCompanyName(""); setQuery(""); setNotes(""); setFiles([]); setMessage("任务已进入队列。离开此页不会中断任务。"); await load();
+      setCompanyName(""); setQuery(""); setNotes(""); setFiles([]); setMessage("任务已进入队列。离开此页不会中断任务。"); await load(0);
     } catch { setMessage("任务提交请求失败，请检查网络后重试；重试不会重复创建任务。"); }
     finally { setBusy(false); }
   }
@@ -146,7 +168,7 @@ export default function ExpertDetailPage() {
     setBusy(true);
     try {
       const response = await fetch(`/api/v1/membership/expert-tasks/${taskId}/entity`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ companyId }) });
-      setMessage(response.ok ? "已确认主体，继续查询…" : "主体确认失败，请刷新后重试。"); await load();
+      setMessage(response.ok ? "已确认主体，继续查询…" : "主体确认失败，请刷新后重试。"); await load(pageOffset);
     } catch { setMessage("主体确认请求失败，请检查网络后重试。"); }
     finally { setBusy(false); }
   }
@@ -155,7 +177,7 @@ export default function ExpertDetailPage() {
     setBusy(true);
     try {
       const response = await fetch(`/api/v1/membership/expert-tasks/${taskId}/${action}`, { method: "POST" });
-      setMessage(response.ok ? (action === "retry" ? "任务已重新提交。" : "已请求取消任务。") : "操作失败，请刷新后重试。"); await load();
+      setMessage(response.ok ? (action === "retry" ? "任务已重新提交。" : "已请求取消任务。") : "操作失败，请刷新后重试。"); await load(pageOffset);
     } catch { setMessage("操作请求失败，请检查网络后重试。"); }
     finally { setBusy(false); }
   }
@@ -165,7 +187,7 @@ export default function ExpertDetailPage() {
     try {
       const response = await fetch(`/api/v1/membership/expert-tasks/${taskId}/materials/${materialId}`, { method: "DELETE" });
       setMessage(response.ok ? "任务材料已删除。" : "材料删除失败，请确认任务已结束。");
-      await load();
+      await load(pageOffset);
     } catch { setMessage("材料删除请求失败，请检查网络后重试。"); }
     finally { setBusy(false); }
   }
@@ -222,9 +244,9 @@ export default function ExpertDetailPage() {
       </Card>}
 
       {expert && expert.status !== COMING_SOON_EXPERT_STATUS && <Card>
-        <CardHeader className="flex-row items-center justify-between"><div><CardTitle>我的任务</CardTitle></div><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void load()}>刷新</Button></CardHeader>
+        <CardHeader className="flex-row items-center justify-between"><div><CardTitle>我的任务</CardTitle></div><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void load(pageOffset)}>刷新</Button></CardHeader>
         <CardContent>
-          {!tasks.length ? <p className="text-sm text-ink-3">暂无任务。</p> : <div className="grid gap-4">{tasks.map(task => <article key={task.id} className="rounded-card border border-line p-4">
+          {!tasks.length ? <p className="text-sm text-ink-3">{pageOffset > 0 ? "这一页没有任务记录，可回到上一页查看。" : "该专家还没有任务记录。提交任务后，运行记录与产物会显示在这里。"}</p> : <div className="grid gap-4">{tasks.map(task => <article key={task.id} className="rounded-card border border-line p-4">
             <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{task.expertName}</h3><Badge variant={STATE_VARIANT[task.state] ?? "secondary"}>{STATE_TEXT[task.state] ?? task.state}</Badge></div>
             {taskSubject(task) && <p className="mt-1 break-words text-sm text-ink-2">查询：{taskSubject(task)}</p>}
             {task.selectedEntity?.name && <p className="mt-1 break-words text-xs text-ink-3">已确认主体：{task.selectedEntity.name}{task.selectedEntity.creditCode ? `（${task.selectedEntity.creditCode}）` : ""}</p>}
@@ -242,6 +264,11 @@ export default function ExpertDetailPage() {
               {["queued", "running", "waiting_input"].includes(task.state) && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void taskAction(task.id, "cancel")}>取消</Button>}
             </div>
           </article>)}</div>}
+          {(nextOffset !== null || pageOffset > 0) && <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={paging || pageOffset === 0} onClick={() => void turn(Math.max(0, pageOffset - EXPERT_TASK_PAGE_SIZE))}>上一页</Button>
+            <span className="text-xs text-ink-3">第 {Math.floor(pageOffset / EXPERT_TASK_PAGE_SIZE) + 1} 页</span>
+            <Button type="button" variant="outline" size="sm" disabled={paging || nextOffset === null} onClick={() => void turn(nextOffset ?? pageOffset)}>下一页</Button>
+          </div>}
         </CardContent>
       </Card>}
     </div>

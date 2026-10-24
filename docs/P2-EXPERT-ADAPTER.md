@@ -106,6 +106,7 @@
 ## 运行边界
 
 - 格式及依赖检查通过的专家对获准员工公开；任务、上传材料、模型调用记录与产物仍归属于发起任务的员工，专家创建者不能读取其他员工的任务内容。
+- 任务列表接口（`GET /api/v1/membership/expert-tasks`）只返回调用者自己的未过期任务，支持 `limit`／`offset` 分页与可选的 `expertSlug` 过滤：一页默认 20 条，最多 100 条，最多翻到 100000 条，非数字或重复参数按 400 拒绝。专家详情页按当前专家分页读取任务历史，因此某个专家的任务不再被固定上限截断，也不会读到其他专家或其他员工的任务。
 - 用户上传的 SKILL.md 或 ZIP 只作为文本保存和展示，不执行脚本、模板、网页或包内程序。ZIP 根目录仅允许 `manifest.json` 与 `SKILL.md`；限制压缩体积、条目数量、解压声明大小及路径。
 - `SKILL.md` frontmatter 与 ZIP manifest 的 `tools`、`skills`/`dependencies.tools`、`dependencies.skills` 会结构化校验。未声明工具的自定义专家仍按文本执行；完整声明 `fuzzy_search_company_list`、`get_company_profile`、`get_direct_investment` 的专家可走平台固定的新华财经适配流程（模式 `xinhua_trial`）；完整声明平台全部八项能力的专家走平台的多层执行器（模式 `xinhua_panorama`），由平台实现穿透规则，技能文本只作为说明。缺少所需工具、声明额外未适配工具或未发布专项 skill 的导入项会显示缺失依赖并阻止运行；只声明部分全景能力时按一层执行，并在导入说明中提示。用户包不能指定 MCP 地址、密钥、代码或文件系统权限。
 - MCP 工具采用服务端固定 allowlist，token 从 `XINHUA_MCP_API_KEY` 凭据组读取；远端地址固定在 `mcp.cnfic.com.cn` 的 HTTPS 主机范围。
