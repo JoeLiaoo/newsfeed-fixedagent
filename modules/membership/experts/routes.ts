@@ -4,8 +4,9 @@ import { sql } from "@aihot/backend/db";
 import { enqueueOn } from "@aihot/backend/jobs/queue";
 import type { MemberSession } from "../server.ts";
 import { EXPERT_QUEUE } from "./queue.ts";
-import { parseSkillUpload, expertSlug } from "./import.ts";
+import { parseSkillUpload, expertSlug, executionMode } from "./import.ts";
 import { BUILTIN_EXPERT, EXPERT_SLUG } from "./catalog.ts";
+import { parseTaskMaterials, MAX_TOTAL_MATERIAL_BYTES } from "./materials.ts";
 import { getTaskArtifact } from "./worker.ts";
 
 type Authenticate = (request: FastifyRequest, allowPending?: boolean) => Promise<MemberSession | null>;
@@ -41,8 +42,8 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     if (!user) return reply.code(401).send({ error: "login_required" });
     await seedBuiltin();
     const experts = await sql<{ slug: string; name: string; description: string; version: string; status: string; missing_dependencies: string[]; execution_mode: string; created_at: Date }[]>`
-      SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${EXPERT_SLUG} THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
-      WHERE status = 'available' OR owner_id = ${user.id} OR ${user.role === "admin"}
+      SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
+      WHERE owner_id IS NULL OR owner_id = ${user.id}
       ORDER BY (slug = ${EXPERT_SLUG}) DESC, created_at DESC`;
     return { experts };
   });
@@ -65,7 +66,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const status = skill.missingDependencies.length ? "blocked" : "available";
     await sql`INSERT INTO member_experts(slug, owner_id, name, description, version, skill_md, manifest, status, missing_dependencies)
       VALUES (${slug}, ${user.id}, ${skill.name}, ${skill.description}, ${skill.version}, ${skill.skillMd}, ${sql.json(skill.manifest)}, ${status}, ${sql.array(skill.missingDependencies)}::text[])`;
-    return reply.code(201).send({ expert: { slug, name: skill.name, description: skill.description, version: skill.version, status, executionMode: "text_only", missingDependencies: skill.missingDependencies } });
+    return reply.code(201).send({ expert: { slug, name: skill.name, description: skill.description, version: skill.version, status, executionMode: executionMode(skill.manifest), missingDependencies: skill.missingDependencies } });
   });
 
   app.get("/api/v1/membership/expert-tasks", async (req, reply) => {
@@ -74,13 +75,14 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     if (!user) return reply.code(401).send({ error: "login_required" });
     const tasks = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
         t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
-        EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact"
+        EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
+        COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
       WHERE t.user_id=${user.id} AND t.expires_at > now() ORDER BY t.created_at DESC LIMIT 50`;
     return { tasks };
   });
 
-  app.post("/api/v1/membership/expert-tasks", async (req, reply) => {
+  app.post("/api/v1/membership/expert-tasks", { bodyLimit: Math.ceil(MAX_TOTAL_MATERIAL_BYTES * 4 / 3) + 512 * 1024 }, async (req, reply) => {
     noStore(reply);
     if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
     const user = await authenticate(req);
@@ -89,13 +91,17 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const notes = typeof body(req).notes === "string" ? (body(req).notes as string).trim() : "";
     const companyName = typeof body(req).companyName === "string" ? (body(req).companyName as string).trim() : "";
     if (notes.length > 20_000 || companyName.length > 200) return reply.code(413).send({ error: "task_input_too_large" });
-    const experts = typeof slug === "string" ? await sql<{ status: string }[]>`SELECT status FROM member_experts WHERE slug=${slug}` : [];
+    let materials;
+    try { materials = parseTaskMaterials(body(req).materials); }
+    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "expert_material_invalid" }); }
+    const experts = typeof slug === "string" ? await sql<{ status: string; owner_id: string | null; manifest: { tools?: string[] } }[]>`SELECT status, owner_id, manifest FROM member_experts WHERE slug=${slug} AND (owner_id IS NULL OR owner_id=${user.id})` : [];
     const expert = experts[0];
     if (!expert || expert.status !== "available") return reply.code(404).send({ error: expert ? "expert_dependencies_missing" : "expert_not_found" });
-    if (slug === EXPERT_SLUG && companyName.length < 2) return reply.code(400).send({ error: "company_name_required" });
+    const mode = slug === EXPERT_SLUG ? "xinhua_trial" : executionMode(expert.manifest);
+    if (mode === "xinhua_trial" && companyName.length < 2) return reply.code(400).send({ error: "company_name_required" });
     if (slug !== EXPERT_SLUG && notes.length < 2) return reply.code(400).send({ error: "task_text_required" });
     const id = taskId();
-    const input = { ...(slug === EXPERT_SLUG ? { companyName } : {}), notes };
+    const input = { ...(mode === "xinhua_trial" ? { companyName } : {}), notes };
     const rawKey = req.headers["idempotency-key"];
     const idempotencyKey = typeof rawKey === "string" && /^[a-zA-Z0-9._:-]{8,128}$/.test(rawKey) ? rawKey : null;
     const accepted = await sql.begin(async tx => {
@@ -109,6 +115,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
       const recent = await tx<{ count: number }[]>`SELECT count(*)::int AS count FROM member_expert_tasks WHERE user_id=${user.id} AND created_at > now() - interval '1 hour'`;
       if ((recent[0]?.count ?? 0) >= 10) return null;
       await tx`INSERT INTO member_expert_tasks(id,user_id,expert_slug,state,input,idempotency_key) VALUES (${id},${user.id},${slug as string},'queued',${tx.json(input)},${idempotencyKey})`;
+      for (const material of materials) await tx`INSERT INTO member_expert_task_materials(id,task_id,user_id,filename,format,content_type,byte_size,sha256,body) VALUES (${material.id},${id},${user.id},${material.filename},${material.format},${material.contentType},${material.bytes.length},${material.sha256},${material.bytes})`;
       await enqueueOn(EXPERT_QUEUE, { taskId: id }, { singletonKey: id }, tx);
       return { id, state: "queued" };
     });
@@ -128,7 +135,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const companyId = body(req).companyId;
     if (typeof companyId !== "string" || companyId.length > 120) return reply.code(400).send({ error: "invalid_entity" });
     const changed = await sql.begin(async tx => {
-      const rows = await tx<{ id: string; result: { candidates?: Array<Record<string, unknown>> } | null }[]>`SELECT id, result FROM member_expert_tasks WHERE id=${id} AND user_id=${user.id} AND state='waiting_input' AND expert_slug=${EXPERT_SLUG} FOR UPDATE`;
+      const rows = await tx<{ id: string; result: { candidates?: Array<Record<string, unknown>> } | null }[]>`SELECT t.id, t.result FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug WHERE t.id=${id} AND t.user_id=${user.id} AND t.state='waiting_input' AND (t.expert_slug=${EXPERT_SLUG} OR e.manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb) FOR UPDATE OF t`;
       const candidates = rows[0]?.result?.candidates ?? [];
       const entity = candidates.find(candidate => candidate.id === companyId);
       if (!rows[0] || !entity) return false;
@@ -180,5 +187,27 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const artifact = await getTaskArtifact(id, user.id);
     if (!artifact) return reply.code(404).send({ error: "artifact_not_found_or_expired" });
     return reply.header("Content-Type", artifact.content_type).header("Content-Disposition", `attachment; filename="${artifact.filename}"`).header("X-Content-Type-Options", "nosniff").header("ETag", `"${artifact.sha256}"`).send(artifact.body);
+  });
+
+  app.get("/api/v1/membership/expert-tasks/:id/materials/:materialId", async (req, reply) => {
+    noStore(reply);
+    const user = await authenticate(req);
+    if (!user) return reply.code(401).send({ error: "login_required" });
+    const { id, materialId } = req.params as { id: string; materialId: string };
+    const rows = await sql<{ filename: string; content_type: string; body: Buffer; sha256: string }[]>`SELECT m.filename,m.content_type,m.body,m.sha256 FROM member_expert_task_materials m JOIN member_expert_tasks t ON t.id=m.task_id WHERE m.id=${materialId} AND m.task_id=${id} AND m.user_id=${user.id} AND t.user_id=${user.id} AND t.state <> 'cancelled' AND t.expires_at > now() AND m.expires_at > now()`;
+    if (!rows[0]) return reply.code(404).send({ error: "expert_material_not_found" });
+    const material = rows[0];
+    return reply.header("Content-Type", material.content_type).header("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(material.filename)}`).header("X-Content-Type-Options", "nosniff").header("ETag", `"${material.sha256}"`).send(material.body);
+  });
+
+  app.delete("/api/v1/membership/expert-tasks/:id/materials/:materialId", async (req, reply) => {
+    noStore(reply);
+    if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
+    const user = await authenticate(req);
+    if (!user) return reply.code(401).send({ error: "login_required" });
+    const { id, materialId } = req.params as { id: string; materialId: string };
+    const removed = await sql`DELETE FROM member_expert_task_materials m USING member_expert_tasks t WHERE m.id=${materialId} AND m.task_id=${id} AND m.user_id=${user.id} AND t.id=m.task_id AND t.user_id=${user.id} AND t.state IN ('succeeded','failed','cancelled') RETURNING m.id`;
+    if (!removed.length) return reply.code(404).send({ error: "expert_material_not_deletable" });
+    return reply.code(204).send();
   });
 }

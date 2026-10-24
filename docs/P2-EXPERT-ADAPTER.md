@@ -24,12 +24,12 @@
 ## 运行边界
 
 - 用户上传的 SKILL.md 或 ZIP 只作为文本保存和展示，不执行脚本、模板、网页或包内程序。ZIP 根目录仅允许 `manifest.json` 与 `SKILL.md`；限制压缩体积、条目数量、解压声明大小及路径。
-- `SKILL.md` frontmatter 与 ZIP manifest 的 `tools`、`skills`/`dependencies.tools`、`dependencies.skills` 会结构化校验，拒绝无效格式、未知工具、未发布或自引用循环技能依赖；声明依赖会阻止运行。自定义专家明确标记为纯文本模式，只使用 DeepSeek，不向用户包开放 MCP、代码执行或文件系统权限。
+- `SKILL.md` frontmatter 与 ZIP manifest 的 `tools`、`skills`/`dependencies.tools`、`dependencies.skills` 会结构化校验。未声明工具的自定义专家仍按文本执行；完整声明 `fuzzy_search_company_list`、`get_company_profile`、`get_direct_investment` 的专家可走平台固定的新华财经适配流程：员工先确认主体，服务端以固定参数读取画像和一层直接投资，再把结构化证据交给 DeepSeek。缺少其中任一工具、声明额外未适配工具、悟道或未发布专项 skill 的导入项会显示缺失依赖并阻止运行。用户包不能指定 MCP 地址、密钥、代码或文件系统权限。
 - MCP 工具采用服务端固定 allowlist，token 从 `XINHUA_MCP_API_KEY` 凭据组读取；远端地址固定在 `mcp.cnfic.com.cn` 的 HTTPS 主机范围。
 - 2026-10-23 实测的工具契约（结构信息，未落盘原始响应）：`fuzzy_search_company_list` 的参数为 `keyword`（必填）、`limit`（1–50）、`offset`，返回 `{result:{total, results[], pagination{limit,offset,count,has_more,next_offset}}}`，候选含 `company_id`、`company_name`、`company_status_name`、`credit_code`、`address`、`start_date`；`get_company_profile` 与 `get_direct_investment` 的 `time` 为可选对象，`time_field` 分别是 `start_date` 与 `capi_date`，不传则按滚动三年窗口过滤。
-- 员工材料目前是受长度限制的纯文本备注，不支持任意文件上传。任务文本、结果和产物隔离到所属用户；任务和产物均于创建后 7 天清理。
+- 任务可附最多 3 份 PDF、DOCX、PPTX 或 UTF-8 Markdown 材料，单份 5 MB、总计 10 MB；与任务在同一事务入库。提取文字按文件截断后作为不可信数据交给模型，报告列文件名及 SHA-256，且标明用户提供、未经独立核验。上传材料、任务、结果与产物仅本人可访问，七天后清理；任务结束后可提前删除材料。扫描 PDF 无文字层时任务明确失败。
 - 每人最多同时有 2 个排队/运行/待选任务，每小时最多提交 10 个；客户端幂等键防止重复提交。单任务最多领取执行 3 次，每人每小时最多 6 次执行尝试；失败重试计入同一预算。任务用原子领取、5 分钟租约和 30 秒心跳保护，产物对每个任务唯一。
-- 真实新华财经账号、工具 schema 和 DeepSeek 实际配置仍需部署后端到端试用。试运行底稿不能替代正式尽调复核。
+- 新增材料上传及自定义专家受控工具执行尚未经过真实环境端到端试用；仍需部署后核对权限、提取质量、工具响应和报告内容。试运行底稿不能替代正式尽调复核。
 
 ## Review 回归验证
 

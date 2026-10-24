@@ -46,7 +46,7 @@
 | `POST /bases` | 新增知识库：名称（2–80 字）与说明（≤200 字）；已批准员工均可创建 |
 | `GET /overview` | 库内材料数、知识页数、构建中／失败数、未决质量问题、时效分布（`?baseId=` 指定库，缺省为共享库） |
 | `GET /documents`、`GET /documents/:id` | 材料列表（可检索，`?baseId=`、`?query=`）与单份材料的版本、构建状态（已撤回的材料只对上传者与管理员可见） |
-| `POST /documents` | 上传：文件名、base64 正文、标题、作者、机构、日期、类型、所属库 `baseId`、可选的 `documentId`（作为新版本） |
+| `POST /documents` | 上传：文件名、base64 正文、标题、作者、机构、日期、类型、所属库 `baseId`、可选的 `documentId`（作为新版本）；日期须为真实有效的 `YYYY-MM-DD`，无效值返回 `knowledge_date_invalid` |
 | `POST /documents/:id/withdraw` | 撤回材料：它的贡献退出所在库，由它生成的知识页重新聚合或下架 |
 | `GET /tasks`、`POST /tasks/:id/retry` | 库内构建状态列表；重跑失败的任务（从上次成功的检查点继续） |
 | `GET /pages`、`GET /pages/:slug` | 已发布知识页列表（可检索，`?baseId=`、`?query=`）与单页正文、引用、质量问题（下架的页面对其他员工是 404） |
@@ -65,7 +65,7 @@
 
 - **发布围栏**：发布事务按固定顺序锁材料与任务（先材料后任务），并核对材料仍为 `active`、任务仍为 `running`、租约令牌属于当前 worker 且未过期；任一项不满足就不写页面也不写成功事件（错误码 `knowledge_lease_lost`／`knowledge_document_withdrawn`）。每个阶段的 `UPDATE` 影响 0 行即停止后续工作。同一材料的旧版本构建不得覆盖新版本已发布的内容（错误码 `knowledge_publish_stale`）。
 - **多材料聚合**：每份材料版本对同一标的（`target_key`）保存一份结构化贡献（`member_wiki_contributions`），当前页面由该标的所有有效贡献聚合而成；更新一份材料只替换它自己那份贡献，其余材料与版本不受影响。页面按 `target_key` 加锁，并发发布的两份材料都在页面上。
-- 重跑：`membership.knowledge-recover` 每 5 分钟把租约过期的构建重新入队；`POST /tasks/:id/retry` 由上传者手动重跑（同一任务最多 5 次尝试）。
+- 重跑：`membership.knowledge-recover` 每 5 分钟把租约过期的构建重新入队；`POST /tasks/:id/retry` 由上传者手动重跑。自动恢复与手动重试共用最多 5 次领取预算；达到上限时任务转 `failed`，保留 `knowledge_retry_exhausted` 原因，不再入队。
 - 重跑从上次成功的检查点继续：模型不可用等临时失败会重新跑那一步；**确定性的质量失败**（复核不通过、结构检查出现 P0）重跑结果相同，需要新材料版本或修正规则。
 - 上传材料只作数据：正文里的指令不改变规则，构建过程不执行材料中的任何程序。
 

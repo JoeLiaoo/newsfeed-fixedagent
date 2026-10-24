@@ -38,6 +38,9 @@ export const MAX_PUBLISHED_PAGE_SLUG_LENGTH = 128;
 /** The pages one build may publish. */
 export const MAX_PAGES_PER_BUILD = 8;
 
+/** Shared budget for worker lease recovery and an employee's manual retry. */
+export const MAX_WIKI_ATTEMPTS = 5;
+
 /** The stance words a viewpoint table may hold; the set is closed so a page cannot grow a new one. */
 export const STANCE_WORDS = ["看多", "看好", "中性", "看空", "超配", "标配", "低配", "上行", "震荡", "下行"] as const;
 
@@ -93,6 +96,7 @@ export const TASK_ERRORS: Record<string, string> = {
   knowledge_publish_failed: "发布环节失败，旧版页面仍可阅读，可重试。",
   knowledge_publish_stale: "该材料已有更新版本发布，本次构建未覆盖当前页面。",
   knowledge_lease_lost: "构建已交由其他进程处理或材料已撤回，本次构建未发布任何页面。",
+  knowledge_retry_exhausted: "构建自动恢复次数已用尽，请联系管理员检查后重新上传材料。",
   knowledge_document_withdrawn: "该材料已撤回，本次构建未发布任何页面。",
   knowledge_task_cancelled: "任务已取消。",
   knowledge_task_not_retryable: "任务当前不可重试。",
