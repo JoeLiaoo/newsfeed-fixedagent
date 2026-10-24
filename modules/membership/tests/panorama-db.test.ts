@@ -68,4 +68,6 @@ test("the panorama expert is published, needs a confirmed entity and keeps its c
   assert.equal(download.statusCode, 200);
   assert.ok(download.headers["content-type"]?.includes("application/x-ndjson"));
   assert.ok(download.body.includes("get_direct_investment"));
+  const listedTasks = (await (await app.inject({ method: "GET", url: "/api/v1/membership/expert-tasks", headers: { cookie, ...common } })).json() as { tasks: Array<{ id: string; hasCheckpoint: boolean }> }).tasks;
+  assert.equal(listedTasks.find(task => task.id === taskId)?.hasCheckpoint, true, "页面只在采集台账存在时显示 JSONL 下载");
 });

@@ -7,6 +7,7 @@ import { mapProfile, mapRelations, mapShareholders } from "../experts/panorama-f
 import { renderPanorama } from "../experts/panorama-markdown.ts";
 import { executionMode } from "../experts/import.ts";
 import { BUILTIN_EXPERT, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG, XINHUA_ALLOWED_TOOLS } from "../experts/catalog.ts";
+import type { XinhuaCall } from "../experts/xinhua.ts";
 
 type Relation = Partial<PanoramaRelation>;
 
@@ -155,7 +156,7 @@ function provider(fixture: Fixture) {
     if (tool === "get_company_annual_report_investment_info") return { company_annual_report_investment_info: fixture.annualInvestment?.[query] ?? [] };
     throw new Error(`unexpected tool ${tool}`);
   };
-  return { call: call as never, calls };
+  return { call: call as unknown as XinhuaCall, calls };
 }
 
 function panoramaFixture(): Fixture {
@@ -297,6 +298,29 @@ test("the run stops at its limits and says the result is incomplete", async () =
   assert.ok(markdown.includes("触及上限"), "底稿要写明触及了哪个上限");
 });
 
+test("using exactly the per-subject relationship budget is complete", async () => {
+  const { run } = await runFixture({ ...DEFAULT_PANORAMA_BUDGET, maxChildrenPerNode: 4 });
+  assert.ok(!run.stats.limits.includes("单节点处理上限"), "刚好处理完预算数量不应误报截断");
+  assert.equal(run.stats.untreated, 0);
+});
+
+test("provider failures become generic gaps and make the report incomplete", async () => {
+  const fixture = panoramaFixture();
+  const providerStub = provider(fixture);
+  const run = await runPanorama({
+    call: async (tool, args) => {
+      if (tool === "get_direct_investment" && args.query === "91330000MA000ROOT") throw new Error("private provider detail");
+      return providerStub.call(tool, args);
+    },
+    root: { key: "company:root", name: "本方主体", companyId: "root", aliases: [] },
+  });
+  assert.equal(run.stats.incomplete, true);
+  assert.ok(run.gaps.some(gap => gap.text.includes("未覆盖")));
+  assert.ok(!JSON.stringify(run.nodes).includes("private provider detail"));
+  const { markdown } = renderPanorama({ run, root: { name: "本方主体", id: "root" }, queriedAt: "2026-10-24T00:00:00.000Z", toolLabels: [] });
+  assert.ok(markdown.includes("完整性：结果不完整"));
+});
+
 test("a node the provider cannot answer is a gap, not a missing row and not a failure", async () => {
   const fixture = panoramaFixture();
   fixture.profiles["控股子公司"] = { not_found: true };
@@ -360,11 +384,11 @@ test("a run that already read a subject resumes from the ledger instead of payin
   const callsAfterFirst = providerStub.calls.length;
   const second = await runPanorama({
     call: providerStub.call, root: { key: "company:root", name: "本方主体", companyId: "root", aliases: [] },
-    budget: DEFAULT_PANORAMA_BUDGET, checkpoint,
+    budget: { ...DEFAULT_PANORAMA_BUDGET, maxCalls: 1 }, checkpoint,
   });
   assert.equal(providerStub.calls.length, callsAfterFirst, "断点续跑不得重复调用已读的主体");
   assert.equal(second.nodes.length, first.nodes.length);
-  assert.equal(second.stats.calls, first.stats.calls);
+  assert.equal(second.stats.calls, 0, "从台账恢复的读取不消耗本轮供应商调用预算");
 });
 
 test("the employee-facing copy names capabilities, not data sources or models", () => {

@@ -92,6 +92,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const tasks = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
         t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
+        EXISTS(SELECT 1 FROM member_expert_panorama_checkpoints p WHERE p.task_id=t.id AND p.user_id=${user.id}) AS "hasCheckpoint",
         COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
       WHERE t.user_id=${user.id} AND t.expires_at > now() ORDER BY t.created_at DESC LIMIT 50`;

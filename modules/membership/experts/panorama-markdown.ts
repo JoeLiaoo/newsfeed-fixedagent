@@ -268,6 +268,7 @@ function ledgerSection(run: PanoramaRunResult) {
   lines.push("");
   lines.push(`> 本次调用 ${run.stats.calls} 次，读到 ${run.stats.nodes} 个主体，最深 ${run.stats.depth} 层。`);
   if (run.stats.limits.length) lines.push(`> 本次触及上限：${run.stats.limits.join("、")}；触及上限的部分未继续下钻，结果不完整。`);
+  else if (run.stats.incomplete) lines.push("> 本次存在未能核实的数据缺口，底稿结果不完整；详见第七节。");
   if (run.stats.untreated) lines.push(`> 本次有 ${run.stats.untreated} 条关系未处理（超出上限），未进入任何表格。`);
   lines.push("");
   return lines;
@@ -306,7 +307,9 @@ export function renderPanorama(input: PanoramaRenderInput): PanoramaRenderResult
   lines.push(`- 读取时间：${input.queriedAt}`);
   lines.push(`- 数据来源：${input.toolLabels.join("、")}`);
   lines.push(`- 覆盖层级：${run.stats.depth} 层；主体 ${run.stats.nodes} 个；对外投资关系 ${run.edges.length} 条；调用 ${run.stats.calls} 次`);
-  lines.push(run.stats.limits.length ? "- 完整性：本次触及穿透上限，未覆盖部分未读取，结果不完整" : "- 完整性：本次未触及穿透上限，仍需按第八节台账核对覆盖范围");
+  lines.push(run.stats.incomplete
+    ? `- 完整性：结果不完整；${run.stats.limits.length ? `触及上限（${run.stats.limits.join("、")}）` : "存在未能核实的数据缺口"}，详见第七节与第八节`
+    : "- 完整性：本次未触及预算上限且未记录单体读取缺口，仍需按第八节台账核对覆盖范围");
   lines.push("");
   lines.push("## 一、逐层投资明细");
   lines.push("");

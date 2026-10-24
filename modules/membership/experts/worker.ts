@@ -12,7 +12,7 @@ import { materialContext } from "./materials.ts";
 import { runPanorama, type PanoramaRunResult } from "./panorama-run.ts";
 import { renderPanorama } from "./panorama-markdown.ts";
 import { createPanoramaCheckpoint } from "./panorama-checkpoint.ts";
-import type { PanoramaSubject } from "./panorama.ts";
+import { DEFAULT_PANORAMA_BUDGET, type PanoramaSubject } from "./panorama.ts";
 import type { WikiFormat } from "../knowledge/catalog.ts";
 
 type TaskRow = { id: string; user_id: string; expert_slug: string; input: Record<string, unknown>; selected_entity: Record<string, unknown> | null; execution_attempts: number };
@@ -198,10 +198,19 @@ async function runPanoramaExpert(task: TaskRow, leaseToken: string, options: { b
   if (!entity || typeof entity.name !== "string" || typeof entity.id !== "string") throw new Error("entity_not_selected");
   const root: PanoramaSubject = { key: `company:${entity.id}`, name: entity.name, companyId: entity.id, aliases: [], creditCode: typeof entity.creditCode === "string" ? entity.creditCode : null };
   const checkpoint = createPanoramaCheckpoint(task.id, task.user_id);
+  let identityCalls = 0;
   const run = await withXinhua(async call => {
+    // The verified root profile is also the runner's depth-zero profile checkpoint. A retry can
+    // reconstruct the same graph without repeating the identity verification call.
+    const savedRootProfile = await checkpoint.get(root.key, "profile");
+    if (savedRootProfile) {
+      await assertRunning(task.id, leaseToken);
+      return runPanorama({ call, root, checkpoint, heartbeat: async () => { await assertRunning(task.id, leaseToken); } });
+    }
     // The confirmed entity is verified against the provider before a single layer is walked.
     let identity;
-    try { identity = await querySelectedCompanyProfile(call, entity as unknown as EntityCandidate); }
+    const identityCall: XinhuaCall = async (tool, args) => { identityCalls += 1; return call(tool, args); };
+    try { identity = await querySelectedCompanyProfile(identityCall, entity as unknown as EntityCandidate); }
     catch (error) {
       const code = error instanceof Error ? error.message : "xinhua_identity_unverified";
       if (code === "xinhua_identity_unverified" || code === "xinhua_entity_mismatch") throw new ExpertProviderError(code);
@@ -209,8 +218,12 @@ async function runPanoramaExpert(task: TaskRow, leaseToken: string, options: { b
     }
     await assertRunning(task.id, leaseToken);
     await checkpoint.put({ nodeKey: root.key, depth: 0, kind: "profile", tool: "get_company_profile", payload: identity.profile });
-    return runPanorama({ call, root, checkpoint, heartbeat: async () => { await assertRunning(task.id, leaseToken); } });
+    return runPanorama({
+      call, root, checkpoint, budget: { ...DEFAULT_PANORAMA_BUDGET, maxCalls: DEFAULT_PANORAMA_BUDGET.maxCalls - identityCalls },
+      heartbeat: async () => { await assertRunning(task.id, leaseToken); },
+    });
   });
+  run.stats.calls += identityCalls;
   await assertRunning(task.id, leaseToken);
   const materials = options.materials ?? await taskMaterials(task, leaseToken);
   const narrative = await panoramaNarrative(task, run, { ...options, materials });
@@ -221,7 +234,7 @@ async function runPanoramaExpert(task: TaskRow, leaseToken: string, options: { b
     toolLabels: PANORAMA_TOOL_LABELS,
     narrative,
   });
-  return rendered.markdown;
+  return { markdown: rendered.markdown, incomplete: run.stats.incomplete, gapCount: run.gaps.length, limits: run.stats.limits };
 }
 
 /** The model writes the words; the tables and the gaps stay with the runner. */
@@ -296,6 +309,7 @@ export async function runExpertTask(taskId: string) {
   heartbeat.unref?.();
   try {
     let report: string;
+    let panoramaStatus: { incomplete: boolean; gapCount: number; limits: string[] } | null = null;
     const experts = await sql<{ manifest: { tools?: string[] }; status: string }[]>`SELECT manifest,status FROM member_experts WHERE slug=${task.expert_slug}`;
     // A hidden expert still runs the tasks it was given before it was hidden; only new tasks are
     // refused, and the refusal happens where the task is created. A `coming_soon` expert never runs:
@@ -311,18 +325,26 @@ export async function runExpertTask(taskId: string) {
       await sql`UPDATE member_expert_tasks SET state='waiting_input',stage='choose_entity',result=${sql.json({ candidates, approximate })},updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
       return;
     }
-    report = task.expert_slug === EXPERT_SLUG
-      ? await runBuiltin(task, leaseToken)
-      : task.expert_slug === PANORAMA_EXPERT_SLUG
-        ? await runPanoramaExpert(task, leaseToken)
-        : await runCustom(task, leaseToken);
+    if (task.expert_slug === EXPERT_SLUG) report = await runBuiltin(task, leaseToken);
+    else if (task.expert_slug === PANORAMA_EXPERT_SLUG) {
+      const panorama = await runPanoramaExpert(task, leaseToken);
+      report = panorama.markdown;
+      panoramaStatus = { incomplete: panorama.incomplete, gapCount: panorama.gapCount, limits: panorama.limits };
+    } else {
+      const custom = await runCustom(task, leaseToken);
+      if (typeof custom === "string") report = custom;
+      else {
+        report = custom.markdown;
+        panoramaStatus = { incomplete: custom.incomplete, gapCount: custom.gapCount, limits: custom.limits };
+      }
+    }
     const body = Buffer.from(report, "utf8");
     const digest = createHash("sha256").update(body).digest("hex");
     await sql.begin(async tx => {
       const active = await tx`SELECT id FROM member_expert_tasks WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} AND lease_expires_at > now() FOR UPDATE`;
       if (!active.length) return;
       await tx`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256) VALUES (${taskId},${task.user_id},${`expert-${taskId}.md`},'text/markdown; charset=utf-8',${body},${digest}) ON CONFLICT(task_id) DO NOTHING`;
-      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json({ preview: report.slice(0, 6000) })},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
+      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json({ preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
     });
   } catch (error) {
     const detail = errorText(error);
