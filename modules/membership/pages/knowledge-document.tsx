@@ -81,8 +81,7 @@ export default function KnowledgeDocumentPage() {
               <Badge variant={STATE_VARIANT[version.taskState ?? ""] ?? "secondary"}>{TASK_STATE_LABELS[version.taskState ?? ""] ?? "未构建"}</Badge>
             </span>
           </div>
-          <p className="mt-1 text-xs text-ink-3">{version.sourceOrg ?? "机构未知"} · {version.sourceAuthor ?? "作者未知"} · {version.sourceDate ?? "日期未知"}{version.sourceKind ? ` · ${version.sourceKind}` : ""} · {version.uploaderName} · {new Date(version.createdAt).toLocaleString("zh-CN")} · {Math.round(version.byteSize / 1024)} KB</p>
-          <p className="mt-1 break-all text-xs text-ink-4">校验和 {version.sha256}</p>
+          <p className="mt-1 text-xs text-ink-3">{version.sourceOrg ?? "机构未知"} · {version.sourceAuthor ?? "分析师未知"} · {version.sourceDate ?? "材料日期未知"}{version.sourceKind ? ` · ${version.sourceKind}` : ""} · {version.uploaderName} · {new Date(version.createdAt).toLocaleString("zh-CN")} · {Math.round(version.byteSize / 1024)} KB</p>
           {version.extractionStatus === "unavailable" && <p className="mt-1 text-xs text-hot">{version.extractionNote ?? "未能提取文本"}</p>}
           {version.errorCode && <p className="mt-1 text-xs text-hot">{TASK_ERRORS[version.errorCode] ?? version.errorMessage ?? version.errorCode}</p>}
           <div className="mt-2 flex flex-wrap gap-3">
