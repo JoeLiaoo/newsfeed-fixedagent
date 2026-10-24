@@ -5,6 +5,21 @@ import { textField } from "../experts/data.ts";
 export const GP_TAGS: string[] = DIRECTIONS.filter(d => d.name !== "战略配售").flatMap(d => [...d.tags]);
 export type Investment = { key: string; name: string; investeeId: string | null; dataDate: string | null; updatedAt: string | null; investmentDate: string | null; raw: Record<string,unknown> };
 
+/** Keep the first human-readable spelling while deduplicating aliases by normalized identity. */
+export function normalizeAliases(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > 20 || value.some(alias => typeof alias !== "string" || alias.length > 180)) return null;
+  const aliases: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of value as string[]) {
+    const alias = raw.trim();
+    const key = alias.normalize("NFKC").replace(/\s+/g, "").toLocaleLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    aliases.push(alias);
+  }
+  return aliases;
+}
+
 export function normalizeInvestment(raw: Record<string,unknown>): Investment | null {
   const name = textField(raw, "company_name", "investee_name", "investee_company_name", "name");
   if (!name) return null;

@@ -76,7 +76,9 @@ try {
       ON CONFLICT(canonical_name) DO UPDATE SET aliases=EXCLUDED.aliases,source_ref=EXCLUDED.source_ref,
         entity_role=CASE WHEN member_gp_watchlist.status='candidate' AND member_gp_watchlist.reviewed_by IS NULL
           AND NOT EXISTS(SELECT 1 FROM member_gp_snapshots WHERE gp_id=member_gp_watchlist.id)
-          THEN EXCLUDED.entity_role ELSE member_gp_watchlist.entity_role END`;
+          THEN EXCLUDED.entity_role ELSE member_gp_watchlist.entity_role END
+      WHERE member_gp_watchlist.status='candidate' AND member_gp_watchlist.reviewed_by IS NULL
+        AND NOT EXISTS(SELECT 1 FROM member_gp_snapshots WHERE gp_id=member_gp_watchlist.id)`;
   }
   console.log(JSON.stringify({ candidateCount: candidates.length, status: "imported_as_unverified" }));
 } finally { await closeDb(); }
