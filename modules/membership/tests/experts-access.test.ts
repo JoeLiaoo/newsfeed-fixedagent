@@ -76,7 +76,14 @@ test("expert tasks enforce per-user isolation, idempotency, cancellation, retry 
 
   const customSlug = `test-expert-${suffix}`;
   await sql`INSERT INTO member_experts(slug,owner_id,name,description,version,skill_md,manifest,status,missing_dependencies) VALUES (${customSlug},${userIds[0]},'Test','Test','1.0.0','---\nname: Test\ndescription: Test\n---\n',${sql.json({ tools: [], skills: [] })},'available',ARRAY[]::text[])`;
-  const sharedTask=await app.inject({method:"POST",url:"/api/v1/membership/expert-tasks",headers:{cookie:cookies[1]!,...common},payload:{slug:customSlug,notes:"共享专家隔离测试"}});
+  const blockedSlug = `blocked-expert-${suffix}`;
+  await sql`INSERT INTO member_experts(slug,owner_id,name,description,version,skill_md,manifest,status,missing_dependencies) VALUES (${blockedSlug},${userIds[0]},'Blocked','Blocked','1.0.0','blocked',${sql.json({ tools: ["unavailable"] })},'blocked',ARRAY['unavailable']::text[])`;
+  const sharedCatalog = await (await app.inject({ method: "GET", url: "/api/v1/membership/experts", headers: { cookie: cookies[1]!, ...common } })).json() as { experts: Array<{ slug: string }> };
+  assert(sharedCatalog.experts.some(expert => expert.slug === customSlug), "published experts appear in another employee's catalog");
+  assert(!sharedCatalog.experts.some(expert => expert.slug === blockedSlug), "blocked imports stay out of the shared catalog");
+  assert.equal((await app.inject({ method: "POST", url: "/api/v1/membership/expert-tasks", headers: { cookie: cookies[1]!, ...common }, payload: { slug: blockedSlug, notes: "must not execute" } })).statusCode, 404);
+  const sharedMaterial = Buffer.from("# Private task evidence\n\nOnly employee B's task may read this material.");
+  const sharedTask=await app.inject({method:"POST",url:"/api/v1/membership/expert-tasks",headers:{cookie:cookies[1]!,...common},payload:{slug:customSlug,notes:"共享专家隔离测试",materials:[{fileName:"evidence.md",base64:sharedMaterial.toString("base64")}]}});
   assert.equal(sharedTask.statusCode,202,"a published expert can be executed by another employee");
   const sharedTaskId=(await sharedTask.json() as {id:string}).id;
   const tasksA=await (await app.inject({method:"GET",url:"/api/v1/membership/expert-tasks",headers:{cookie:cookies[0]!,...common}})).json() as {tasks:Array<{id:string}>};
@@ -84,7 +91,10 @@ test("expert tasks enforce per-user isolation, idempotency, cancellation, retry 
   assert(!tasksA.tasks.some(task=>task.id===sharedTaskId));
   assert(tasksB.tasks.some(task=>task.id===sharedTaskId));
   assert.equal((await app.inject({method:"POST",url:`/api/v1/membership/expert-tasks/${sharedTaskId}/cancel`,headers:{cookie:cookies[0]!,...common}})).statusCode,404);
-  assert.equal((await app.inject({method:"POST",url:`/api/v1/membership/expert-tasks/${sharedTaskId}/cancel`,headers:{cookie:cookies[1]!,...common}})).statusCode,200);
+  const [materialRow] = await sql<{ id: string }[]>`SELECT id FROM member_expert_task_materials WHERE task_id=${sharedTaskId}`;
+  const materialUrl = `/api/v1/membership/expert-tasks/${sharedTaskId}/materials/${materialRow!.id}`;
+  assert.equal((await app.inject({ method: "GET", url: materialUrl, headers: { cookie: cookies[0]!, ...common } })).statusCode, 404);
+  assert.equal((await app.inject({ method: "GET", url: materialUrl, headers: { cookie: cookies[1]!, ...common } })).body, sharedMaterial.toString());
 
   const recoverable=randomUUID(),exhausted=randomUUID();
   for(const [id,attempts] of [[recoverable,1],[exhausted,3]] as const)
@@ -100,10 +110,12 @@ test("expert tasks enforce per-user isolation, idempotency, cancellation, retry 
   assert.equal(recoveredStates.find(row=>row.id===recoverable)?.state,"queued");
   assert.equal(recoveredStates.find(row=>row.id===exhausted)?.error_code,"expert_retry_exhausted");
 
-  const concurrentId = randomUUID();
-  await sql`INSERT INTO member_expert_tasks(id,user_id,expert_slug,state,input) VALUES (${concurrentId},${userIds[0]},${customSlug},'queued',${sql.json({ notes: "mocked retry boundary" })})`;
+  const concurrentId = sharedTaskId;
   const previousModelEnv = Object.fromEntries(["MODEL_CALLS_ENABLED", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"].map(key => [key, process.env[key]]));
-  const model = await stub(() => ({ id: "expert-mock", model: "expert-mock", choices: [{ message: { content: JSON.stringify({ result: "mock report", caveats: ["fixture"] }) } }], usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } }));
+  const model = await stub((_hit, request) => {
+    assert.match(request.body, /Only employee B's task may read this material/);
+    return { id: "expert-mock", model: "expert-mock", choices: [{ message: { content: JSON.stringify({ result: "mock report", caveats: ["fixture"] }) } }], usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } };
+  });
   Object.assign(process.env, { MODEL_CALLS_ENABLED: "true", LLM_BASE_URL: `${model.url}/v1`, LLM_API_KEY: "mock-key", LLM_MODEL: "expert-mock" });
   try { await Promise.all([runExpertTask(concurrentId), runExpertTask(concurrentId)]); }
   finally {
@@ -114,11 +126,17 @@ test("expert tasks enforce per-user isolation, idempotency, cancellation, retry 
   assert.equal(concurrency[0]?.execution_attempts, 1);
   assert.equal(concurrency[0]?.state, "succeeded");
   assert.equal(model.hits(), 1);
+  assert.equal((await sql`SELECT extraction_status FROM member_expert_task_materials WHERE id=${materialRow!.id}`)[0]?.extraction_status, "available");
+  assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${sharedTaskId}/artifact`, headers: { cookie: cookies[0]!, ...common } })).statusCode, 404);
+  assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${sharedTaskId}/artifact`, headers: { cookie: cookies[1]!, ...common } })).statusCode, 200);
+  assert.equal((await app.inject({ method: "DELETE", url: materialUrl, headers: { cookie: cookies[0]!, ...common } })).statusCode, 404);
+  assert.equal((await app.inject({ method: "DELETE", url: materialUrl, headers: { cookie: cookies[1]!, ...common } })).statusCode, 204);
+  assert.equal((await app.inject({ method: "GET", url: materialUrl, headers: { cookie: cookies[1]!, ...common } })).statusCode, 404);
   await sql`UPDATE member_expert_tasks SET state='failed',execution_attempts=1,last_attempt_at=now() WHERE id=${concurrentId}`;
-  const retry = await app.inject({ method: "POST", url: `/api/v1/membership/expert-tasks/${concurrentId}/retry`, headers: { cookie: cookies[0]!, ...common } });
+  const retry = await app.inject({ method: "POST", url: `/api/v1/membership/expert-tasks/${concurrentId}/retry`, headers: { cookie: cookies[1]!, ...common } });
   assert.equal(retry.statusCode, 202);
   await sql`UPDATE member_expert_tasks SET state='failed',execution_attempts=3 WHERE id=${concurrentId}`;
-  assert.equal((await app.inject({ method: "POST", url: `/api/v1/membership/expert-tasks/${concurrentId}/retry`, headers: { cookie: cookies[0]!, ...common } })).statusCode, 404);
+  assert.equal((await app.inject({ method: "POST", url: `/api/v1/membership/expert-tasks/${concurrentId}/retry`, headers: { cookie: cookies[1]!, ...common } })).statusCode, 404);
 
   const marker="receipt-response-marker-7d";
   await sql`INSERT INTO receipts(logical_key,service,purpose,subject,member_user_id,member_task_id,status,response,usage,cost,currency,cost_basis)

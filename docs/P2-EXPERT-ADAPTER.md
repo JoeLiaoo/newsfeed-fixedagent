@@ -22,6 +22,7 @@
 
 ## 运行边界
 
+- 格式及依赖检查通过的专家对获准员工公开；任务、上传材料、模型调用记录与产物仍归属于发起任务的员工，专家创建者不能读取其他员工的任务内容。
 - 用户上传的 SKILL.md 或 ZIP 只作为文本保存和展示，不执行脚本、模板、网页或包内程序。ZIP 根目录仅允许 `manifest.json` 与 `SKILL.md`；限制压缩体积、条目数量、解压声明大小及路径。
 - `SKILL.md` frontmatter 与 ZIP manifest 的 `tools`、`skills`/`dependencies.tools`、`dependencies.skills` 会结构化校验。未声明工具的自定义专家仍按文本执行；完整声明 `fuzzy_search_company_list`、`get_company_profile`、`get_direct_investment` 的专家可走平台固定的新华财经适配流程：员工先确认主体，服务端以固定参数读取画像和一层直接投资，再把结构化证据交给 DeepSeek。缺少其中任一工具、声明额外未适配工具或未发布专项 skill 的导入项会显示缺失依赖并阻止运行。用户包不能指定 MCP 地址、密钥、代码或文件系统权限。
 - MCP 工具采用服务端固定 allowlist，token 从 `XINHUA_MCP_API_KEY` 凭据组读取；远端地址固定在 `mcp.cnfic.com.cn` 的 HTTPS 主机范围。

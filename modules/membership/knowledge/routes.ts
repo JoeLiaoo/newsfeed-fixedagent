@@ -216,7 +216,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const author = text(payload.author, 120);
     const organization = text(payload.organization, 120);
     const kind = text(payload.kind, 60);
-    const date = typeof payload.date === "string" ? payload.date.trim() : null;
+    const date = typeof payload.date === "string" ? payload.date.trim() || null : null;
     if (date && !isDate(date)) return reply.code(400).send({ error: "knowledge_date_invalid", message: "材料日期需为真实有效的 YYYY-MM-DD 日期。" });
     if (payload.date !== undefined && payload.date !== null && typeof payload.date !== "string") return reply.code(400).send({ error: "knowledge_date_invalid", message: "材料日期需为真实有效的 YYYY-MM-DD 日期。" });
     const requestedDocument = text(payload.documentId, 64);

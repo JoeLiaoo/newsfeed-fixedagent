@@ -382,4 +382,40 @@ test("the shared library is open to approved employees and closed to everyone el
   assert.equal(staleAnswer.statusCode, 409, "an answer cannot publish evidence withdrawn while the model was running");
   assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_answers WHERE question='某公司撤回期间怎么看？'`)[0]?.n, 0);
 
+  // Exercise the browser's blank date through the real upload route and database.
+  const uploadCounts = async () => (await sql`SELECT
+    (SELECT count(*)::int FROM member_wiki_documents) AS documents,
+    (SELECT count(*)::int FROM member_wiki_document_versions) AS versions,
+    (SELECT count(*)::int FROM member_wiki_tasks) AS tasks,
+    (SELECT count(*)::int FROM member_wiki_audit_events) AS events,
+    (SELECT count(*)::int FROM pgboss.job WHERE name='membership.knowledge') AS jobs`)[0];
+  const beforeInvalidDate = await uploadCounts();
+  for (const date of ["2026-02-30", "2025-02-29", "2026-13-01", "0000-01-01", "2026-01-01-extra", 20260101, false, {}]) {
+    const rejected = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[2]!, ...common },
+      payload: { fileName: "invalid-date.md", base64: Buffer.from("# Invalid date fixture").toString("base64"), date } });
+    assert.equal(rejected.statusCode, 400, JSON.stringify(date));
+    assert.equal(rejected.json().error, "knowledge_date_invalid");
+  }
+  assert.deepEqual(await uploadCounts(), beforeInvalidDate, "invalid dates leave no version, task, audit or queue side effects");
+  for (const [index, date] of [undefined, null, "", "   ", "2024-02-29"].entries()) {
+    const accepted = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[2]!, ...common },
+      payload: { fileName: `optional-date-${index}.md`, base64: Buffer.from(`# Optional date fixture ${index}`).toString("base64"), ...(date === undefined ? {} : { date }) } });
+    assert.equal(accepted.statusCode, 202, `optional date ${index}: ${accepted.body}`);
+    const result = accepted.json() as { documentId: string; versionId: string; taskId: string };
+    const [version] = await sql<{ source_date: string | null }[]>`SELECT source_date::text FROM member_wiki_document_versions WHERE id=${result.versionId}`;
+    assert.equal(version?.source_date, date === "2024-02-29" ? date : null);
+    assert.equal((await sql`SELECT state FROM member_wiki_tasks WHERE id=${result.taskId}`)[0]?.state, "queued");
+    await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/documents/${result.documentId}/withdraw`, headers: { cookie: cookies[2]!, ...common } });
+  }
+
+  const exhausted = await seed([basePage]);
+  await sql`UPDATE member_wiki_tasks SET state='running', attempt_count=5, lease_expires_at=now()-interval '1 minute' WHERE id=${exhausted.taskId}`;
+  assert.deepEqual(await recoverWikiTasks(async () => { assert.fail("exhausted task must not be enqueued"); }), { recovered: 0 });
+  const [exhaustedRow] = await sql`SELECT state,error_code,finished_at,draft,audit FROM member_wiki_tasks WHERE id=${exhausted.taskId}`;
+  assert.equal(exhaustedRow?.state, "failed");
+  assert.equal(exhaustedRow?.error_code, "knowledge_retry_exhausted");
+  assert.ok(exhaustedRow?.finished_at);
+  assert.ok(exhaustedRow?.draft && exhaustedRow.audit, "recovery preserves checkpoints");
+  assert.equal((await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/tasks/${exhausted.taskId}/retry`, headers: { cookie: cookies[0]!, ...common } })).statusCode, 404);
+
 });

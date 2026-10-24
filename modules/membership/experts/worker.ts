@@ -186,7 +186,7 @@ async function runBuiltin(task: TaskRow, leaseToken: string) {
 }
 
 async function runCustom(task: TaskRow, leaseToken: string) {
-  const rows = await sql<{ skill_md: string; name: string; manifest: { tools?: string[] } }[]>`SELECT skill_md, name, manifest FROM member_experts WHERE slug = ${task.expert_slug} AND owner_id=${task.user_id} AND status = 'available'`;
+  const rows = await sql<{ skill_md: string; name: string; manifest: { tools?: string[] } }[]>`SELECT skill_md, name, manifest FROM member_experts WHERE slug = ${task.expert_slug} AND status = 'available'`;
   if (!rows[0]) throw new Error("expert_unavailable");
   const notes = typeof task.input.notes === "string" ? task.input.notes : "";
   const materials = await taskMaterials(task, leaseToken);
@@ -224,7 +224,7 @@ export async function runExpertTask(taskId: string) {
   heartbeat.unref?.();
   try {
     let report: string;
-    const experts = await sql<{ manifest: { tools?: string[] }; status: string }[]>`SELECT manifest,status FROM member_experts WHERE slug=${task.expert_slug} AND (owner_id IS NULL OR owner_id=${task.user_id})`;
+    const experts = await sql<{ manifest: { tools?: string[] }; status: string }[]>`SELECT manifest,status FROM member_experts WHERE slug=${task.expert_slug}`;
     if (!experts[0] || experts[0].status !== "available") throw new Error("expert_unavailable");
     const toolMode = task.expert_slug === EXPERT_SLUG || executionMode(experts[0].manifest) === "xinhua_trial";
     if (toolMode && !task.selected_entity) {

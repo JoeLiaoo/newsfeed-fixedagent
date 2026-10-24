@@ -43,7 +43,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     await seedBuiltin();
     const experts = await sql<{ slug: string; name: string; description: string; version: string; status: string; missing_dependencies: string[]; execution_mode: string; created_at: Date }[]>`
       SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
-      WHERE owner_id IS NULL OR owner_id = ${user.id}
+      WHERE status = 'available' OR owner_id = ${user.id} OR ${user.role === "admin"}
       ORDER BY (slug = ${EXPERT_SLUG}) DESC, created_at DESC`;
     return { experts };
   });
@@ -94,7 +94,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     let materials;
     try { materials = parseTaskMaterials(body(req).materials); }
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "expert_material_invalid" }); }
-    const experts = typeof slug === "string" ? await sql<{ status: string; owner_id: string | null; manifest: { tools?: string[] } }[]>`SELECT status, owner_id, manifest FROM member_experts WHERE slug=${slug} AND (owner_id IS NULL OR owner_id=${user.id})` : [];
+    const experts = typeof slug === "string" ? await sql<{ status: string; manifest: { tools?: string[] } }[]>`SELECT status, manifest FROM member_experts WHERE slug=${slug}` : [];
     const expert = experts[0];
     if (!expert || expert.status !== "available") return reply.code(404).send({ error: expert ? "expert_dependencies_missing" : "expert_not_found" });
     const mode = slug === EXPERT_SLUG ? "xinhua_trial" : executionMode(expert.manifest);

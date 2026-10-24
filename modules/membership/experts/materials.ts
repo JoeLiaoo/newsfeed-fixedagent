@@ -21,8 +21,11 @@ export function parseTaskMaterials(value: unknown): TaskMaterial[] {
   return value.map(item => {
     if (!item || typeof item !== "object") throw new Error("expert_material_invalid");
     const { fileName, base64 } = item as Record<string, unknown>;
-    if (typeof fileName !== "string" || !fileName.trim() || fileName.length > 180 || /[\\/\r\n\0]/.test(fileName) || typeof base64 !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)) throw new Error("expert_material_invalid");
-    if (base64.length > Math.ceil(MAX_MATERIAL_BYTES * 4 / 3) + 4) throw new Error("expert_material_too_large");
+    if (typeof fileName !== "string" || !fileName.trim() || fileName.length > 180 || /[\\/\r\n\0]/.test(fileName) || typeof base64 !== "string") throw new Error("expert_material_invalid");
+    if (base64.length > Math.ceil(MAX_MATERIAL_BYTES / 3) * 4) throw new Error("expert_material_too_large");
+    // Avoid a repeated-group regexp: multi-megabyte valid inputs can exhaust V8's regexp stack.
+    const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+    if (base64.length % 4 !== 0 || /[^A-Za-z0-9+/]/.test(base64.slice(0, base64.length - padding))) throw new Error("expert_material_invalid");
     const bytes = Buffer.from(base64, "base64");
     total += bytes.length;
     if (!bytes.length || bytes.length > MAX_MATERIAL_BYTES || total > MAX_TOTAL_MATERIAL_BYTES) throw new Error("expert_material_too_large");
