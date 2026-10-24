@@ -5,9 +5,10 @@ import { enqueueOn } from "@aihot/backend/jobs/queue";
 import type { MemberSession } from "../server.ts";
 import { EXPERT_QUEUE } from "./queue.ts";
 import { parseSkillUpload, expertSlug, executionMode } from "./import.ts";
-import { BUILTIN_EXPERT, EXPERT_SLUG } from "./catalog.ts";
+import { BUILTIN_EXPERT, COMING_SOON_EXPERT, COMING_SOON_EXPERT_STATUS, EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG } from "./catalog.ts";
 import { parseTaskMaterials, MAX_TOTAL_MATERIAL_BYTES } from "./materials.ts";
 import { getTaskArtifact } from "./worker.ts";
+import { panoramaCheckpointJsonl } from "./panorama-checkpoint.ts";
 
 type Authenticate = (request: FastifyRequest, allowPending?: boolean) => Promise<MemberSession | null>;
 
@@ -27,10 +28,25 @@ function body(req: FastifyRequest): Record<string, unknown> {
 }
 
 async function seedBuiltin() {
+  // The one-layer expert keeps its row, its skill text and its worker, but the employee platform no
+  // longer offers it: its status is `hidden`, so the catalog drops it and no new task starts on it.
+  // The conflict branch writes the status back, so an already deployed `available` row flips on the
+  // next seed.
   await sql`INSERT INTO member_experts(slug, owner_id, name, description, version, skill_md, manifest, status, missing_dependencies)
-    VALUES (${BUILTIN_EXPERT.slug}, NULL, ${BUILTIN_EXPERT.name}, ${BUILTIN_EXPERT.description}, ${BUILTIN_EXPERT.version}, ${BUILTIN_EXPERT.skillMd}, ${sql.json({ tools: ["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"] })}, 'available', ${sql.array(BUILTIN_EXPERT.missingDependencies)}::text[])
+    VALUES (${BUILTIN_EXPERT.slug}, NULL, ${BUILTIN_EXPERT.name}, ${BUILTIN_EXPERT.description}, ${BUILTIN_EXPERT.version}, ${BUILTIN_EXPERT.skillMd}, ${sql.json({ tools: ["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"] })}, ${HIDDEN_EXPERT_STATUS}, ${sql.array(BUILTIN_EXPERT.missingDependencies)}::text[])
+    ON CONFLICT(slug) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, version=EXCLUDED.version,
+      skill_md=EXCLUDED.skill_md, manifest=EXCLUDED.manifest, status=EXCLUDED.status, missing_dependencies=EXCLUDED.missing_dependencies`;
+  await sql`INSERT INTO member_experts(slug, owner_id, name, description, version, skill_md, manifest, status, missing_dependencies)
+    VALUES (${PANORAMA_EXPERT.slug}, NULL, ${PANORAMA_EXPERT.name}, ${PANORAMA_EXPERT.description}, ${PANORAMA_EXPERT.version}, ${PANORAMA_EXPERT.skillMd}, ${sql.json({ tools: ["fuzzy_search_company_list", "get_company_profile", "get_direct_investment", "get_company_shareholder", "get_company_can_rev", "get_history_company_name", "get_company_annual_report_base_info", "get_company_annual_report_investment_info"] })}, 'available', ${sql.array(PANORAMA_EXPERT.missingDependencies)}::text[])
     ON CONFLICT(slug) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, version=EXCLUDED.version,
       skill_md=EXCLUDED.skill_md, manifest=EXCLUDED.manifest, missing_dependencies=EXCLUDED.missing_dependencies`;
+  // The planned entry keeps its row in the catalog for every role, marked `coming_soon`: the employee
+  // sees what is on the way, no task starts on it, and the conflict branch writes the status back so an
+  // already deployed row flips on the next seed.
+  await sql`INSERT INTO member_experts(slug, owner_id, name, description, version, skill_md, manifest, status, missing_dependencies)
+    VALUES (${COMING_SOON_EXPERT.slug}, NULL, ${COMING_SOON_EXPERT.name}, ${COMING_SOON_EXPERT.description}, ${COMING_SOON_EXPERT.version}, ${COMING_SOON_EXPERT.skillMd}, ${sql.json({ tools: [] })}, ${COMING_SOON_EXPERT_STATUS}, ${sql.array(COMING_SOON_EXPERT.missingDependencies)}::text[])
+    ON CONFLICT(slug) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, version=EXCLUDED.version,
+      skill_md=EXCLUDED.skill_md, manifest=EXCLUDED.manifest, status=EXCLUDED.status, missing_dependencies=EXCLUDED.missing_dependencies`;
 }
 
 function taskId() { return randomBytes(16).toString("hex"); }
@@ -42,9 +58,9 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     if (!user) return reply.code(401).send({ error: "login_required" });
     await seedBuiltin();
     const experts = await sql<{ slug: string; name: string; description: string; version: string; status: string; missing_dependencies: string[]; execution_mode: string; created_at: Date }[]>`
-      SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
-      WHERE status = 'available' OR owner_id = ${user.id} OR ${user.role === "admin"}
-      ORDER BY (slug = ${EXPERT_SLUG}) DESC, created_at DESC`;
+      SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${PANORAMA_EXPERT_SLUG} THEN 'xinhua_panorama' WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
+      WHERE status <> ${HIDDEN_EXPERT_STATUS} AND (status IN ('available', ${COMING_SOON_EXPERT_STATUS}) OR owner_id = ${user.id} OR ${user.role === "admin"})
+      ORDER BY (status = 'available') DESC, (status = ${COMING_SOON_EXPERT_STATUS}) DESC, (slug = ${PANORAMA_EXPERT_SLUG}) DESC, (slug = ${EXPERT_SLUG}) DESC, created_at DESC`;
     return { experts };
   });
 
@@ -96,12 +112,18 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "expert_material_invalid" }); }
     const experts = typeof slug === "string" ? await sql<{ status: string; manifest: { tools?: string[] } }[]>`SELECT status, manifest FROM member_experts WHERE slug=${slug}` : [];
     const expert = experts[0];
-    if (!expert || expert.status !== "available") return reply.code(404).send({ error: expert ? "expert_dependencies_missing" : "expert_not_found" });
-    const mode = slug === EXPERT_SLUG ? "xinhua_trial" : executionMode(expert.manifest);
+    // A planned entry stays in the catalog but starts no task: the employee sees what is on the way and
+    // the refusal names the state, so nobody reads it as a broken dependency.
+    if (expert?.status === COMING_SOON_EXPERT_STATUS) return reply.code(404).send({ error: "expert_coming_soon" });
+    // A hidden builtin is not offered as a catalog entry, so it reads as absent: it starts no task.
+    const hidden = (typeof slug === "string" && HIDDEN_BUILTIN_SLUGS.has(slug)) || expert?.status === HIDDEN_EXPERT_STATUS;
+    if (hidden || !expert || expert.status !== "available") return reply.code(404).send({ error: hidden || !expert ? "expert_not_found" : "expert_dependencies_missing" });
+    const mode = slug === EXPERT_SLUG ? "xinhua_trial" : slug === PANORAMA_EXPERT_SLUG ? "xinhua_panorama" : executionMode(expert.manifest);
     if (mode === "xinhua_trial" && companyName.length < 2) return reply.code(400).send({ error: "company_name_required" });
-    if (slug !== EXPERT_SLUG && notes.length < 2) return reply.code(400).send({ error: "task_text_required" });
+    if (mode === "xinhua_panorama" && companyName.length < 2) return reply.code(400).send({ error: "company_name_required" });
+    if (slug !== EXPERT_SLUG && slug !== PANORAMA_EXPERT_SLUG && notes.length < 2) return reply.code(400).send({ error: "task_text_required" });
     const id = taskId();
-    const input = { ...(mode === "xinhua_trial" ? { companyName } : {}), notes };
+    const input = { ...(mode === "text_only" ? {} : { companyName }), notes };
     const rawKey = req.headers["idempotency-key"];
     const idempotencyKey = typeof rawKey === "string" && /^[a-zA-Z0-9._:-]{8,128}$/.test(rawKey) ? rawKey : null;
     const accepted = await sql.begin(async tx => {
@@ -135,7 +157,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const companyId = body(req).companyId;
     if (typeof companyId !== "string" || companyId.length > 120) return reply.code(400).send({ error: "invalid_entity" });
     const changed = await sql.begin(async tx => {
-      const rows = await tx<{ id: string; result: { candidates?: Array<Record<string, unknown>> } | null }[]>`SELECT t.id, t.result FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug WHERE t.id=${id} AND t.user_id=${user.id} AND t.state='waiting_input' AND (t.expert_slug=${EXPERT_SLUG} OR e.manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb) FOR UPDATE OF t`;
+      const rows = await tx<{ id: string; result: { candidates?: Array<Record<string, unknown>> } | null }[]>`SELECT t.id, t.result FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug WHERE t.id=${id} AND t.user_id=${user.id} AND t.state='waiting_input' AND (t.expert_slug=${EXPERT_SLUG} OR t.expert_slug=${PANORAMA_EXPERT_SLUG} OR e.manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb) FOR UPDATE OF t`;
       const candidates = rows[0]?.result?.candidates ?? [];
       const entity = candidates.find(candidate => candidate.id === companyId);
       if (!rows[0] || !entity) return false;
@@ -187,6 +209,17 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const artifact = await getTaskArtifact(id, user.id);
     if (!artifact) return reply.code(404).send({ error: "artifact_not_found_or_expired" });
     return reply.header("Content-Type", artifact.content_type).header("Content-Disposition", `attachment; filename="${artifact.filename}"`).header("X-Content-Type-Options", "nosniff").header("ETag", `"${artifact.sha256}"`).send(artifact.body);
+  });
+
+  app.get("/api/v1/membership/expert-tasks/:id/checkpoint", async (req, reply) => {
+    noStore(reply);
+    const user = await authenticate(req);
+    if (!user) return reply.code(401).send({ error: "login_required" });
+    const id = (req.params as { id: string }).id;
+    const tasks = await sql<{ id: string }[]>`SELECT id FROM member_expert_tasks WHERE id=${id} AND user_id=${user.id} AND expires_at > now()`;
+    if (!tasks[0]) return reply.code(404).send({ error: "task_not_found" });
+    const body = Buffer.from(await panoramaCheckpointJsonl(id, user.id), "utf8");
+    return reply.header("Content-Type", "application/x-ndjson; charset=utf-8").header("Content-Disposition", `attachment; filename="expert-${id}-checkpoint.jsonl"`).header("X-Content-Type-Options", "nosniff").send(body);
   });
 
   app.get("/api/v1/membership/expert-tasks/:id/materials/:materialId", async (req, reply) => {

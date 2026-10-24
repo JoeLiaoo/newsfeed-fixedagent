@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { unzipSync } from "fflate";
-import { XINHUA_USED_TOOLS } from "./catalog.ts";
+import { XINHUA_ALLOWED_TOOLS, XINHUA_BASE_TOOLS, XINHUA_USED_TOOLS } from "./catalog.ts";
 
 const MAX_ARCHIVE_BYTES = 1_000_000;
 const MAX_UNPACKED_BYTES = 2_000_000;
@@ -117,12 +117,17 @@ function dependencies(text: string, manifest: Record<string, unknown>) {
   if ([...explicitTools, ...explicitSkills].some(dependency => !dependencyPattern.test(dependency))) throw new Error("manifest_dependencies_invalid");
   const metadata = parseFrontmatter(text);
   const platformTools = new Set<string>(XINHUA_USED_TOOLS);
-  const hasCompleteAdapter = XINHUA_USED_TOOLS.every(name => explicitTools.includes(name));
+  const hasCompleteAdapter = XINHUA_BASE_TOOLS.every(name => explicitTools.includes(name));
+  const baseTools = new Set<string>(XINHUA_BASE_TOOLS);
+  const panoramaTools: string[] = XINHUA_ALLOWED_TOOLS.filter(name => !baseTools.has(name));
   const required = new Set([
     ...explicitTools.filter(name => !platformTools.has(name)).map(name => `尚未适配的工具依赖：${name}`),
     ...(explicitTools.length && !hasCompleteAdapter ? ["平台企业信息适配需要同时声明主体检索、企业画像和直接投资三个工具"] : []),
     ...explicitSkills.map(name => name.split("@")[0]!.toLowerCase() === metadata.name.toLowerCase() ? `循环技能依赖：${name}` : `未发布的技能依赖：${name}`),
   ]);
+  if (explicitTools.some(name => panoramaTools.includes(name)) && !XINHUA_ALLOWED_TOOLS.every(name => explicitTools.includes(name))) {
+    required.add("技能声明的部分平台能力只在对外投资全景图专家中生效");
+  }
   if (/悟道|wudao_mcp_gateway/i.test(text)) required.add("未适配的 MCP 工具依赖");
   if (/skills?\/(?:10|11|12)\b|10\/11\/12 专项 skill/i.test(text)) required.add("未发布的专项 skill");
   if (/企查查|qichacha/i.test(text)) required.add("第三方企业信息 MCP（尚未接入）");
@@ -130,8 +135,13 @@ function dependencies(text: string, manifest: Record<string, unknown>) {
   return [...required];
 }
 
-export function executionMode(manifest: { tools?: string[] }): "xinhua_trial" | "text_only" {
-  return XINHUA_USED_TOOLS.every(name => manifest.tools?.includes(name)) ? "xinhua_trial" : "text_only";
+export function executionMode(manifest: { tools?: string[] }): "xinhua_trial" | "xinhua_panorama" | "text_only" {
+  const tools = manifest.tools ?? [];
+  // A skill that declares every platform capability runs the multi-layer runner; one that declares the
+  // three the one-layer adapter reads runs that adapter; anything else runs as text.
+  if (XINHUA_ALLOWED_TOOLS.every(name => tools.includes(name))) return "xinhua_panorama";
+  if (XINHUA_BASE_TOOLS.every(name => tools.includes(name))) return "xinhua_trial";
+  return "text_only";
 }
 
 export function parseSkillMarkdown(text: string): ImportedSkill {

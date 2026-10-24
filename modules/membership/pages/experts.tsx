@@ -7,14 +7,14 @@ import { Card } from "@aihot/web/components/member-ui/card";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { EXPERT_MODE_INPUTS, EXPERT_MODE_LABELS } from "../experts/catalog.ts";
+import { COMING_SOON_EXPERT_STATUS, EXPERT_MODE_INPUTS, EXPERT_MODE_LABELS, expertStatusBadge } from "../experts/catalog.ts";
 
 export const handle: Screen = { tab: "me", name: "专家平台" };
 export const meta = () => pageMeta({ title: "专家平台", path: "/experts", noindex: true });
 
 type Expert = {
   slug: string; name: string; description: string; version: string; status: string;
-  execution_mode: "xinhua_trial" | "text_only"; missing_dependencies: string[];
+  execution_mode: "xinhua_trial" | "xinhua_panorama" | "text_only"; missing_dependencies: string[];
 };
 
 /** The expert platform: the experts there are, as cards. One card opens the expert. */
@@ -44,20 +44,24 @@ export default function ExpertsPage() {
     {loading
       ? <p className="text-sm text-ink-3" role="status">正在加载专家目录…</p>
       : experts.length
-        ? <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{experts.map(expert => <li key={expert.slug}>
+        ? <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{experts.map(expert => {
+          const badge = expertStatusBadge(expert.status);
+          return <li key={expert.slug}>
           <Card asChild className="h-full transition-colors hover:bg-bg-sunk">
             <IntentLink to={`/experts/${encodeURIComponent(expert.slug)}`} className="flex h-full flex-col gap-2 p-5">
               <span className="font-semibold text-ink">{expert.name}</span>
               <span className="text-sm leading-relaxed text-ink-3">{expert.description}</span>
               <span className="mt-auto flex flex-wrap items-center gap-2 pt-3 text-xs text-ink-3">
-                <Badge variant={expert.status === "available" ? "success" : "warning"}>{expert.status === "available" ? "可运行" : "缺少依赖"}</Badge>
-                <Badge variant="secondary">{EXPERT_MODE_LABELS[expert.execution_mode] ?? expert.execution_mode}</Badge>
-                <span>{[EXPERT_MODE_INPUTS[expert.execution_mode], `v${expert.version}`].filter(Boolean).join(" · ")}</span>
+                <Badge variant={badge.variant}>{badge.label}</Badge>
+                {expert.status === COMING_SOON_EXPERT_STATUS
+                  ? <span>v{expert.version}</span>
+                  : <><Badge variant="secondary">{EXPERT_MODE_LABELS[expert.execution_mode] ?? expert.execution_mode}</Badge><span>{[EXPERT_MODE_INPUTS[expert.execution_mode], `v${expert.version}`].filter(Boolean).join(" · ")}</span></>}
               </span>
               {expert.missing_dependencies.length > 0 && <span className="text-xs text-amber-ink">缺少依赖：{expert.missing_dependencies.join("、")}</span>}
             </IntentLink>
           </Card>
-        </li>)}</ul>
+        </li>;
+        })}</ul>
         : <p className="text-sm text-ink-3">暂无已发布的专家。</p>}
   </main>;
 }

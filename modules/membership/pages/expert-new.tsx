@@ -59,7 +59,7 @@ export default function NewExpertPage() {
     <Card>
       <CardHeader><CardTitle>导入技能</CardTitle></CardHeader>
       <CardContent>
-        <p className="mb-4 text-sm leading-relaxed text-ink-3">接受带 YAML frontmatter 的单个 SKILL.md 或 ZIP（根目录包含 manifest.json 与 SKILL.md），最多 1 MB。技能按自身声明及平台已开放的能力执行：未声明工具的技能为文本任务专家，直接填写任务要求；完整声明主体检索、工商画像与一层直接投资三项平台能力的技能为一层对外投资核查，需先确认企业主体。声明的工具或其他技能依赖会被结构化检查，未接入的依赖会阻止运行。</p>
+        <p className="mb-4 text-sm leading-relaxed text-ink-3">接受带 YAML frontmatter 的单个 SKILL.md 或 ZIP（根目录包含 manifest.json 与 SKILL.md），最多 1 MB。技能按自身声明及平台已开放的能力执行：未声明工具的技能为文本任务专家，直接填写任务要求；完整声明主体检索、工商画像与一层直接投资三项平台能力的技能为一层对外投资核查，需先确认企业主体；完整声明全部平台能力的技能为对外投资全景图，逐层穿透并逐项标注能力缺口。声明的工具或其他技能依赖会被结构化检查，未接入的依赖会阻止运行。</p>
         <form onSubmit={importSkill} className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="grid min-w-0 flex-1 gap-2"><Label htmlFor="skill-file">技能文件</Label><Input id="skill-file" name="skillFile" type="file" accept=".md,.zip,text/markdown,application/zip" required /></div>
           <Button type="submit" variant="outline" disabled={busy}>{busy ? "检查中…" : "检查并导入"}</Button>

@@ -37,8 +37,10 @@ test("expert tasks enforce per-user isolation, idempotency, cancellation, retry 
   const expertsResponse = await app.inject({ method: "GET", url: "/api/v1/membership/experts", headers: { cookie: cookies[0]!, ...common } });
   assert.equal(expertsResponse.statusCode, 200);
   const experts = (await expertsResponse.json() as { experts: Array<{ slug: string; execution_mode: string }> }).experts;
-  const builtin = experts.find(expert => expert.execution_mode === "xinhua_trial");
-  assert.ok(builtin);
+  // The one-layer builtin is hidden from the catalog; the panorama is the employee-facing builtin.
+  const builtin = experts.find(expert => expert.execution_mode === "xinhua_panorama");
+  assert.ok(builtin, "对外投资全景图专家在目录中");
+  assert.ok(!experts.some(expert => expert.execution_mode === "xinhua_trial"), "隐藏的一层专家不在目录中");
 
   const key = randomUUID();
   const create = () => app.inject({ method: "POST", url: "/api/v1/membership/expert-tasks", headers: { cookie: cookies[0]!, ...common, "idempotency-key": key }, payload: { slug: builtin.slug, companyName: "测试企业" } });
