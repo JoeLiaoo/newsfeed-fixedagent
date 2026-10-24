@@ -18,7 +18,8 @@
 ## 风险与交接
 
 - 已知限制／缺失依赖：本页展示的数据是否完整，取决于 GP 主体核验、投资事件审核及同步运行情况；页面不会把观察记录或暂停 GP 转成可见项目。未新增迁移或供应商调用。
-- 下一步：等待 PR #52 的 review 与 CI；员工登录后的真实页面验收待安排。本次不合并、不部署。
+- PR CI：代码 head `f868d44` 的 Docs links、P3 quality 与 PostgreSQL integration 均通过；第一次 quality 对设计系统圆角的提示已修复并复跑通过。Review 尚未完成。
+- 下一步：等待 PR #52 的 review；员工登录后的真实页面验收待安排。本次不合并、不部署。
 
 PR：[PR #52](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/52)，分支 `feat/projects-invested-gp-v1`。
 
