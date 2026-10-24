@@ -2,7 +2,7 @@
 // table shape, the coverage counts and the source labels are all decided here, so every page in the
 // library reads the same way and can be checked by machine.
 import type { CompiledDraft, Correction, Finding, PageDraft, SourceRecord } from "./schema.ts";
-import { FRESHNESS_TIERS, today } from "./catalog.ts";
+import { FRESHNESS_TIERS, isRealDay, today } from "./catalog.ts";
 
 export type Coverage = {
   analysts: number;
@@ -13,10 +13,18 @@ export type Coverage = {
 };
 
 const UNKNOWN = "未知";
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+/**
+ * Whether a value is a day the platform knows: the shape of a date and a day the calendar has. A
+ * string that only looks like a date (2026-02-30) is not a date, so it never counts as one, and it
+ * never reaches the timeline or the freshness of a page.
+ */
 export function isKnownDate(value: string | null | undefined): value is string {
-  return typeof value === "string" && DATE_PATTERN.test(value);
+  if (typeof value !== "string") return false;
+  const match = DATE_PATTERN.exec(value);
+  if (!match) return false;
+  return isRealDay(Number(match[1]), Number(match[2]), Number(match[3]));
 }
 
 /** A single-line value for the frontmatter. */

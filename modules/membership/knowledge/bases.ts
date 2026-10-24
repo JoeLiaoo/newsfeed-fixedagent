@@ -10,10 +10,10 @@ import { sql } from "@aihot/backend/db";
 export const DEFAULT_BASE_ID = "shared";
 
 /** The name the default base carries. */
-export const DEFAULT_BASE_NAME = "全公司共享知识库";
+export const DEFAULT_BASE_NAME = "知识库示例";
 
 /** The description the default base carries. */
-export const DEFAULT_BASE_DESCRIPTION = "全公司共用的投研知识库：上传的材料自动构建成知识页，问答只依据已发布的页面。";
+export const DEFAULT_BASE_DESCRIPTION = "示例投研知识库：上传的材料自动构建成知识页，问答只依据已发布的页面。";
 
 /** How many knowledge bases the library holds at once, the default one included. */
 export const MAX_BASES = 20;
@@ -56,13 +56,23 @@ export function baseSlugOf(slug: string, baseId: string): string {
   return slug.startsWith(prefix) ? slug.slice(prefix.length) : slug;
 }
 
-/** The default base, written the first time the library is read. */
+/**
+ * The default base, written the first time the library is read. The base belongs to the platform, not
+ * to an employee, so it always carries the platform's own name and description: a base left over from
+ * an earlier release is renamed when it is ensured, and a base an employee made is never touched.
+ */
 export async function ensureDefaultBase(): Promise<void> {
-  const rows = await sql`SELECT id FROM member_wiki_bases WHERE id = ${DEFAULT_BASE_ID}`;
-  if (rows[0]) return;
-  await sql`INSERT INTO member_wiki_bases (id, name, description, status)
-    VALUES (${DEFAULT_BASE_ID}, ${DEFAULT_BASE_NAME}, ${DEFAULT_BASE_DESCRIPTION}, 'active')
-    ON CONFLICT (id) DO NOTHING`;
+  const rows = await sql<{ name: string; description: string }[]>`SELECT name, description FROM member_wiki_bases WHERE id = ${DEFAULT_BASE_ID}`;
+  const row = rows[0];
+  if (!row) {
+    await sql`INSERT INTO member_wiki_bases (id, name, description, status)
+      VALUES (${DEFAULT_BASE_ID}, ${DEFAULT_BASE_NAME}, ${DEFAULT_BASE_DESCRIPTION}, 'active')
+      ON CONFLICT (id) DO NOTHING`;
+    return;
+  }
+  if (row.name === DEFAULT_BASE_NAME && row.description === DEFAULT_BASE_DESCRIPTION) return;
+  await sql`UPDATE member_wiki_bases SET name = ${DEFAULT_BASE_NAME}, description = ${DEFAULT_BASE_DESCRIPTION}, updated_at = now()
+    WHERE id = ${DEFAULT_BASE_ID}`;
 }
 
 /**

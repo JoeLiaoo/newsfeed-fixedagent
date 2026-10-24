@@ -37,7 +37,9 @@ export function lintPage(page: PageDraft, knownSlugs: Set<string>): Finding[] {
     else if (vague(stance.analyst)) report("P1", "attribution-vague", `观点分布第 ${index + 1} 行的分析师归因无法识别。`, stance.analyst);
     if (missing(stance.institution)) report("P1", "attribution-missing", `观点分布第 ${index + 1} 行缺少机构。`);
     else if (vague(stance.institution)) report("P1", "attribution-vague", `观点分布第 ${index + 1} 行的机构归因无法识别。`, stance.institution);
-    if (!STANCE_WORDS.includes(stance.stance as (typeof STANCE_WORDS)[number])) report("P1", "stance-vocabulary", `观点分布第 ${index + 1} 行的立场词「${stance.stance}」不在封闭词表内。`, stance.stance);
+    if (missing(stance.stance)) report("P1", "stance-missing", `观点分布第 ${index + 1} 行没有立场（评级）。`);
+    else if (!STANCE_WORDS.includes(stance.stance as (typeof STANCE_WORDS)[number])) report("P1", "stance-vocabulary", `观点分布第 ${index + 1} 行的立场词「${stance.stance}」不在封闭词表内。`, stance.stance);
+    if (missing(stance.sourceRef)) report("P1", "source-missing", `观点分布第 ${index + 1} 行没有可核对的来源引用。`);
     const date = dateProblem(stance.date);
     if (date) report("P0", "time-anchor-missing", `观点分布第 ${index + 1} 行的时间锚无效：${date}。`);
     const key = `${stance.analyst}|${stance.institution}`;
