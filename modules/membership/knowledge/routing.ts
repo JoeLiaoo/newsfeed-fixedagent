@@ -3,7 +3,7 @@
 // it are left out rather than padded in.
 import type { Coverage } from "./render.ts";
 
-/** One citation of a published page: what it points at, and who said it. */
+/** One citation of a published page: what it points at, who said it, and where it may be read. */
 export type RoutableCitation = {
   id: string;
   label: string;
@@ -13,6 +13,10 @@ export type RoutableCitation = {
   anchor: string | null;
   sourceTitle: string | null;
   versionId: string;
+  /** The material the citation was read from: an answer must lead back to the file behind it. */
+  documentId: string;
+  documentTitle: string;
+  fileName: string;
 };
 
 export type RoutablePage = {

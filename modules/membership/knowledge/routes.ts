@@ -60,6 +60,23 @@ function dateText(value: unknown): string | null {
 }
 
 /**
+ * The window a list is read in: a clamped page size and an offset, so a long list is never cut
+ * short at an arbitrary number of rows.
+ */
+function pageWindow(req: FastifyRequest): { limit: number; offset: number } {
+  const query = typeof req.query === "object" && req.query ? req.query as Record<string, unknown> : {};
+  const count = (value: unknown, fallback: number) => {
+    const raw = typeof value === "string" ? value.trim() : "";
+    const parsed = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : Number.NaN;
+    return Number.isSafeInteger(parsed) ? parsed : fallback;
+  };
+  return {
+    limit: Math.min(100, Math.max(1, count(query.limit, 50))),
+    offset: Math.min(100_000, Math.max(0, count(query.offset, 0))),
+  };
+}
+
+/**
  * Whether an employee may look at what a withdrawn material left behind: the uploader of one of
  * the materials the page was built from, or an administrator. The shared library itself never
  * shows a withdrawn material to anyone else.
@@ -292,14 +309,15 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     return { id, status: "withdrawn" };
   });
 
-  /** The builds of the shared library, with their state. */
+  /** The builds of the shared library, with their state. They are read a page at a time. */
   app.get("/api/v1/membership/knowledge/tasks", async (req, reply) => {
     noStore(reply);
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const base = await baseOf(req);
     if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
-    const tasks = await sql`
+    const window = pageWindow(req);
+    const rows = await sql`
       SELECT t.id, t.stage, t.state, t.attempt_count AS "attemptCount", t.error_code AS "errorCode", t.error_message AS "errorMessage",
         t.created_at AS "createdAt", t.updated_at AS "updatedAt", t.finished_at AS "finishedAt",
         d.id AS "documentId", d.title AS "documentTitle", u.real_name AS "uploaderName", v.version_no AS "versionNo", v.file_name AS "fileName"
@@ -308,8 +326,9 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       JOIN member_wiki_document_versions v ON v.id = t.version_id
       JOIN member_users u ON u.id = t.uploader_id
       WHERE d.base_id = ${base.id}
-      ORDER BY t.created_at DESC LIMIT 100`;
-    return { tasks };
+      ORDER BY t.created_at DESC, t.id DESC LIMIT ${window.limit + 1} OFFSET ${window.offset}`;
+    const hasMore = rows.length > window.limit;
+    return { tasks: rows.slice(0, window.limit), hasMore, nextOffset: hasMore ? window.offset + window.limit : null };
   });
 
   /** Running a failed build again, from the stage it stopped at. */
@@ -429,9 +448,13 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       FROM member_wiki_pages p JOIN member_wiki_page_revisions r ON r.page_id = p.id
         AND r.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = p.id)
       WHERE p.status='published' AND p.base_id = ${base.id}`;
-    const citationRows = await sql<{ id: string; page_id: string; label: string; anchor: string | null; analyst: string | null; organization: string | null; published_on: Date | null; source_title: string | null; version_id: string }[]>`
-      SELECT c.id, c.page_id, c.label, c.anchor, c.analyst, c.organization, c.published_on, c.source_title, c.version_id
-      FROM member_wiki_citations c JOIN member_wiki_pages p ON p.id = c.page_id
+    const citationRows = await sql<{ id: string; page_id: string; label: string; anchor: string | null; analyst: string | null; organization: string | null; published_on: Date | null; source_title: string | null; version_id: string; document_id: string; document_title: string; file_name: string }[]>`
+      SELECT c.id, c.page_id, c.label, c.anchor, c.analyst, c.organization, c.published_on, c.source_title, c.version_id,
+        d.id AS document_id, d.title AS document_title, v.file_name AS file_name
+      FROM member_wiki_citations c
+      JOIN member_wiki_pages p ON p.id = c.page_id
+      JOIN member_wiki_document_versions v ON v.id = c.version_id
+      JOIN member_wiki_documents d ON d.id = v.document_id
       WHERE p.status='published' AND p.base_id = ${base.id}
         AND c.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = c.page_id)`;
     const byPage = new Map<string, RoutableCitation[]>();
@@ -446,6 +469,9 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
         anchor: row.anchor,
         sourceTitle: row.source_title,
         versionId: row.version_id,
+        documentId: row.document_id,
+        documentTitle: row.document_title,
+        fileName: row.file_name,
       });
       byPage.set(row.page_id, list);
     }
