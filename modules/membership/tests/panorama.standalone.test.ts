@@ -420,3 +420,42 @@ test("the employee-facing copy names capabilities, not data sources or models", 
   assert.ok(!/悟道|新华财经|DeepSeek|wudao/i.test(PANORAMA_EXPERT.skillMd), "内置专家的技能文本也要按能力表述");
   assert.equal(PANORAMA_EXPERT.slug, PANORAMA_EXPERT_SLUG);
 });
+
+
+for (const boundary of ["profile", "history", "shareholders"] as const) {
+  test(`mid-subject ${boundary} budget exhaustion returns a partial report and resumes`, async () => {
+    const ledger = new Map<string, unknown>();
+    const checkpoint = {
+      async get(nodeKey: string, kind: string) {
+        const payload = ledger.get(`${nodeKey}:${kind}`);
+        return payload === undefined ? null : { seq: 0, nodeKey, depth: 0, kind, tool: "get_company_profile", payload };
+      },
+      async put(line: { nodeKey: string; kind: string; payload: unknown }) { ledger.set(`${line.nodeKey}:${line.kind}`, line.payload); },
+    };
+    const calls: string[] = [];
+    const call: XinhuaCall = async (tool, args) => {
+      calls.push(`${tool}:${args.query}`);
+      if (tool === "get_company_profile") return { company_id: args.query === "Root" ? "root" : String(args.query).toLowerCase(), company_name: args.query === "Child" && boundary === "history" ? "Renamed" : args.query, company_status_name: "存续", company_type_name: "有限责任公司", start_date: "2000-01-01" };
+      if (tool === "get_history_company_name") return [{ company_name: "Child" }];
+      if (tool === "get_direct_investment") return { direct_investment_info: args.query === "Root" ? ["Prior", "Child", "Later"].map((name, i) => ({ company_id: name.toLowerCase(), company_name: name, stock_percent: i === 0 ? "5" : "30", stock_name: "Root" })) : [], pagination: { count: args.query === "Root" ? 3 : 0, has_more: false, next_offset: null } };
+      if (tool === "get_company_shareholder") return { shareholder_info: [{ stock_name: "Other", stock_percent: "95" }, { stock_name: "Root", stock_percent: "5" }] };
+      return {};
+    };
+    // Root profile + relations + Prior profile + shareholders = four calls.
+    const options = { call, checkpoint, root: { key: "company:root", name: "Root", companyId: "root", aliases: [] }, budget: { ...DEFAULT_PANORAMA_BUDGET, maxCalls: boundary === "profile" ? 4 : 5 } };
+    const partial = await runPanorama(options);
+    assert.equal(partial.stats.calls, options.budget.maxCalls);
+    assert.equal(calls.length, options.budget.maxCalls);
+    assert.equal(partial.stats.incomplete, true);
+    assert.ok(partial.stats.limits.includes("调用次数上限"));
+    assert.equal(partial.stats.untreated, 2, "Count the interrupted relation and every remaining sibling");
+    assert.ok(partial.edges.some(edge => edge.relation.name === "Prior"), "Keep completed relationships");
+    assert.ok(!partial.edges.some(edge => edge.relation.name === "Child"), "Do not classify an incompletely verified subject");
+    const report = renderPanorama({ run: partial, root: { name: "Root", id: "root" }, queriedAt: "2026-10-24T00:00:00Z", toolLabels: [] });
+    assert.ok(report.markdown.includes("结果不完整"));
+    const previousCalls = [...calls];
+    const resumed = await runPanorama({ ...options, budget: DEFAULT_PANORAMA_BUDGET });
+    assert.ok(resumed.edges.some(edge => edge.relation.name === "Child"));
+    for (const paid of previousCalls) assert.equal(calls.filter(value => value === paid).length, 1, "Do not repay checkpointed calls");
+  });
+}

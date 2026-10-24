@@ -251,7 +251,7 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
           node.historyNames = [...new Set([...node.historyNames, ...node.profile.originalName.split(/[;；]/).map(part => part.trim()).filter(Boolean)])];
         }
       } catch (error) {
-        if (error instanceof PanoramaLimitError) { limits.push("调用次数上限"); break; }
+        if (error instanceof PanoramaLimitError) { recordNodeGap(node, "已达调用次数上限，该主体尚有信息未读取或交叉核验。"); break; }
         recordNodeGap(node, `主体画像未取到（${errorText(error)}），该主体未继续下钻。`, "主体画像未取到，该主体未继续下钻。");
         continue;
       }
@@ -269,7 +269,7 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
         node.status.revocationDate = canRev.revocationDate;
         node.status.cancellationDate = canRev.cancellationDate;
       } catch (error) {
-        if (error instanceof PanoramaLimitError) { limits.push("调用次数上限"); break; }
+        if (error instanceof PanoramaLimitError) { recordNodeGap(node, "已达调用次数上限，该主体尚有信息未读取或交叉核验。"); break; }
         recordNodeGap(node, "注销吊销记录未取到，注销或吊销日期缺失。");
       }
       recordNodeGap(node, "登记状态显示该主体已注销、吊销或撤销，其对外投资随链抑制。");
@@ -298,7 +298,7 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
       // page makes the draft incomplete.
       relationsPartial = !pages.complete && !(providerSaysEmpty && !pages.rows.length);
     } catch (error) {
-      if (error instanceof PanoramaLimitError) { limits.push("调用次数上限"); break; }
+      if (error instanceof PanoramaLimitError) { recordNodeGap(node, "已达调用次数上限，该主体尚有信息未读取或交叉核验。"); break; }
       recordNodeGap(node, `对外直接投资未取到（${errorText(error)}）。`, "对外直接投资未取到，该主体的对外投资未覆盖。");
     }
     if (relationsPartial) {
@@ -331,7 +331,7 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
           }
         }
       } catch (error) {
-        if (error instanceof PanoramaLimitError) { limits.push("调用次数上限"); break; }
+        if (error instanceof PanoramaLimitError) { recordNodeGap(node, "已达调用次数上限，该主体尚有信息未读取或交叉核验。"); break; }
         recordNodeGap(node, "年报信息未取到，该主体的对外投资为空这一事实尚未交叉核验。");
       }
       continue;
@@ -365,16 +365,24 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
         budgetUntreated += 1;
         continue;
       }
-      if (calls >= budget.maxCalls) {
-        limits.push("调用次数上限");
-        node.excluded.push({ name: relation.name, reason: "超出本次调用次数上限" });
-        untreated += 1;
-        budgetUntreated += 1;
+      const depth = node.depth + 1;
+      let child: PanoramaNode;
+      try {
+        // Only providerCall can decide whether a read needs a fresh query: cached
+        // profiles and shareholders remain usable even when this run spent its budget.
+        child = await readSubject(relation, depth);
+      } catch (error) {
+        if (!(error instanceof PanoramaLimitError)) throw error;
+        const key = relation.companyId ? `company:${relation.companyId}` : `name:${relation.name}`;
+        const partial = nodes.get(key);
+        if (partial) recordNodeGap(partial, "已达调用次数上限，主体核验未完成，该关系未判定或继续下钻。");
+        const remaining = usable.slice(usable.indexOf(relation));
+        for (const skipped of remaining) node.excluded.push({ name: skipped.name, reason: "超出本次调用次数上限" });
+        untreated += remaining.length;
+        budgetUntreated += remaining.length;
         break;
       }
       treated += 1;
-      const depth = node.depth + 1;
-      const child = await readSubject(relation, depth);
       const repeated = edges.find(edge => edge.parentKey === node.key && edge.childKey === child.key);
       if (repeated) {
         // The same relation reached twice: one row per relation, and the first decision stands.
