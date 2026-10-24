@@ -7,6 +7,7 @@ import { mapProfile, mapRelations, mapShareholders } from "../experts/panorama-f
 import { renderPanorama } from "../experts/panorama-markdown.ts";
 import { executionMode } from "../experts/import.ts";
 import { BUILTIN_EXPERT, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG, XINHUA_ALLOWED_TOOLS } from "../experts/catalog.ts";
+import type { XinhuaCall } from "../experts/xinhua.ts";
 
 type Relation = Partial<PanoramaRelation>;
 
@@ -155,7 +156,7 @@ function provider(fixture: Fixture) {
     if (tool === "get_company_annual_report_investment_info") return { company_annual_report_investment_info: fixture.annualInvestment?.[query] ?? [] };
     throw new Error(`unexpected tool ${tool}`);
   };
-  return { call: call as never, calls };
+  return { call: call as unknown as XinhuaCall, calls };
 }
 
 function panoramaFixture(): Fixture {
@@ -297,6 +298,43 @@ test("the run stops at its limits and says the result is incomplete", async () =
   assert.ok(markdown.includes("触及上限"), "底稿要写明触及了哪个上限");
 });
 
+test("the depth budget never emits a relation layer beyond its configured depth", async () => {
+  const { run } = await runFixture({ ...DEFAULT_PANORAMA_BUDGET, maxDepth: 1 });
+  assert.equal(run.stats.depth, 1, "第 2 层关系不得出现在只允许 1 层的底稿中");
+  assert.ok(run.stats.limits.includes("层级上限"));
+  assert.ok(run.gaps.some(gap => gap.text.includes("层级上限") && gap.text.includes("未读取主体详情")));
+  assert.equal(run.stats.incomplete, true);
+});
+
+test("relations skipped by the per-subject budget appear in the gap list", async () => {
+  const { run } = await runFixture({ ...DEFAULT_PANORAMA_BUDGET, maxChildrenPerNode: 1 });
+  assert.ok(run.stats.untreated > 0);
+  assert.ok(run.gaps.some(gap => gap.scope === "本方主体" && gap.text.includes("单节点处理上限") && gap.text.includes("未处理")));
+});
+
+test("using exactly the per-subject relationship budget is complete", async () => {
+  const { run } = await runFixture({ ...DEFAULT_PANORAMA_BUDGET, maxChildrenPerNode: 4 });
+  assert.ok(!run.stats.limits.includes("单节点处理上限"), "刚好处理完预算数量不应误报截断");
+  assert.equal(run.stats.untreated, 0);
+});
+
+test("provider failures become generic gaps and make the report incomplete", async () => {
+  const fixture = panoramaFixture();
+  const providerStub = provider(fixture);
+  const run = await runPanorama({
+    call: async (tool, args) => {
+      if (tool === "get_direct_investment" && args.query === "91330000MA000ROOT") throw new Error("private provider detail");
+      return providerStub.call(tool, args);
+    },
+    root: { key: "company:root", name: "本方主体", companyId: "root", aliases: [] },
+  });
+  assert.equal(run.stats.incomplete, true);
+  assert.ok(run.gaps.some(gap => gap.text.includes("未覆盖")));
+  assert.ok(!JSON.stringify(run.nodes).includes("private provider detail"));
+  const { markdown } = renderPanorama({ run, root: { name: "本方主体", id: "root" }, queriedAt: "2026-10-24T00:00:00.000Z", toolLabels: [] });
+  assert.ok(markdown.includes("完整性：结果不完整"));
+});
+
 test("a node the provider cannot answer is a gap, not a missing row and not a failure", async () => {
   const fixture = panoramaFixture();
   fixture.profiles["控股子公司"] = { not_found: true };
@@ -360,11 +398,11 @@ test("a run that already read a subject resumes from the ledger instead of payin
   const callsAfterFirst = providerStub.calls.length;
   const second = await runPanorama({
     call: providerStub.call, root: { key: "company:root", name: "本方主体", companyId: "root", aliases: [] },
-    budget: DEFAULT_PANORAMA_BUDGET, checkpoint,
+    budget: { ...DEFAULT_PANORAMA_BUDGET, maxCalls: 1 }, checkpoint,
   });
   assert.equal(providerStub.calls.length, callsAfterFirst, "断点续跑不得重复调用已读的主体");
   assert.equal(second.nodes.length, first.nodes.length);
-  assert.equal(second.stats.calls, first.stats.calls);
+  assert.equal(second.stats.calls, 0, "从台账恢复的读取不消耗本轮供应商调用预算");
 });
 
 test("the employee-facing copy names capabilities, not data sources or models", () => {
@@ -382,3 +420,42 @@ test("the employee-facing copy names capabilities, not data sources or models", 
   assert.ok(!/悟道|新华财经|DeepSeek|wudao/i.test(PANORAMA_EXPERT.skillMd), "内置专家的技能文本也要按能力表述");
   assert.equal(PANORAMA_EXPERT.slug, PANORAMA_EXPERT_SLUG);
 });
+
+
+for (const boundary of ["profile", "history", "shareholders"] as const) {
+  test(`mid-subject ${boundary} budget exhaustion returns a partial report and resumes`, async () => {
+    const ledger = new Map<string, unknown>();
+    const checkpoint = {
+      async get(nodeKey: string, kind: string) {
+        const payload = ledger.get(`${nodeKey}:${kind}`);
+        return payload === undefined ? null : { seq: 0, nodeKey, depth: 0, kind, tool: "get_company_profile", payload };
+      },
+      async put(line: { nodeKey: string; kind: string; payload: unknown }) { ledger.set(`${line.nodeKey}:${line.kind}`, line.payload); },
+    };
+    const calls: string[] = [];
+    const call: XinhuaCall = async (tool, args) => {
+      calls.push(`${tool}:${args.query}`);
+      if (tool === "get_company_profile") return { company_id: args.query === "Root" ? "root" : String(args.query).toLowerCase(), company_name: args.query === "Child" && boundary === "history" ? "Renamed" : args.query, company_status_name: "存续", company_type_name: "有限责任公司", start_date: "2000-01-01" };
+      if (tool === "get_history_company_name") return [{ company_name: "Child" }];
+      if (tool === "get_direct_investment") return { direct_investment_info: args.query === "Root" ? ["Prior", "Child", "Later"].map((name, i) => ({ company_id: name.toLowerCase(), company_name: name, stock_percent: i === 0 ? "5" : "30", stock_name: "Root" })) : [], pagination: { count: args.query === "Root" ? 3 : 0, has_more: false, next_offset: null } };
+      if (tool === "get_company_shareholder") return { shareholder_info: [{ stock_name: "Other", stock_percent: "95" }, { stock_name: "Root", stock_percent: "5" }] };
+      return {};
+    };
+    // Root profile + relations + Prior profile + shareholders = four calls.
+    const options = { call, checkpoint, root: { key: "company:root", name: "Root", companyId: "root", aliases: [] }, budget: { ...DEFAULT_PANORAMA_BUDGET, maxCalls: boundary === "profile" ? 4 : 5 } };
+    const partial = await runPanorama(options);
+    assert.equal(partial.stats.calls, options.budget.maxCalls);
+    assert.equal(calls.length, options.budget.maxCalls);
+    assert.equal(partial.stats.incomplete, true);
+    assert.ok(partial.stats.limits.includes("调用次数上限"));
+    assert.equal(partial.stats.untreated, 2, "Count the interrupted relation and every remaining sibling");
+    assert.ok(partial.edges.some(edge => edge.relation.name === "Prior"), "Keep completed relationships");
+    assert.ok(!partial.edges.some(edge => edge.relation.name === "Child"), "Do not classify an incompletely verified subject");
+    const report = renderPanorama({ run: partial, root: { name: "Root", id: "root" }, queriedAt: "2026-10-24T00:00:00Z", toolLabels: [] });
+    assert.ok(report.markdown.includes("结果不完整"));
+    const previousCalls = [...calls];
+    const resumed = await runPanorama({ ...options, budget: DEFAULT_PANORAMA_BUDGET });
+    assert.ok(resumed.edges.some(edge => edge.relation.name === "Child"));
+    for (const paid of previousCalls) assert.equal(calls.filter(value => value === paid).length, 1, "Do not repay checkpointed calls");
+  });
+}

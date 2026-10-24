@@ -75,7 +75,7 @@ export type PanoramaRunResult = {
   nodes: PanoramaNode[];
   edges: PanoramaEdge[];
   gaps: Array<{ scope: string; text: string }>;
-  stats: { calls: number; nodes: number; depth: number; limits: string[]; untreated: number };
+  stats: { calls: number; nodes: number; depth: number; limits: string[]; untreated: number; incomplete: boolean };
 };
 
 export type PanoramaRunOptions = {
@@ -99,10 +99,7 @@ function statusIsExpired(status: string | null) {
   return EXPIRED_STATUS_WORDS.some(word => status.includes(word));
 }
 
-function errorText(error: unknown) {
-  if (error instanceof Error && error.message) return error.message;
-  return "工具调用失败";
-}
+function errorText(_error: unknown) { return "平台企业信息查询未返回可用结果"; }
 
 /** The query a provider call uses for a subject: the credit code when it is known, the registered name otherwise. */
 function subjectQuery(subject: PanoramaSubject, creditCode: string | null) {
@@ -125,13 +122,13 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
   let untreated = 0;
 
   const providerCall = async (tool: Parameters<XinhuaCall>[0], args: Record<string, unknown>, nodeKey: string, depth: number, kind: string) => {
+    const cached = await options.checkpoint?.get(nodeKey, kind);
+    if (cached) return cached.payload;
     if (calls >= budget.maxCalls) {
       limits.push("调用次数上限");
       throw new PanoramaLimitError("调用次数上限");
     }
     calls += 1;
-    const cached = await options.checkpoint?.get(nodeKey, kind);
-    if (cached) return cached.payload;
     const payload = await options.call(tool, args);
     await options.checkpoint?.put({ nodeKey, depth, kind, tool, payload });
     await options.heartbeat?.();
@@ -140,6 +137,10 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
 
   const addGap = (scope: string, text: string) => {
     if (!gaps.some(gap => gap.scope === scope && gap.text === text)) gaps.push({ scope, text });
+  };
+  const recordNodeGap = (node: PanoramaNode, detail: string, summary = detail) => {
+    node.gaps.push(detail);
+    addGap(node.name, summary);
   };
 
   const rootNode: PanoramaNode = {
@@ -176,26 +177,22 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
           const history = mapHistoryNames(await providerCall("get_history_company_name", { query: relation.name, query_type: "company_name" }, key, depth, "history_names"));
           node.historyNames = [...new Set([...node.historyNames, ...history])];
           if (!history.includes(relation.name)) {
-            node.gaps.push("画像返回名称与投资记录名称不一致，未确认是同一主体，该分支未继续下钻。");
-            addGap(node.name, "画像返回名称与投资记录名称不一致，未确认是同一主体，该分支未继续下钻。");
+            recordNodeGap(node, "画像返回名称与投资记录名称不一致，未确认是同一主体，该分支未继续下钻。");
             return node;
           }
         } catch (error) {
           if (error instanceof PanoramaLimitError) throw error;
-          node.gaps.push("曾用名未取到，名称不一致的主体未确认是否同一主体，该分支未继续下钻。");
-          addGap(node.name, "曾用名未取到，名称不一致的主体未确认是否同一主体，该分支未继续下钻。");
+          recordNodeGap(node, "曾用名未取到，名称不一致的主体未确认是否同一主体，该分支未继续下钻。");
           return node;
         }
       }
       if (!node.profile.name && !node.profile.companyId && !node.profile.creditCode) {
-        node.gaps.push("主体画像未取到（平台未返回该主体的登记信息），该分支未继续下钻。");
-        addGap(node.name, "主体画像未取到，该分支未继续下钻。");
+        recordNodeGap(node, "主体画像未取到（平台未返回该主体的登记信息），该分支未继续下钻。", "主体画像未取到，该分支未继续下钻。");
         return node;
       }
     } catch (error) {
       if (error instanceof PanoramaLimitError) throw error;
-      node.gaps.push(`主体画像未取到（${errorText(error)}），该分支未继续下钻。`);
-      addGap(node.name, "主体画像未取到，该分支未继续下钻。");
+      recordNodeGap(node, `主体画像未取到（${errorText(error)}），该分支未继续下钻。`, "主体画像未取到，该分支未继续下钻。");
       return node;
     }
 
@@ -211,8 +208,7 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
       } catch (error) {
         if (error instanceof PanoramaLimitError) throw error;
         node.shareholders = null;
-        node.gaps.push("股东名单未取到，控制口径按单一持股口径处理。");
-        addGap(node.name, "股东名单未取到，控制口径按单一持股口径处理。");
+        recordNodeGap(node, "股东名单未取到，控制口径按单一持股口径处理。");
       }
     }
     return node;
@@ -255,15 +251,13 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
           node.historyNames = [...new Set([...node.historyNames, ...node.profile.originalName.split(/[;；]/).map(part => part.trim()).filter(Boolean)])];
         }
       } catch (error) {
-        if (error instanceof PanoramaLimitError) { limits.push("调用次数上限"); break; }
-        node.gaps.push(`主体画像未取到（${errorText(error)}），该主体未继续下钻。`);
-        addGap(node.name, "主体画像未取到，该主体未继续下钻。");
+        if (error instanceof PanoramaLimitError) { recordNodeGap(node, "已达调用次数上限，该主体尚有信息未读取或交叉核验。"); break; }
+        recordNodeGap(node, `主体画像未取到（${errorText(error)}），该主体未继续下钻。`, "主体画像未取到，该主体未继续下钻。");
         continue;
       }
     }
     if (!node.profile.name && !node.profile.companyId && !node.profile.creditCode) {
-      node.gaps.push("主体画像未取到（平台未返回该主体的登记信息），该主体未继续下钻。");
-      addGap(node.name, "主体画像未取到，该主体未继续下钻。");
+      recordNodeGap(node, "主体画像未取到（平台未返回该主体的登记信息），该主体未继续下钻。", "主体画像未取到，该主体未继续下钻。");
       continue;
     }
 
@@ -275,11 +269,10 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
         node.status.revocationDate = canRev.revocationDate;
         node.status.cancellationDate = canRev.cancellationDate;
       } catch (error) {
-        if (error instanceof PanoramaLimitError) { limits.push("调用次数上限"); break; }
-        node.gaps.push("注销吊销记录未取到，注销或吊销日期缺失。");
-        addGap(node.name, "注销吊销记录未取到，注销或吊销日期缺失。");
+        if (error instanceof PanoramaLimitError) { recordNodeGap(node, "已达调用次数上限，该主体尚有信息未读取或交叉核验。"); break; }
+        recordNodeGap(node, "注销吊销记录未取到，注销或吊销日期缺失。");
       }
-      node.gaps.push("登记状态显示该主体已注销、吊销或撤销，其对外投资随链抑制。");
+      recordNodeGap(node, "登记状态显示该主体已注销、吊销或撤销，其对外投资随链抑制。");
       continue;
     }
 
@@ -305,13 +298,11 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
       // page makes the draft incomplete.
       relationsPartial = !pages.complete && !(providerSaysEmpty && !pages.rows.length);
     } catch (error) {
-      if (error instanceof PanoramaLimitError) { limits.push("调用次数上限"); break; }
-      node.gaps.push(`对外直接投资未取到（${errorText(error)}）。`);
-      addGap(node.name, "对外直接投资未取到，该主体的对外投资未覆盖。");
+      if (error instanceof PanoramaLimitError) { recordNodeGap(node, "已达调用次数上限，该主体尚有信息未读取或交叉核验。"); break; }
+      recordNodeGap(node, `对外直接投资未取到（${errorText(error)}）。`, "对外直接投资未取到，该主体的对外投资未覆盖。");
     }
     if (relationsPartial) {
-      node.gaps.push("对外直接投资分页未读完，该主体的对外投资可能不完整。");
-      addGap(node.name, "对外直接投资分页未读完，该主体的对外投资可能不完整。");
+      recordNodeGap(node, "对外直接投资分页未读完，该主体的对外投资可能不完整。");
     }
 
     // Existence check: a row of another shareholder, or a row dated before the subject existed, is not
@@ -336,46 +327,66 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
           const disclosure = mapAnnualInvestment(await providerCall("get_company_annual_report_investment_info", subjectQuery(subject, subject.creditCode ?? null), node.key, node.depth, "annual_investment"));
           node.annualDisclosure = disclosure;
           if (disclosure.length) {
-            node.gaps.push("年报披露过对外投资但当前在投清单为空，退出性质未由平台工具确认。");
-            addGap(node.name, "年报披露过对外投资但当前在投清单为空；退出性质与接手股东无对等工具，无法确认退出时间与方式。");
+            recordNodeGap(node, "年报披露过对外投资但当前在投清单为空，退出性质未由平台工具确认。", "年报披露过对外投资但当前在投清单为空；退出性质与接手股东无对等工具，无法确认退出时间与方式。");
           }
         }
       } catch (error) {
-        if (error instanceof PanoramaLimitError) { limits.push("调用次数上限"); break; }
-        node.gaps.push("年报信息未取到，该主体的对外投资为空这一事实尚未交叉核验。");
-        addGap(node.name, "年报信息未取到，该主体的对外投资为空这一事实尚未交叉核验。");
+        if (error instanceof PanoramaLimitError) { recordNodeGap(node, "已达调用次数上限，该主体尚有信息未读取或交叉核验。"); break; }
+        recordNodeGap(node, "年报信息未取到，该主体的对外投资为空这一事实尚未交叉核验。");
       }
+      continue;
+    }
+
+    // maxDepth counts investment layers below the confirmed root. Once a node at that
+    // depth has a readable outbound list, disclose those rows as untreated without
+    // fetching profiles or emitting a fifth (or later) layer into the report.
+    if (node.depth >= budget.maxDepth) {
+      for (const relation of usable) node.excluded.push({ name: relation.name, reason: "超出本次层级上限" });
+      untreated += usable.length;
+      limits.push("层级上限");
+      recordNodeGap(node, `已达层级上限，该主体另有 ${usable.length} 条对外投资关系未读取主体详情或继续下钻。`);
       continue;
     }
 
     const pending: PanoramaNode[] = [];
     let treated = 0;
+    let budgetUntreated = 0;
     for (const relation of usable) {
       if (treated >= budget.maxChildrenPerNode) {
         node.excluded.push({ name: relation.name, reason: "超出本节点处理上限" });
         untreated += 1;
+        budgetUntreated += 1;
         continue;
       }
       if (nodes.size >= budget.maxNodes) {
         limits.push("主体数上限");
         node.excluded.push({ name: relation.name, reason: "超出本次主体数上限" });
         untreated += 1;
+        budgetUntreated += 1;
         continue;
       }
-      if (calls >= budget.maxCalls) {
-        limits.push("调用次数上限");
-        node.excluded.push({ name: relation.name, reason: "超出本次调用次数上限" });
-        untreated += 1;
+      const depth = node.depth + 1;
+      let child: PanoramaNode;
+      try {
+        // Only providerCall can decide whether a read needs a fresh query: cached
+        // profiles and shareholders remain usable even when this run spent its budget.
+        child = await readSubject(relation, depth);
+      } catch (error) {
+        if (!(error instanceof PanoramaLimitError)) throw error;
+        const key = relation.companyId ? `company:${relation.companyId}` : `name:${relation.name}`;
+        const partial = nodes.get(key);
+        if (partial) recordNodeGap(partial, "已达调用次数上限，主体核验未完成，该关系未判定或继续下钻。");
+        const remaining = usable.slice(usable.indexOf(relation));
+        for (const skipped of remaining) node.excluded.push({ name: skipped.name, reason: "超出本次调用次数上限" });
+        untreated += remaining.length;
+        budgetUntreated += remaining.length;
         break;
       }
       treated += 1;
-      const depth = node.depth + 1;
-      const child = await readSubject(relation, depth);
       const repeated = edges.find(edge => edge.parentKey === node.key && edge.childKey === child.key);
       if (repeated) {
         // The same relation reached twice: one row per relation, and the first decision stands.
-        node.gaps.push("同一出资关系重复出现，按首次到达的链条判定。");
-        addGap(child.name, "同一出资关系重复出现，按首次到达的链条判定。");
+        recordNodeGap(node, "同一出资关系重复出现，按首次到达的链条判定。", `同一出资关系到达 ${child.name} 多次，按首次链条判定。`);
         continue;
       }
       const edge = decide(node, child, relation, depth);
@@ -385,7 +396,16 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
       }
       if (edge.verdict.drill && !child.exited) pending.push(child);
     }
-    if (treated >= budget.maxChildrenPerNode) limits.push("单节点处理上限");
+    if (treated >= budget.maxChildrenPerNode && usable.length > budget.maxChildrenPerNode) limits.push("单节点处理上限");
+    if (budgetUntreated) {
+      const reasons = [...new Set(node.excluded.flatMap(row => {
+        if (row.reason === "超出本节点处理上限") return ["单节点处理上限"];
+        if (row.reason === "超出本次主体数上限") return ["主体数上限"];
+        if (row.reason === "超出本次调用次数上限") return ["调用次数上限"];
+        return [];
+      }))];
+      recordNodeGap(node, `${budgetUntreated} 条关系因${reasons.join("、")}未处理。`);
+    }
     // One branch is finished before the next one starts.
     for (const child of pending.reverse()) stack.push(child);
   }
@@ -397,7 +417,7 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
     nodes: ordered,
     edges,
     gaps,
-    stats: { calls, nodes: ordered.length, depth, limits: [...new Set(limits)], untreated },
+    stats: { calls, nodes: ordered.length, depth, limits: [...new Set(limits)], untreated, incomplete: limits.length > 0 || gaps.length > 0 },
   };
 }
 
