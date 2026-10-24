@@ -70,7 +70,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
   });
   app.get("/api/v1/membership/admin/gp-observations",async(req,reply)=>{
     if(!await admin(req,reply)) return;
-    const observations=await sql`SELECT i.id,i.gp_id,g.canonical_name AS gp_name,i.investee_name,i.first_seen_at,i.investment_date,i.data_date,s.captured_at AS snapshot_captured_at,
+    const observations=await sql`SELECT i.id,i.gp_id,g.canonical_name AS gp_name,i.investee_name,i.first_seen_at,i.investment_date,i.provider_updated_at,i.data_date,s.captured_at AS snapshot_captured_at,
       i.status,i.sector_tags,i.sector_reason,i.classification_state,i.approved_event_date,i.approved_source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       LEFT JOIN member_gp_snapshots s ON s.id=i.source_snapshot_id ORDER BY i.first_seen_at DESC LIMIT 300`;

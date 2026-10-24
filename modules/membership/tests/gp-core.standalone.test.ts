@@ -7,6 +7,14 @@ test("data source update time is not treated as deal date",()=>{
   assert.equal(row?.investmentDate,null);
   assert.equal(row?.updatedAt,"2026-10-22");
 });
+test("discovery, provider update, and actual investment dates remain separate",()=>{
+  const row=normalizeInvestment({company_name:"Example",data_date:"2026-10-20",update_time:"2026-10-22",invest_date:"2024-03-01"});
+  assert.equal(row?.dataDate,"2026-10-20");
+  assert.equal(row?.updatedAt,"2026-10-22");
+  assert.equal(row?.investmentDate,"2024-03-01");
+  const missingDealDate=normalizeInvestment({company_name:"Example",data_date:"2026-10-20",update_time:"2026-10-22"});
+  assert.equal(missingDealDate?.investmentDate,null);
+});
 test("duplicate investees collapse, unidentifiable evidence fails completeness",()=>{
   const result=uniqueInvestments([{company_name:"甲",company_id:"1"},{company_name:"甲",company_id:"1"},{update_time:"today"}]);
   assert.equal(result.records.length,1);
