@@ -12,7 +12,7 @@ import { capExtraction, detectFormat, extractMaterial } from "./extract.ts";
 import { publishBuildPages } from "./publish.ts";
 import { DEFAULT_BASE_ID, baseSlugOf } from "./bases.ts";
 import { compiledDraftSchema, auditResultSchema, type AuditResult, type CompiledDraft, type Finding } from "./schema.ts";
-import { MAX_EXTRACTED_CHARS, MAX_WIKI_ATTEMPTS, TASK_ERRORS } from "./catalog.ts";
+import { MAX_EXTRACTED_CHARS, MAX_WIKI_ATTEMPTS, TASK_ERRORS, type WikiFormat } from "./catalog.ts";
 
 type TaskRow = {
   id: string;
@@ -31,6 +31,7 @@ type VersionRow = {
   id: string;
   document_id: string;
   version_no: number;
+  format: WikiFormat;
   file_name: string;
   body: Buffer;
   source_title: string | null;
@@ -46,6 +47,7 @@ function failureCode(error: unknown): { code: string; message: string } {
   if (error instanceof ModelUnavailableError) return { code: "knowledge_model_failed", message: TASK_ERRORS.knowledge_model_failed };
   if (error instanceof ModelOutputError) return { code: "knowledge_model_output_invalid", message: TASK_ERRORS.knowledge_model_output_invalid };
   const code = error instanceof Error ? error.message : "knowledge_model_failed";
+  if (code === "knowledge_file_type_unsupported") return { code, message: TASK_ERRORS.knowledge_file_type_unsupported };
   if (code === "knowledge_text_unavailable" || code === "knowledge_file_unreadable") return { code, message: "未能读取材料内容，未生成知识页。" };
   if (code === "knowledge_text_empty") return { code, message: TASK_ERRORS.knowledge_text_empty };
   if (code === "knowledge_audit_failed") return { code, message: TASK_ERRORS.knowledge_audit_failed };
@@ -71,7 +73,7 @@ async function loadTask(taskId: string): Promise<TaskRow | null> {
 }
 
 async function loadVersion(versionId: string): Promise<VersionRow | null> {
-  const rows = await sql<VersionRow[]>`SELECT id, document_id, version_no, file_name, body, source_title, source_author, source_org, source_date, source_kind, extracted_text, extraction_status FROM member_wiki_document_versions WHERE id = ${versionId}`;
+  const rows = await sql<VersionRow[]>`SELECT id, document_id, version_no, format, file_name, body, source_title, source_author, source_org, source_date, source_kind, extracted_text, extraction_status FROM member_wiki_document_versions WHERE id = ${versionId}`;
   return rows[0] ?? null;
 }
 
@@ -94,6 +96,11 @@ async function saveCheckpoint(taskId: string, leaseToken: string, field: "draft"
 
 /** Reads the material out and keeps the text on the version, so a retry does not read the file again. */
 async function extractVersion(version: VersionRow): Promise<string> {
+  // A cached extraction must not let a historical PPTX resume its model build.
+  if (version.format === "pptx") {
+    await sql`UPDATE member_wiki_document_versions SET extraction_status='unavailable', extraction_note='PPTX 已停止处理，请先转换为 PDF。' WHERE id=${version.id}`;
+    throw new Error("knowledge_file_type_unsupported");
+  }
   if (version.extraction_status === "available" && version.extracted_text) return version.extracted_text;
   const format = detectFormat(version.file_name, version.body);
   if (!format) throw new Error("knowledge_file_type_unsupported");

@@ -301,7 +301,8 @@ export default function KnowledgeBasePage() {
           <form onSubmit={upload} className="grid gap-4">
             <div className="grid gap-2">
               <Label htmlFor="wiki-file">文件</Label>
-              <FileInput id="wiki-file" name="file" accept=".pdf,.docx,.pptx,.md,.markdown,.txt,application/pdf" onChange={event => setFile(event.target.files?.[0] ?? null)} required />
+              <FileInput id="wiki-file" name="file" accept=".pdf,.docx,.md,.markdown,.txt,application/pdf" onChange={event => setFile(event.target.files?.[0] ?? null)} required />
+              <p className="text-xs text-ink-3">支持 PDF、DOCX、Markdown；PPT 请先转换为 PDF。</p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2"><Label htmlFor="wiki-title">标题</Label><Input id="wiki-title" name="title" maxLength={200} placeholder="留空则用文件名" /></div>

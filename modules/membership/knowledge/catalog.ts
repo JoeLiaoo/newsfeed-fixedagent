@@ -5,13 +5,14 @@
 import { beijingDate } from "@aihot/contracts/time";
 
 /** The material formats the library accepts. */
-export const WIKI_FORMATS = ["pdf", "docx", "pptx", "markdown"] as const;
-export type WikiFormat = (typeof WIKI_FORMATS)[number];
+export const WIKI_FORMATS = ["pdf", "docx", "markdown"] as const;
+export type SupportedWikiFormat = (typeof WIKI_FORMATS)[number];
+/** Existing versions can still record PPTX; new uploads and extraction reject it. */
+export type WikiFormat = SupportedWikiFormat | "pptx";
 
-export const FORMAT_EXTENSIONS: Record<WikiFormat, string[]> = {
+export const FORMAT_EXTENSIONS: Record<SupportedWikiFormat, string[]> = {
   pdf: ["pdf"],
   docx: ["docx"],
-  pptx: ["pptx"],
   markdown: ["md", "markdown", "txt"],
 };
 
@@ -102,7 +103,7 @@ export const BUILD_STAGES = ["queued", "extracting", "compiling", "auditing", "l
 /** Why a build stopped, in the words the page shows. */
 export const TASK_ERRORS: Record<string, string> = {
   knowledge_upload_too_large: "文件超过上限，未入库。",
-  knowledge_file_type_unsupported: "文件格式不受支持（仅支持 PDF、Word、PPT、Markdown）。",
+  knowledge_file_type_unsupported: "文件格式不受支持（仅支持 PDF、DOCX、Markdown；PPT 请先转换为 PDF）。",
   knowledge_file_unreadable: "文件无法读取或已损坏。",
   knowledge_text_unavailable: "未能从文件中提取出可用文本，未生成知识页。",
   knowledge_text_empty: "材料内容超出单次构建上限且未能截取到有效文本，未生成知识页。",

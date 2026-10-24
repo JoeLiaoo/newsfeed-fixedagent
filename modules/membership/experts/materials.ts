@@ -30,7 +30,7 @@ export function parseTaskMaterials(value: unknown): TaskMaterial[] {
     total += bytes.length;
     if (!bytes.length || bytes.length > MAX_MATERIAL_BYTES || total > MAX_TOTAL_MATERIAL_BYTES) throw new Error("expert_material_too_large");
     const format = detectFormat(fileName, bytes);
-    if (!format || !["pdf", "docx", "pptx", "markdown"].includes(format)) throw new Error("expert_material_format_unsupported");
+    if (!format) throw new Error("expert_material_format_unsupported");
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     if (seen.has(sha256)) throw new Error("expert_material_duplicate");
     seen.add(sha256);
