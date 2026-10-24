@@ -29,9 +29,10 @@
 - `node --import ./tests/standalone.ts --test modules/membership/tests/panorama.standalone.test.ts`：18 项通过，含深度上限不多读一层、跳过关系进入缺口清单的回归用例。
 - `node scripts/check-doc-links.ts`：首次运行时发现本日志链接目标尚未创建；创建日志后复跑通过，检查 360 个本地 Markdown 链接。
 - `git diff --check`：通过。
-- PostgreSQL `panorama-db.test.ts` 未运行：`DATABASE_URL` 未设置。已补充“无台账下载应为 404”的数据库集成断言，待 CI 或临时测试数据库运行。
+- 本地 PostgreSQL `panorama-db.test.ts` 未运行：`DATABASE_URL` 未设置；新增“无台账下载应为 404”的集成断言已由 PR #51 的 `postgres-integration` CI 通过。
+- 推送后 PR #51 的 `links`、`postgres-integration`、`quality` 三项 GitHub checks 均通过。
 
 ## 未验证事项与下一步
 
 - 当前无真实 MCP 与生产员工验收证据；生产目录、样例全景、报告及 JSONL 下载仍待用户验收。
-- 在 PR #51 分支提交并推送本轮修复；不合并、不部署。保持 P2-05 `[ ]`。
+- 本轮修复已提交并推送到 PR #51；不合并、不部署。保持 P2-05 `[ ]`。
