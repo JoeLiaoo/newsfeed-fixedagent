@@ -2,7 +2,7 @@
 
 - Agent：Codex
 - 对应任务：维护任务（不对应 P0–P5 验收项）
-- 完成状态：代码完成，PR 待创建
+- 完成状态：PR #52 已创建，Open；未合并、未部署
 
 ## 本次改动
 
@@ -18,4 +18,6 @@
 ## 风险与交接
 
 - 已知限制／缺失依赖：本页展示的数据是否完整，取决于 GP 主体核验、投资事件审核及同步运行情况；页面不会把观察记录或暂停 GP 转成可见项目。未新增迁移或供应商调用。
-- 下一步：完成文档链接检查、提交并推送分支、创建面向 `main` 的 PR；不合并、不部署。PR 与提交 SHA 写入 `/tmp/nf-codex-projects-gp-result.md`。
+- 下一步：等待 PR #52 的 review 与 CI；员工登录后的真实页面验收待安排。本次不合并、不部署。
+
+PR：[PR #52](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/52)，head `138f6bc`（`feat/projects-invested-gp-v1`）。
