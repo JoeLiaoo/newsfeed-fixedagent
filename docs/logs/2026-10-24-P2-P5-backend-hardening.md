@@ -1,7 +1,7 @@
 # 2026-10-24 专家与知识库后端补全
 
 - 对应任务：[Issue #41](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/41)、[#42](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/42)、[#43](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/43)、[#44](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/44)；P2 专家执行与 P5 知识库维护。
-- 完成状态：代码完成，真实环境验收待执行。
+- 完成状态：PR #45 已合并（`2b50816cb3046bdbe7e4098b94e90de1e91821c4`），未部署，真实环境验收待执行；最终检查与修复见 [复审日志](2026-10-24-pr45-review.md)。
 
 ## 本次改动
 
