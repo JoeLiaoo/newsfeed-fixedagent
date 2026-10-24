@@ -10,7 +10,7 @@ import { buildApp } from "../../../apps/api/src/app.ts";
 import { SERVER_MODULES } from "../../../site/modules/server.ts";
 import { stub, tag } from "../../../tests/setup.ts";
 import { runWikiTask } from "../knowledge/worker.ts";
-import { DEFAULT_BASE_ID } from "../knowledge/bases.ts";
+import { DEFAULT_BASE_DESCRIPTION, DEFAULT_BASE_ID, DEFAULT_BASE_NAME, ensureDefaultBase } from "../knowledge/bases.ts";
 
 // A valid draft name grows beyond 80 characters once the new base prefixes it.
 const PAGE_SLUG = `view-company-${"a".repeat(57)}`;
@@ -98,12 +98,23 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
   const bases = (await listed.json() as { bases: Array<{ id: string; name: string; documents: number; pages: number }> }).bases;
   assert.equal(bases.length, 1, "the shared base is there before anything else is made");
   assert.equal(bases[0]?.id, DEFAULT_BASE_ID);
+  assert.equal(bases[0]?.name, "知识库示例", "the default base carries the platform's own name");
 
   // A new base is made by an approved employee.
   const created = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/bases", headers: { cookie: cookies[0]!, ...common }, payload: { name: "新能源赛道投研", description: "只收新能源赛道的材料" } });
   assert.equal(created.statusCode, 201);
   const base = (await created.json() as { base: { id: string; name: string } }).base;
   assert.equal(base.name, "新能源赛道投研");
+
+  // The default base belongs to the platform: a base left over from an earlier release is renamed
+  // when the library is read, and a base an employee made keeps the name it was given.
+  await sql`UPDATE member_wiki_bases SET name = ${"全公司共享知识库"}, description = ${"全公司共用的投研知识库"} WHERE id = ${DEFAULT_BASE_ID}`;
+  await ensureDefaultBase();
+  const renamed = await sql<{ name: string; description: string }[]>`SELECT name, description FROM member_wiki_bases WHERE id = ${DEFAULT_BASE_ID}`;
+  assert.equal(renamed[0]?.name, DEFAULT_BASE_NAME, "the default base is renamed when it is ensured");
+  assert.equal(renamed[0]?.description, DEFAULT_BASE_DESCRIPTION);
+  const own = await sql<{ name: string }[]>`SELECT name FROM member_wiki_bases WHERE id = ${base.id}`;
+  assert.equal(own[0]?.name, "新能源赛道投研", "a base an employee made is not renamed");
   assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/bases/${base.id}`, headers: { cookie: cookies[0]!, ...common } })).statusCode, 200);
   assert.equal((await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/bases/kb-does-not-exist", headers: { cookie: cookies[0]!, ...common } })).statusCode, 404);
 

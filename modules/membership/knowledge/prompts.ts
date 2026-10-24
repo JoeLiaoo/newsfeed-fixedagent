@@ -14,6 +14,8 @@ export const BUILDER_SYSTEM = [
   "数字与判断带具体时间锚，不写「目前」「近期」这类模糊词。",
   "覆盖度由平台按页面内的具名证据统计，你不要自己编造覆盖数字。",
   "同一标的的页面用同一个 slug，不同标的用不同 slug；平台会把同一标的的多份材料合并成同一页。",
+  // The provider answers in JSON mode; the word "json" in the prompt is what keeps that mode open.
+  "输出格式：只返回一个 JSON 对象，不要 Markdown 围栏。",
 ].join("\n");
 
 /** The Auditor reviews in its own context: it sees the material and the draft, never the Builder's reasoning. */
@@ -27,6 +29,7 @@ export const AUDITOR_SYSTEM = [
   "草稿里没有依据的条目，用 remove 撤回；依据不足但归属无法确认的，用 unknown_attribution 把该字段改为「未知」。",
   "你不能新增材料里没有的观点，只能撤回、降级为未知或记录质量问题。",
   "结论用 pass、pass_with_issues 或 fail：核心观点大面积缺失且无法在本批内修正时用 fail。",
+  "输出格式：只返回一个 JSON 对象，不要 Markdown 围栏。",
 ].join("\n");
 
 /** The consumption discipline the answers follow (the platform's BEHAVIOR rules). */
@@ -43,4 +46,5 @@ export const ANSWER_SYSTEM = [
   "材料日期距今超过 6 个月时必须标注日期；超过 12 个月时显式声明素材截至哪一天、无法反映当前状态。",
   "不用「根据参考资料」「文献指出」这类转述腔；不写内部文件名。",
   "回答末尾固定给三项：参考资料清单、本次参考的知识页列表、一句免责声明（含 AI 综合判断，不构成投资建议）。",
+  "输出格式：只返回一个 JSON 对象，不要 Markdown 围栏。",
 ].join("\n");
