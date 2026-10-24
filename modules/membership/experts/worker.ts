@@ -298,7 +298,8 @@ export async function runExpertTask(taskId: string) {
     let report: string;
     const experts = await sql<{ manifest: { tools?: string[] }; status: string }[]>`SELECT manifest,status FROM member_experts WHERE slug=${task.expert_slug}`;
     // A hidden expert still runs the tasks it was given before it was hidden; only new tasks are
-    // refused, and the refusal happens where the task is created.
+    // refused, and the refusal happens where the task is created. A `coming_soon` expert never runs:
+    // its data sources are not connected yet.
     if (!experts[0] || (experts[0].status !== "available" && experts[0].status !== HIDDEN_EXPERT_STATUS)) throw new Error("expert_unavailable");
     const toolMode = task.expert_slug === EXPERT_SLUG || task.expert_slug === PANORAMA_EXPERT_SLUG || executionMode(experts[0].manifest) === "xinhua_trial" || executionMode(experts[0].manifest) === "xinhua_panorama";
     if (toolMode && !task.selected_entity) {

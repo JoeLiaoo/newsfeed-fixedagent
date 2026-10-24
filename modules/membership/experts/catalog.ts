@@ -28,6 +28,13 @@ export const HIDDEN_EXPERT_STATUS = "hidden";
 /** The builtins the employee platform keeps but does not offer as a catalog entry. */
 export const HIDDEN_BUILTIN_SLUGS = new Set<string>([EXPERT_SLUG]);
 
+/**
+ * The status of an expert the platform plans to offer. `blocked` would mean missing dependencies and
+ * `hidden` means the catalog drops the entry; `coming_soon` keeps the entry visible for every role so
+ * employees can see what is on the way, but it starts no task and shows no execution mode.
+ */
+export const COMING_SOON_EXPERT_STATUS = "coming_soon";
+
 export const EXPERT_SKILL = `# 企业一层对外投资核查
 
 本专家使用平台已授权的企业信息查询能力与文本整理能力。当前按已确认主体读取工商画像和一层直接投资，生成可复核的底稿。
@@ -79,8 +86,44 @@ export const PANORAMA_EXPERT = {
   missingDependencies: [],
 };
 
+/**
+ * The planned expert entry: a company public-opinion and brand-reputation report. The data sources and
+ * the run are not connected yet, so the entry only says what the capability will be.
+ */
+export const COMING_SOON_EXPERT_SLUG = "company-sentiment-report";
+
+export const COMING_SOON_EXPERT_SKILL = `# 企业舆情报告
+
+本专家计划产出企业公开舆情与品牌声誉方向的专题报告。当前处于开发中：平台尚未接入舆情数据源与报告生成流程，因此本条目不提供任务提交，也不产出报告。
+
+当前状态：开发中，敬请期待。目录里保留这条入口，是为了让员工看到这项能力的规划与口径。
+
+接入后，本技能文本会写明报告覆盖的时段与对象、证据口径与引用方式，以及每一项未提供的字段如何标注。当前版本不声明任何工具依赖。
+`;
+
+export const COMING_SOON_EXPERT = {
+  slug: COMING_SOON_EXPERT_SLUG,
+  name: "企业舆情报告",
+  description: "面向企业公开舆情与品牌声誉的专题报告能力，开发中，敬请期待。",
+  version: "0.1.0",
+  skillMd: COMING_SOON_EXPERT_SKILL,
+  missingDependencies: [],
+};
+
 /** The experts the platform ships; their tasks take an entity name instead of a written brief. */
 export const BUILTIN_SLUGS = new Set<string>([EXPERT_SLUG, PANORAMA_EXPERT_SLUG]);
+
+/** What an employee reads on a card or a detail page for each state of an expert. */
+export const EXPERT_STATUS_BADGES: Record<string, { label: string; variant: "success" | "warning" | "secondary" }> = {
+  available: { label: "可运行", variant: "success" },
+  coming_soon: { label: "开发中", variant: "secondary" },
+  blocked: { label: "缺少依赖", variant: "warning" },
+};
+
+/** The badge of an expert's state; an unknown state keeps its own name instead of borrowing one. */
+export function expertStatusBadge(status: string) {
+  return EXPERT_STATUS_BADGES[status] ?? { label: status, variant: "secondary" as const };
+}
 
 /**
  * Employee-facing labels for an execution mode. They name the capability an employee gets, never the

@@ -5,7 +5,7 @@ import { enqueueOn } from "@aihot/backend/jobs/queue";
 import type { MemberSession } from "../server.ts";
 import { EXPERT_QUEUE } from "./queue.ts";
 import { parseSkillUpload, expertSlug, executionMode } from "./import.ts";
-import { BUILTIN_EXPERT, EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG } from "./catalog.ts";
+import { BUILTIN_EXPERT, COMING_SOON_EXPERT, COMING_SOON_EXPERT_STATUS, EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG } from "./catalog.ts";
 import { parseTaskMaterials, MAX_TOTAL_MATERIAL_BYTES } from "./materials.ts";
 import { getTaskArtifact } from "./worker.ts";
 import { panoramaCheckpointJsonl } from "./panorama-checkpoint.ts";
@@ -40,6 +40,13 @@ async function seedBuiltin() {
     VALUES (${PANORAMA_EXPERT.slug}, NULL, ${PANORAMA_EXPERT.name}, ${PANORAMA_EXPERT.description}, ${PANORAMA_EXPERT.version}, ${PANORAMA_EXPERT.skillMd}, ${sql.json({ tools: ["fuzzy_search_company_list", "get_company_profile", "get_direct_investment", "get_company_shareholder", "get_company_can_rev", "get_history_company_name", "get_company_annual_report_base_info", "get_company_annual_report_investment_info"] })}, 'available', ${sql.array(PANORAMA_EXPERT.missingDependencies)}::text[])
     ON CONFLICT(slug) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, version=EXCLUDED.version,
       skill_md=EXCLUDED.skill_md, manifest=EXCLUDED.manifest, missing_dependencies=EXCLUDED.missing_dependencies`;
+  // The planned entry keeps its row in the catalog for every role, marked `coming_soon`: the employee
+  // sees what is on the way, no task starts on it, and the conflict branch writes the status back so an
+  // already deployed row flips on the next seed.
+  await sql`INSERT INTO member_experts(slug, owner_id, name, description, version, skill_md, manifest, status, missing_dependencies)
+    VALUES (${COMING_SOON_EXPERT.slug}, NULL, ${COMING_SOON_EXPERT.name}, ${COMING_SOON_EXPERT.description}, ${COMING_SOON_EXPERT.version}, ${COMING_SOON_EXPERT.skillMd}, ${sql.json({ tools: [] })}, ${COMING_SOON_EXPERT_STATUS}, ${sql.array(COMING_SOON_EXPERT.missingDependencies)}::text[])
+    ON CONFLICT(slug) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, version=EXCLUDED.version,
+      skill_md=EXCLUDED.skill_md, manifest=EXCLUDED.manifest, status=EXCLUDED.status, missing_dependencies=EXCLUDED.missing_dependencies`;
 }
 
 function taskId() { return randomBytes(16).toString("hex"); }
@@ -52,8 +59,8 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     await seedBuiltin();
     const experts = await sql<{ slug: string; name: string; description: string; version: string; status: string; missing_dependencies: string[]; execution_mode: string; created_at: Date }[]>`
       SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${PANORAMA_EXPERT_SLUG} THEN 'xinhua_panorama' WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
-      WHERE status <> ${HIDDEN_EXPERT_STATUS} AND (status = 'available' OR owner_id = ${user.id} OR ${user.role === "admin"})
-      ORDER BY (slug = ${PANORAMA_EXPERT_SLUG}) DESC, (slug = ${EXPERT_SLUG}) DESC, created_at DESC`;
+      WHERE status <> ${HIDDEN_EXPERT_STATUS} AND (status IN ('available', ${COMING_SOON_EXPERT_STATUS}) OR owner_id = ${user.id} OR ${user.role === "admin"})
+      ORDER BY (status = 'available') DESC, (status = ${COMING_SOON_EXPERT_STATUS}) DESC, (slug = ${PANORAMA_EXPERT_SLUG}) DESC, (slug = ${EXPERT_SLUG}) DESC, created_at DESC`;
     return { experts };
   });
 
@@ -105,6 +112,9 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "expert_material_invalid" }); }
     const experts = typeof slug === "string" ? await sql<{ status: string; manifest: { tools?: string[] } }[]>`SELECT status, manifest FROM member_experts WHERE slug=${slug}` : [];
     const expert = experts[0];
+    // A planned entry stays in the catalog but starts no task: the employee sees what is on the way and
+    // the refusal names the state, so nobody reads it as a broken dependency.
+    if (expert?.status === COMING_SOON_EXPERT_STATUS) return reply.code(404).send({ error: "expert_coming_soon" });
     // A hidden builtin is not offered as a catalog entry, so it reads as absent: it starts no task.
     const hidden = (typeof slug === "string" && HIDDEN_BUILTIN_SLUGS.has(slug)) || expert?.status === HIDDEN_EXPERT_STATUS;
     if (hidden || !expert || expert.status !== "available") return reply.code(404).send({ error: hidden || !expert ? "expert_not_found" : "expert_dependencies_missing" });

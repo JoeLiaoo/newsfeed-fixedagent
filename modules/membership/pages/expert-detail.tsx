@@ -11,7 +11,7 @@ import { Textarea } from "@aihot/web/components/member-ui/textarea";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { EXPERT_MODE_INPUTS, EXPERT_MODE_LABELS, BUILTIN_SLUGS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, modeNeedsEntity } from "../experts/catalog.ts";
+import { COMING_SOON_EXPERT_STATUS, EXPERT_MODE_INPUTS, EXPERT_MODE_LABELS, BUILTIN_SLUGS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, modeNeedsEntity, expertStatusBadge } from "../experts/catalog.ts";
 
 export const handle: Screen = { tab: "me", name: "专家" };
 export const meta = () => pageMeta({ title: "专家详情", path: "/experts", noindex: true });
@@ -75,7 +75,7 @@ export default function ExpertDetailPage() {
       }));
       const response = await fetch("/api/v1/membership/expert-tasks", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ slug, companyName, notes, materials }) });
       const data = await response.json() as { error?: string };
-      if (!response.ok) { setMessage(data.error === "expert_dependencies_missing" ? "该专家依赖尚未接入。" : data.error === "expert_task_rate_limited" ? "任务并发或每小时提交上限已达到，请稍后重试。" : data.error?.startsWith("expert_material_") ? "任务材料不符合要求，请使用有文字层的 PDF、DOCX、PPTX 或 UTF-8 Markdown，并检查大小。" : "任务提交失败，请检查输入并重试。"); return; }
+      if (!response.ok) { setMessage(data.error === "expert_dependencies_missing" ? "该专家依赖尚未接入。" : data.error === "expert_coming_soon" ? "该专家仍在开发中，暂不接收任务。" : data.error === "expert_task_rate_limited" ? "任务并发或每小时提交上限已达到，请稍后重试。" : data.error?.startsWith("expert_material_") ? "任务材料不符合要求，请使用有文字层的 PDF、DOCX、PPTX 或 UTF-8 Markdown，并检查大小。" : "任务提交失败，请检查输入并重试。"); return; }
       setCompanyName(""); setNotes(""); setFiles([]); setMessage("任务已进入队列。离开此页不会中断任务。"); await load();
     } catch { setMessage("任务提交请求失败，请检查网络后重试。"); }
     finally { setBusy(false); }
@@ -119,18 +119,20 @@ export default function ExpertDetailPage() {
     <p className="mt-4"><IntentLink to="/experts" className="text-sm text-accent underline-offset-4 hover:underline">返回专家平台</IntentLink></p>
   </main>;
 
+  const badge = expertStatusBadge(expert.status);
   return <main className="mx-auto w-full max-w-4xl px-5 py-8">
     <header className="mb-6">
       <Button asChild variant="outline" size="sm" className="mb-4"><IntentLink to="/experts"><ArrowLeft size={14} aria-hidden="true" />专家平台</IntentLink></Button>
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-1 text-2xl font-semibold tracking-tight text-ink">{expert?.name ?? "专家"}</h1>
-        {expert && <Badge variant={expert.status === "available" ? "success" : "warning"}>{expert.status === "available" ? "可运行" : "缺少依赖"}</Badge>}
-        {expert && <Badge variant="secondary">{EXPERT_MODE_LABELS[expert.execution_mode] ?? expert.execution_mode}</Badge>}
+        {expert && <Badge variant={badge.variant}>{badge.label}</Badge>}
+        {expert && expert.status !== COMING_SOON_EXPERT_STATUS && <Badge variant="secondary">{EXPERT_MODE_LABELS[expert.execution_mode] ?? expert.execution_mode}</Badge>}
       </div>
       {expert && <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-3">{expert.description}</p>}
-      {expert && <p className="mt-1 text-xs text-ink-3">{[EXPERT_MODE_INPUTS[expert.execution_mode], `v${expert.version}`].filter(Boolean).join(" · ")}</p>}
+      {expert && <p className="mt-1 text-xs text-ink-3">{expert.status === COMING_SOON_EXPERT_STATUS ? `v${expert.version}` : [EXPERT_MODE_INPUTS[expert.execution_mode], `v${expert.version}`].filter(Boolean).join(" · ")}</p>}
       {expert && expert.missing_dependencies.length > 0 && <p className="mt-1 text-xs text-amber-ink">缺少依赖：{expert.missing_dependencies.join("、")}</p>}
     </header>
+    {expert && expert.status === COMING_SOON_EXPERT_STATUS && <Alert className="mb-5" role="status">开发中，敬请期待。该专家仍在接入数据源，开放后可在详情页直接提交任务。</Alert>}
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
 
     <div className="grid gap-6">
@@ -150,7 +152,7 @@ export default function ExpertDetailPage() {
         </CardContent>
       </Card>}
 
-      <Card>
+      {expert && expert.status !== COMING_SOON_EXPERT_STATUS && <Card>
         <CardHeader className="flex-row items-center justify-between"><div><CardTitle>我的任务</CardTitle></div><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void load()}>刷新</Button></CardHeader>
         <CardContent>
           {!tasks.length ? <p className="text-sm text-ink-3">暂无任务。</p> : <div className="grid gap-4">{tasks.map(task => <article key={task.id} className="rounded-card border border-line p-4">
@@ -168,7 +170,7 @@ export default function ExpertDetailPage() {
             </div>
           </article>)}</div>}
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   </main>;
 }
