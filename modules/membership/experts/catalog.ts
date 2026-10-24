@@ -175,6 +175,55 @@ export const SAMPLE_COMPANIES = [
   "杭州市国有资本投资运营有限公司",
 ];
 
+/** What an employee reads for the state of a task. */
+export const EXPERT_TASK_STATE_LABELS: Record<string, string> = {
+  queued: "排队中",
+  waiting_input: "等待选择主体",
+  running: "执行中",
+  succeeded: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+};
+
+/** The badge of a task's state; an unknown state keeps its own name instead of borrowing one. */
+export const EXPERT_TASK_STATE_VARIANTS: Record<string, "default" | "secondary" | "success" | "warning" | "destructive"> = {
+  queued: "warning",
+  waiting_input: "warning",
+  running: "default",
+  succeeded: "success",
+  failed: "destructive",
+  cancelled: "secondary",
+};
+
+/** The step a task is at; the state says how a task ended, the step says where it is. */
+export const EXPERT_TASK_STAGE_LABELS: Record<string, string> = {
+  queued: "排队中",
+  processing: "生成报告",
+  entity_search: "检索企业主体",
+  choose_entity: "等待确认主体",
+  complete: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+  recovered: "已恢复并重新排队",
+};
+
+/**
+ * What an employee reads when a task failed. The codes stay internal; the sentences name the
+ * capability that stopped, never the service or the model behind it.
+ */
+export const EXPERT_TASK_ERROR_LABELS: Record<string, string> = {
+  xinhua_not_configured: "企业信息查询服务尚未配置，请联系管理员。",
+  xinhua_unavailable: "企业信息查询服务暂时不可用。",
+  xinhua_tool_unavailable: "当前账号缺少所需工具，任务未完成。",
+  xinhua_tool_failed: "企业信息查询未返回可用结果。",
+  xinhua_no_candidates: "未匹配到该名称的企业主体，请核对登记名称或改用更短的关键词。",
+  xinhua_entity_id_missing: "查询返回的主体缺少可核验的唯一标识，报告已停止。",
+  xinhua_response_invalid: "查询返回内容无法解析，报告已停止。",
+  xinhua_identity_unverified: "未能按唯一 ID 或完整信用代码核验主体，报告已停止。",
+  xinhua_entity_mismatch: "查询返回的主体与所选企业不一致，报告已停止。",
+  expert_execution_failed: "任务未完成，请检查配置后重试。",
+};
+
 export const XINHUA_TOOL_LABELS: Record<string, string> = {
   fuzzy_search_company_list: "主体名称候选检索",
   get_company_profile: "企业基础画像",
