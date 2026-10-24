@@ -42,4 +42,11 @@
   - 未新增迁移，未新增供应商调用，未触碰企业舆情／BettaFish。
 - 下一步：PR 评审通过后再安排真实员工在知识库页试用（提问 → 离开页面 → 重新打开 → 回跳材料与原件）。P5-02～P5-04 的验收状态不变，仍未勾选。
 
-PR：[待填写](https://github.com/JoeLiaoo/newsfeed-fixedagent/pulls)，分支 `feat/kb-answer-history-v1`，基于 `main` 的 `8e20afb`。
+PR：[PR #58](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/58)，分支 `feat/kb-answer-history-v1`，基于 `main` 的 `8e20afb`，tip `23557f1`。
+
+## 自动检查结果（PR #58）
+
+- `quality`（typecheck、web 构建、standalone 106/106、架构规则、docker build）：通过。
+- `postgres-integration`（含新增的 `knowledge-answer-history.test.ts`，数据库用例 33/33）：通过。
+- `links`（文档链接 386 个）：通过。
+- PR 状态：OPEN、未合并、未部署；P5-02～P5-04 勾选不变。
