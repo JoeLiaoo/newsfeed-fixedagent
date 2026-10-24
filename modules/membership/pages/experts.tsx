@@ -14,7 +14,7 @@ export const meta = () => pageMeta({ title: "专家平台", path: "/experts", no
 
 type Expert = {
   slug: string; name: string; description: string; version: string; status: string;
-  execution_mode: "xinhua_trial" | "text_only"; missing_dependencies: string[];
+  execution_mode: "xinhua_trial" | "xinhua_panorama" | "text_only"; missing_dependencies: string[];
 };
 
 /** The expert platform: the experts there are, as cards. One card opens the expert. */

@@ -11,14 +11,14 @@ import { Textarea } from "@aihot/web/components/member-ui/textarea";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { EXPERT_MODE_INPUTS, EXPERT_MODE_LABELS, EXPERT_SLUG, SAMPLE_COMPANIES } from "../experts/catalog.ts";
+import { EXPERT_MODE_INPUTS, EXPERT_MODE_LABELS, BUILTIN_SLUGS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, modeNeedsEntity } from "../experts/catalog.ts";
 
 export const handle: Screen = { tab: "me", name: "专家" };
 export const meta = () => pageMeta({ title: "专家详情", path: "/experts", noindex: true });
 
 type Expert = {
   slug: string; name: string; description: string; version: string; status: string;
-  execution_mode: "xinhua_trial" | "text_only"; missing_dependencies: string[];
+  execution_mode: "xinhua_trial" | "xinhua_panorama" | "text_only"; missing_dependencies: string[];
 };
 type Candidate = { id: string; name: string; status: string | null; creditCode: string | null; address: string | null; startDate: string | null };
 type Task = {
@@ -138,12 +138,12 @@ export default function ExpertDetailPage() {
         <CardHeader><CardTitle>提交任务</CardTitle></CardHeader>
         <CardContent>
           <form onSubmit={submit} className="grid gap-4">
-            {expert.execution_mode === "xinhua_trial" ? <>
+            {modeNeedsEntity(expert.execution_mode) ? <>
               <div className="grid gap-2"><Label htmlFor="company-name">目标企业名称</Label><Input id="company-name" required minLength={2} maxLength={200} value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder="输入待核查主体" /></div>
-              <p className="text-xs leading-relaxed text-ink-3">示例：{SAMPLE_COMPANIES.join("；")}。系统先检索同名候选，须由你确认主体后才查询。当前仅生成一层直接投资底稿，不代表完整穿透。</p>
+              <p className="text-xs leading-relaxed text-ink-3">示例：{SAMPLE_COMPANIES.join("；")}。系统先检索同名候选，须由你确认主体后才查询。{expert.execution_mode === "xinhua_panorama" ? "确认后逐层穿透对外投资链条，按终止条件与穿透规则分层出表；触及层级、主体数或调用次数上限时，底稿会标注为不完整并列出缺口。" : "当前仅生成一层直接投资底稿，不代表完整穿透。"}</p>
             </> : null}
             {expert.execution_mode === "text_only" && <div className="grid gap-2"><Label htmlFor="task-notes">任务要求</Label><Textarea id="task-notes" required minLength={2} maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={5} /></div>}
-            {expert.execution_mode === "xinhua_trial" && <div className="grid gap-2"><Label htmlFor="task-notes">核查备注（内置专家可选）</Label><Textarea id="task-notes" required={slug !== EXPERT_SLUG} minLength={slug !== EXPERT_SLUG ? 2 : undefined} maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={4} /></div>}
+            {modeNeedsEntity(expert.execution_mode) && <div className="grid gap-2"><Label htmlFor="task-notes">核查备注（内置专家可选）</Label><Textarea id="task-notes" required={!BUILTIN_SLUGS.has(slug ?? "")} minLength={BUILTIN_SLUGS.has(slug ?? "") ? undefined : 2} maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={4} /></div>}
             <div className="grid gap-2"><Label htmlFor="task-materials">任务材料（可选）</Label><Input id="task-materials" type="file" multiple accept=".pdf,.docx,.pptx,.md,.markdown,.txt" onChange={event => setFiles(Array.from(event.target.files ?? []))} /><p className="text-xs text-ink-3">PDF、DOCX、PPTX、Markdown；最多 3 个，单个 5 MB、总计 10 MB。材料与报告仅本人可访问，七天后清理。</p></div>
             <Button type="submit" disabled={busy}>{busy ? "请稍候…" : "提交任务"}</Button>
           </form>
@@ -162,6 +162,7 @@ export default function ExpertDetailPage() {
             {task.materials?.length > 0 && <div className="mt-3 text-sm">{task.materials.map(material => <div key={material.id} className="flex flex-wrap items-center gap-2">{task.state === "cancelled" ? <span>{material.filename}</span> : <a className="text-accent underline-offset-4 hover:underline" href={`/api/v1/membership/expert-tasks/${task.id}/materials/${material.id}`}>{material.filename}</a>}<span className="text-xs text-ink-3">{Math.ceil(material.byteSize / 1024)} KB · {material.extractionStatus === "available" ? "已用于任务" : material.extractionStatus === "unavailable" ? "无法提取文字" : "等待处理"}</span>{["succeeded", "failed", "cancelled"].includes(task.state) && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void deleteMaterial(task.id, material.id)}>删除</Button>}</div>)}</div>}
             <div className="mt-4 flex flex-wrap gap-2">
               {task.hasArtifact && <Button asChild variant="link" className="h-9 px-0"><a href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}>下载 Markdown 产物</a></Button>}
+              {task.expertSlug === PANORAMA_EXPERT_SLUG && <Button asChild variant="link" className="h-9 px-0"><a href={`/api/v1/membership/expert-tasks/${task.id}/checkpoint`}>下载采集台账</a></Button>}
               {task.state === "failed" && task.executionAttempts < 3 && <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void taskAction(task.id, "retry")}>重试</Button>}
               {["queued", "running", "waiting_input"].includes(task.state) && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void taskAction(task.id, "cancel")}>取消</Button>}
             </div>
