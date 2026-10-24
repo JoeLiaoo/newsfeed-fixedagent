@@ -54,6 +54,23 @@ export const PAGE_TYPES = ["view", "query", "concept", "monitor"] as const;
 export const FRESHNESS_TIERS = ["fresh", "semi", "stale", "undated"] as const;
 export type FreshnessTier = (typeof FRESHNESS_TIERS)[number];
 
+/** The number of days of a month; February depends on the year. */
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 29 : 28;
+  return [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]!;
+}
+
+/**
+ * Whether the three numbers are a day the calendar has. A date is only a date when the calendar says
+ * so: 2026-02-30 and 2025-02-29 are not days, and a year or a year and a month name no day at all.
+ * The platform never completes a day the material did not write.
+ */
+export function isRealDay(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1) return false;
+  return day <= daysInMonth(year, month);
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -92,6 +109,7 @@ export const TASK_ERRORS: Record<string, string> = {
   knowledge_model_failed: "模型调用失败，构建未完成，可重试。",
   knowledge_model_output_invalid: "模型输出无法解析，构建未完成，可重试。",
   knowledge_audit_failed: "独立复核未完成，未发布任何页面，可重试。",
+  knowledge_audit_invalid: "独立复核结果无法解析，未发布任何页面，可重试。",
   knowledge_lint_blocked: "结构与引用检查未通过，未发布任何页面，可重试。",
   knowledge_publish_failed: "发布环节失败，旧版页面仍可阅读，可重试。",
   knowledge_publish_stale: "该材料已有更新版本发布，本次构建未覆盖当前页面。",

@@ -5,7 +5,7 @@
 // 「未知」 or an empty list, which the lint then shows as a quality issue on the page, instead of a whole
 // build that never reaches a page.
 import { escapeControlCharsInStrings } from "@aihot/backend/providers/llm";
-import { MAX_PAGES_PER_BUILD, PAGE_TYPES, TARGET_TYPES } from "./catalog.ts";
+import { MAX_PAGES_PER_BUILD, PAGE_TYPES, TARGET_TYPES, isRealDay } from "./catalog.ts";
 
 /** A value the model wrote, read as a plain string. Anything else is the fallback. */
 export function asString(value: unknown, fallback = ""): string {
@@ -24,7 +24,6 @@ const TARGET_TYPE_ALIASES: Record<string, string> = {
   industry: "行业", macro: "宏观策略", "宏观": "宏观策略",
 };
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_PREFIX = /^(\d{4}-\d{2}-\d{2})(?:[T ]\d{1,2}:\d{2}.*)?$/;
 const SLASHED_DATE = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/;
 const SLASHED_MONTH = /^(\d{4})[-/.](\d{1,2})$/;
@@ -41,37 +40,43 @@ function calendarDate(year: string, month: string, day: string): string {
   const y = Number(year);
   const m = Number(month);
   const d = Number(day);
-  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return "未知";
-  if (y < 1000 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) return "未知";
+  if (!isRealDay(y, m, d)) return "未知";
   return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
+/** A date the platform writes, read as a day of the calendar, or 「未知」 when it is not one. */
+function isoDate(text: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  return match ? calendarDate(match[1]!, match[2]!, match[3]!) : "未知";
+}
+
 /**
- * A date the model wrote, read as YYYY-MM-DD or as 「未知」. A day written the way a human writes it
- * 「2026年6月20日」「2026/06/20」「20260620」 is read as the day it names; a year or a year and a month
- * become the first day of that period. A date the lint cannot read is a P0 that keeps a page from being
+ * A date the model wrote, read as YYYY-MM-DD or as 「未知」. Only a day the model actually named is
+ * read as a day: 「2026年6月20日」「2026/06/20」「20260620」 are the same day, and a day the calendar
+ * does not have (2026-02-30) is not a day at all. A year or a year and a month names no day, so it
+ * stays 「未知」 rather than borrowing the first day of that period: the platform never writes a day
+ * the material did not have. A date the lint cannot read is a P0 that keeps a page from being
  * published, so a date that cannot be read is 「未知」 rather than a string the lint will refuse.
  */
 export function coerceDate(value: unknown): string {
   const text = asString(value).trim();
   if (!text) return "";
   if (UNKNOWN_DATE_WORDS.includes(text.toLowerCase())) return "未知";
-  if (ISO_DATE.test(text)) return text;
   const iso = ISO_PREFIX.exec(text);
-  if (iso) return iso[1]!;
+  if (iso) return isoDate(iso[1]!);
   const chineseDate = CHINESE_DATE.exec(text);
   if (chineseDate) return calendarDate(chineseDate[1]!, chineseDate[2]!, chineseDate[3]!);
   const chineseMonth = CHINESE_MONTH.exec(text);
-  if (chineseMonth) return calendarDate(chineseMonth[1]!, chineseMonth[2]!, "1");
+  if (chineseMonth) return "未知";
   const chineseYear = CHINESE_YEAR.exec(text);
-  if (chineseYear) return calendarDate(chineseYear[1]!, "1", "1");
+  if (chineseYear) return "未知";
   const slashedDate = SLASHED_DATE.exec(text);
   if (slashedDate) return calendarDate(slashedDate[1]!, slashedDate[2]!, slashedDate[3]!);
   const slashedMonth = SLASHED_MONTH.exec(text);
-  if (slashedMonth) return calendarDate(slashedMonth[1]!, slashedMonth[2]!, "1");
+  if (slashedMonth) return "未知";
   const compact = COMPACT_DATE.exec(text);
   if (compact) return calendarDate(compact[1]!, compact[2]!, compact[3]!);
-  if (/^\d{4}$/.test(text)) return `${text}-01-01`;
+  if (/^\d{4}$/.test(text)) return "未知";
   return "未知";
 }
 
@@ -171,7 +176,7 @@ function normalizePage(item: unknown): Record<string, unknown> {
   const marginalChanges = (Array.isArray(page.marginalChanges) ? page.marginalChanges : []).map(row => {
     if (typeof row === "string") {
       const match = /^(\d{4}-\d{2}-\d{2})[：:]\s*(.*)$/.exec(row);
-      return { date: match ? match[1]! : "", attribution: "未知", note: (match ? match[2]! : row).slice(0, 240) };
+      return { date: match ? coerceDate(match[1]!) : "", attribution: "未知", note: (match ? match[2]! : row).slice(0, 240) };
     }
     if (!row || typeof row !== "object") return null;
     const change = row as Record<string, unknown>;
@@ -188,10 +193,14 @@ function normalizePage(item: unknown): Record<string, unknown> {
     return {
       analyst: asString(stance.analyst ?? stance.author, "未知").slice(0, 80),
       institution: asString(stance.institution ?? stance.org, "未知").slice(0, 80),
-      stance: asString(stance.stance, "中性").trim().slice(0, 20),
+      // A rating the model did not write stays empty: a stance without a rating is not a neutral one,
+      // and the machine check shows the missing rating as a quality issue.
+      stance: asString(stance.stance).trim().slice(0, 20),
       date: coerceDate(stance.date),
       argument: asString(stance.argument ?? stance.note ?? stance.reason).slice(0, 160),
-      sourceRef: asString(stance.sourceRef ?? stance.ref, "S1").slice(0, 40),
+      // A source the model did not name stays empty: the first source of the material is not this
+      // stance's source, and a citation is an evidence relation only the material may state.
+      sourceRef: asString(stance.sourceRef ?? stance.ref).trim().slice(0, 40),
     };
   }).filter(Boolean).slice(0, 60);
 
@@ -297,10 +306,16 @@ function normalizeSource(item: unknown): Record<string, unknown> | null {
  * The draft the Builder wrote, read into the platform's own draft shape. The result is what the schema
  * is asked to accept, so a model that came close still builds; what it could not answer for is left
  * empty, and the lint shows it as a quality issue.
+ *
+ * A root that holds no pages, or pages that are not a list, is not a draft at all: it is an answer that
+ * went wrong, and it fails the build before the publish transaction, so the version that is already
+ * published stays published. Only a draft that says it has no pages is an empty build.
  */
 export function normalizeCompiledDraft(raw: unknown): unknown {
   const root = parseJsonObject(raw);
-  const pagesIn = Array.isArray(root.pages) ? root.pages : [];
+  if (!("pages" in root)) throw new Error("Builder answer holds no pages");
+  const pagesIn = root.pages;
+  if (!Array.isArray(pagesIn)) throw new Error("Builder answer pages is not a list");
   const sourcesIn = Array.isArray(root.sources) ? root.sources : [];
   return {
     pages: pagesIn.slice(0, MAX_PAGES_PER_BUILD).map(normalizePage),
@@ -312,6 +327,28 @@ export function normalizeCompiledDraft(raw: unknown): unknown {
 /** What the Auditor may change: a section, an index, an action. */
 const AUDIT_SECTIONS = new Set(["stances", "timeline", "divergences", "risks", "consensus", "marginalChanges", "expectations"]);
 const AUDIT_FIELDS = new Set(["analyst", "institution", "date"]);
+
+/** The verdicts the platform holds, and the few aliases it reads for them. */
+const AUDIT_VERDICTS = ["pass", "pass_with_issues", "fail"] as const;
+type AuditVerdict = (typeof AUDIT_VERDICTS)[number];
+const AUDIT_VERDICT_ALIASES: Record<string, AuditVerdict> = {
+  pass: "pass",
+  pass_with_issues: "pass_with_issues",
+  fail: "fail",
+  failed: "fail",
+};
+
+/**
+ * The verdict the Auditor gave. Only the verdicts the platform holds are read: a missing verdict, a
+ * verdict of the wrong type and a verdict it does not know are all a review that did not happen, and
+ * a review that did not happen never passes a build. A failure stays a failure however it is written.
+ */
+function readVerdict(value: unknown): AuditVerdict {
+  const text = asString(value).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const verdict = AUDIT_VERDICT_ALIASES[text];
+  if (!verdict) throw new Error(`Auditor verdict missing or unrecognized: ${text || "(none)"}`);
+  return verdict;
+}
 
 /** One quality issue the Auditor found. */
 function normalizeFinding(row: unknown): Record<string, unknown> | null {
@@ -328,14 +365,15 @@ function normalizeFinding(row: unknown): Record<string, unknown> | null {
 }
 
 /**
- * The verdict the Auditor gave, read into the platform's own verdict shape. A correction that names a
- * section or an action the platform does not hold is dropped: it cannot be applied to a page, and a
- * correction that cannot be applied is worse than one that is not made.
+ * The verdict the Auditor gave, read into the platform's own verdict shape. An answer the Auditor
+ * could not give a verdict in is not a review: it fails the build, so nothing is published without a
+ * real second reading. A correction that names a section or an action the platform does not hold is
+ * dropped: it cannot be applied to a page, and a correction that cannot be applied is worse than one
+ * that is not made.
  */
 export function normalizeAuditResult(raw: unknown): unknown {
   const root = parseJsonObject(raw);
-  const verdictRaw = asString(root.verdict, "pass_with_issues");
-  const verdict = ["pass", "pass_with_issues", "fail"].includes(verdictRaw) ? verdictRaw : "pass_with_issues";
+  const verdict = readVerdict(root.verdict);
 
   const corrections = (Array.isArray(root.corrections) ? root.corrections : []).map(row => {
     if (!row || typeof row !== "object") return null;

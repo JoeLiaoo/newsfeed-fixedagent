@@ -80,10 +80,18 @@ const provider = await stub(async (_hit, req) => {
   const user = body.messages.find(message => message.role === "user")?.content ?? "";
   if (system.includes("Builder")) {
     if (user.includes("FAILME")) return { choices: [{ message: { content: "这不是 JSON" } }] };
+    // Answers that are not a draft at all: the build must fail before it publishes anything.
+    if (user.includes("BADROOT")) return { choices: [{ message: { content: "{}" } }] };
+    if (user.includes("ERRORROOT")) return { choices: [{ message: { content: JSON.stringify({ error: "provider returned a different response" }) } }] };
+    if (user.includes("PAGESNOTARRAY")) return { choices: [{ message: { content: JSON.stringify({ pages: "not an array" }) } }] };
     if (user.includes("另一券商")) return { choices: [{ message: { content: JSON.stringify(SECOND_DRAFT) } }] };
     return { choices: [{ message: { content: JSON.stringify(DRAFT) } }] };
   }
   if (system.includes("Auditor")) {
+    // Reviews that gave no verdict, and a review that failed: none of them may pass a build.
+    if (user.includes("NOVERDICT")) return { choices: [{ message: { content: "{}" } }] };
+    if (user.includes("BADVERDICT")) return { choices: [{ message: { content: JSON.stringify({ verdict: "maybe" }) } }] };
+    if (user.includes("FAILVERDICT")) return { choices: [{ message: { content: JSON.stringify({ verdict: "FAIL" }) } }] };
     const hook = auditHook;
     auditHook = null;
     await hook?.();
@@ -301,16 +309,16 @@ test("the shared library is open to approved employees and closed to everyone el
   const [owner] = await sql<{ id: string }[]>`SELECT id FROM member_users WHERE username=${accounts[0]!.username}`;
   const basePage = structuredClone(DRAFT.pages[0]!);
   const extraPage = { ...basePage, slug: "view-another-company", title: "另一公司", targetName: "另一公司" };
-  async function seed(pages: typeof DRAFT.pages, options: { documentId?: string; versionNo?: number; audit?: boolean } = {}) {
+  async function seed(pages: typeof DRAFT.pages, options: { documentId?: string; versionNo?: number; audit?: boolean; draft?: boolean; text?: string } = {}) {
     const documentId = options.documentId ?? randomUUID();
     const versionId = randomUUID();
     const taskId = randomUUID();
     if (!options.documentId) await sql`INSERT INTO member_wiki_documents(id,uploader_id,title) VALUES (${documentId},${owner!.id},'checkpoint fixture')`;
     await sql`INSERT INTO member_wiki_document_versions(id,document_id,version_no,uploader_id,file_name,media_type,format,byte_size,sha256,body,extracted_text,extraction_status)
-      VALUES (${versionId},${documentId},${options.versionNo ?? 1},${owner!.id},'checkpoint.md','text/markdown','markdown',7,${versionId},${Buffer.from('fixture')},${`fixture ${versionId}`},'available')`;
+      VALUES (${versionId},${documentId},${options.versionNo ?? 1},${owner!.id},'checkpoint.md','text/markdown','markdown',7,${versionId},${Buffer.from('fixture')},${options.text ?? `fixture ${versionId}`},'available')`;
     const draft = { ...DRAFT, pages };
     await sql`INSERT INTO member_wiki_tasks(id,document_id,version_id,uploader_id,draft,audit)
-      VALUES (${taskId},${documentId},${versionId},${owner!.id},${sql.json(draft)},${options.audit === false ? null : sql.json(AUDIT)})`;
+      VALUES (${taskId},${documentId},${versionId},${owner!.id},${options.draft === false ? null : sql.json(draft)},${options.audit === false ? null : sql.json(AUDIT)})`;
     return { documentId, versionId, taskId };
   }
   const multi = await seed([basePage, extraPage]);
@@ -417,5 +425,39 @@ test("the shared library is open to approved employees and closed to everyone el
   assert.ok(exhaustedRow?.finished_at);
   assert.ok(exhaustedRow?.draft && exhaustedRow.audit, "recovery preserves checkpoints");
   assert.equal((await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/tasks/${exhausted.taskId}/retry`, headers: { cookie: cookies[0]!, ...common } })).statusCode, 404);
+
+  // An answer that is not a draft fails the build before the publish transaction: the version that is
+  // already published keeps its contribution, and its page stays published.
+  const failClosedPage = { ...basePage, slug: "view-fail-closed-company", title: "失败封闭公司", targetName: "失败封闭公司" };
+  const failClosed = await seed([failClosedPage], { text: `第一版 ${randomUUID()}` });
+  await runWikiTask(failClosed.taskId);
+  assert.equal((await sql`SELECT status FROM member_wiki_contributions WHERE version_id=${failClosed.versionId}`)[0]?.status, "active", "the first version is published");
+  assert.equal((await sql`SELECT status FROM member_wiki_pages WHERE slug='view-fail-closed-company'`)[0]?.status, "published");
+  let failClosedVersion = 1;
+  for (const marker of ["BADROOT", "ERRORROOT", "PAGESNOTARRAY"]) {
+    failClosedVersion += 1;
+    const broken = await seed([], { documentId: failClosed.documentId, versionNo: failClosedVersion, draft: false, text: `${marker} ${randomUUID()}` });
+    await runWikiTask(broken.taskId);
+    const failed = await sql`SELECT state, error_code FROM member_wiki_tasks WHERE id=${broken.taskId}`;
+    assert.equal(failed[0]?.state, "failed", marker);
+    assert.equal(failed[0]?.error_code, "knowledge_model_output_invalid", marker);
+    const active = await sql`SELECT version_id FROM member_wiki_contributions WHERE document_id=${failClosed.documentId} AND status='active'`;
+    assert.deepEqual(active.map(row => row.version_id), [failClosed.versionId], `${marker}: the published version keeps its contribution`);
+    assert.equal((await sql`SELECT status FROM member_wiki_pages WHERE slug='view-fail-closed-company'`)[0]?.status, "published", marker);
+    assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_audit_events WHERE task_id=${broken.taskId} AND event_type='knowledge.build.published'`)[0]?.n, 0, marker);
+  }
+
+  // A review that gave no verdict is not a review: the build fails and publishes nothing. A review
+  // that failed stops the build the same way.
+  for (const [marker, expected] of [["NOVERDICT", "knowledge_model_output_invalid"], ["BADVERDICT", "knowledge_model_output_invalid"], ["FAILVERDICT", "knowledge_audit_failed"]] as const) {
+    const noReview = await seed([failClosedPage], { audit: false, text: `${marker} ${randomUUID()}` });
+    await runWikiTask(noReview.taskId);
+    const failed = await sql`SELECT state, error_code FROM member_wiki_tasks WHERE id=${noReview.taskId}`;
+    assert.equal(failed[0]?.state, "failed", marker);
+    assert.equal(failed[0]?.error_code, expected, marker);
+    assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_contributions WHERE version_id=${noReview.versionId}`)[0]?.n, 0, `${marker}: a build without a real review publishes nothing`);
+    assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_audit_events WHERE task_id=${noReview.taskId} AND event_type='knowledge.build.published'`)[0]?.n, 0, marker);
+  }
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_contributions WHERE version_id=${failClosed.versionId} AND status='active'`)[0]?.n, 1, "the published version is untouched by the failed builds");
 
 });

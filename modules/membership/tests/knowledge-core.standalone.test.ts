@@ -6,7 +6,7 @@ import { answerSchema, auditResultSchema, compiledDraftSchema } from "../knowled
 import { test } from "node:test";
 import { strToU8, zipSync } from "fflate";
 import { capExtraction, detectFormat, extractMaterial } from "../knowledge/extract.ts";
-import { applyCorrections, coverageOf, renderPage } from "../knowledge/render.ts";
+import { applyCorrections, coverageOf, isKnownDate, renderPage } from "../knowledge/render.ts";
 import { aggregateContributions, targetKeyOf, type Contribution } from "../knowledge/aggregate.ts";
 import { lintDraft, lintPage } from "../knowledge/lint.ts";
 import { routePages, tokenize } from "../knowledge/routing.ts";
@@ -417,7 +417,7 @@ test("a model answer that drifted is read into the platform's own shape", () => 
   assert.equal(page0.stances[0]?.analyst, "张三", "the analyst's own field name is read");
   assert.equal(page0.stances[0]?.institution, "某券商");
   assert.equal(page0.stances[0]?.argument, "渠道库存低位");
-  assert.equal(page0.stances[0]?.sourceRef, "S1", "a stance without a source points at the first one");
+  assert.equal(page0.stances[0]?.sourceRef, "", "a stance without a source does not borrow the first one");
   assert.equal(page0.stances[0]?.date, "2026-06-20", "a date written the way a human writes it is read as a day");
   assert.equal(page0.timeline[0]?.date, "2026-06-20");
   assert.equal(page0.timeline[0]?.headline, "首次覆盖给予看好");
@@ -432,13 +432,26 @@ test("a model answer that drifted is read into the platform's own shape", () => 
 test("a date the lint cannot read becomes 未知, never a string the lint refuses", () => {
   assert.equal(coerceDate("2026-06-20"), "2026-06-20");
   assert.equal(coerceDate("2026-06-20T10:00:00Z"), "2026-06-20");
+  assert.equal(coerceDate("2026-06-20 10:00"), "2026-06-20");
   assert.equal(coerceDate("2026/06/20"), "2026-06-20");
   assert.equal(coerceDate("20260620"), "2026-06-20");
   assert.equal(coerceDate("2026年6月20日"), "2026-06-20");
-  assert.equal(coerceDate("2026年6月"), "2026-06-01");
-  assert.equal(coerceDate("2026年"), "2026-01-01");
-  assert.equal(coerceDate("2026-06"), "2026-06-01");
-  assert.equal(coerceDate("2026"), "2026-01-01");
+  // A year or a year and a month names no day: the platform does not write the first day of a period.
+  assert.equal(coerceDate("2026年6月"), "未知", "a month is not a day");
+  assert.equal(coerceDate("2026年"), "未知", "a year is not a day");
+  assert.equal(coerceDate("2026-06"), "未知");
+  assert.equal(coerceDate("2026/06"), "未知");
+  assert.equal(coerceDate("2026"), "未知");
+  // A day the calendar does not have is not a date.
+  assert.equal(coerceDate("2026-02-30"), "未知", "2026 February has 28 days");
+  assert.equal(coerceDate("2026/02/30"), "未知");
+  assert.equal(coerceDate("20260230"), "未知");
+  assert.equal(coerceDate("2026年2月30日"), "未知");
+  assert.equal(coerceDate("2025-02-29"), "未知", "2025 is not a leap year");
+  assert.equal(coerceDate("2024-02-29"), "2024-02-29", "2024 is a leap year");
+  assert.equal(coerceDate("2026-04-31"), "未知", "April has 30 days");
+  assert.equal(coerceDate("2026-06-30"), "2026-06-30", "the last day of a month is a day");
+  assert.equal(coerceDate("2026-13-01"), "未知", "there is no thirteenth month");
   assert.equal(coerceDate("去年"), "未知", "a date that names no day is unknown, not an invalid anchor");
   assert.equal(coerceDate("日期未知"), "未知");
   assert.equal(coerceDate(""), "");
@@ -449,6 +462,21 @@ test("a date the lint cannot read becomes 未知, never a string the lint refuse
   }));
   assert.equal(draft.pages[0]?.stances[0]?.date, "未知");
   assert.ok(!lintPage(draft.pages[0]!, new Set()).some(finding => finding.level === "P0"), "an unknown date is not a blocking time anchor");
+});
+
+
+test("a day the calendar does not have never reaches the page as a date", () => {
+  assert.equal(isKnownDate("2026-06-20"), true);
+  assert.equal(isKnownDate("2026-02-30"), false, "a string that looks like a date is not one");
+  assert.equal(isKnownDate("2025-02-29"), false);
+  assert.equal(isKnownDate("2026-6-20"), false);
+  const bogus = { ...page, stances: [{ ...page.stances[0]!, date: "2026-02-30" }], timeline: [], expectations: [] };
+  const coverage = coverageOf(bogus);
+  assert.equal(coverage.first_report, null, "an impossible day is not counted as a report date");
+  assert.equal(coverage.last_report, null);
+  const body = renderPage(bogus, draft.sources, "doc-1").bodyMd;
+  assert.doesNotMatch(body, /2026-02-30/, "an impossible day is never shown as a date");
+  assert.match(body, /\| 张三 \| 某券商 \| 看好 \| 未知 \|/, "the row shows the date as unknown");
 });
 
 
@@ -463,12 +491,11 @@ test("an answer that holds no object at all is an error, not an empty draft", ()
 
 test("every shape the model may write is read into a draft the schema accepts", () => {
   const answers = [
-    {},
-    { pages: "not an array" },
+    { pages: [] },
     { pages: [null, 1, "x", [], { pageType: 42, stances: "x", timeline: [null, 3] }] },
     { pages: [{ pageType: "theme", targetType: "stock", timeline: [{ date: "去年", notes: "x" }], stances: [{ date: {} }], expectations: ["x"], risks: [3], divergences: [{ sides: "x" }], metrics: [{}], related: [1, 2] }] },
     { pages: [{ title: "t".repeat(500), consensus: "c".repeat(2000), structure: ["a".repeat(500)] }] },
-    { sources: [{ institution: 5, authors: "张三", date: 20260620 }], notes: 7 },
+    { pages: [{ slug: "s" }], sources: [{ institution: 5, authors: "张三", date: 20260620 }], notes: 7 },
     { pages: Array.from({ length: 20 }, (_, index) => ({ slug: `s${index}` })) },
   ];
   for (const answer of answers) {
@@ -477,14 +504,87 @@ test("every shape the model may write is read into a draft the schema accepts", 
     assert.ok(Array.isArray(draft.sources));
   }
   const audits = [
-    {}, { verdict: 5 }, { corrections: "x" }, { corrections: [{ section: 1, action: 2, index: "abc" }] },
-    { findings: "x", issues: [1, null], qualityIssues: ["a"] }, { corrections: [{ section: "stances", action: "remove", index: 9999 }] },
+    { verdict: "pass" }, { verdict: "pass_with_issues" }, { verdict: "fail" },
+    { verdict: "PASS" }, { verdict: "Pass With Issues" }, { verdict: "failed" },
+    { verdict: "pass", corrections: "x" }, { verdict: "pass", corrections: [{ section: 1, action: 2, index: "abc" }] },
+    { verdict: "pass", findings: "x", issues: [1, null], qualityIssues: ["a"] }, { verdict: "pass", corrections: [{ section: "stances", action: "remove", index: 9999 }] },
   ];
   for (const answer of audits) {
     const audit = auditResultSchema.parse(normalizeAuditResult(answer));
     assert.ok(Array.isArray(audit.corrections), "a verdict always has corrections");
     assert.ok(Array.isArray(audit.findings));
   }
+});
+
+
+test("an answer that is not a draft fails the build before anything is published", () => {
+  // A root that holds no pages, pages that are not a list, or an error object is an answer that went
+  // wrong: it is not an empty build, and it must not become one.
+  for (const answer of [
+    {},
+    { error: "provider returned a different response" },
+    { pages: "not an array" },
+    { pages: null },
+    { pages: { 0: {} } },
+    { sources: [], notes: "没有页面" },
+  ]) {
+    assert.throws(() => normalizeCompiledDraft(answer), /Builder answer/, JSON.stringify(answer));
+  }
+  // A draft that says it has no pages is an empty build of its own.
+  const empty = compiledDraftSchema.parse(normalizeCompiledDraft({ pages: [] }));
+  assert.deepEqual(empty.pages, []);
+  assert.deepEqual(empty.sources, []);
+  assert.equal(empty.notes, "");
+});
+
+
+test("a review that gave no verdict never passes a build", () => {
+  for (const answer of [{}, { verdict: 5 }, { verdict: null }, { verdict: "" }, { verdict: "unknown" }, { verdict: "maybe" }, { notes: "没有结论" }]) {
+    assert.throws(() => normalizeAuditResult(answer), /verdict/, JSON.stringify(answer));
+  }
+  // The verdicts the platform holds keep their meaning, however the model wrote them.
+  for (const [written, expected] of [
+    ["pass", "pass"], ["PASS", "pass"], ["pass_with_issues", "pass_with_issues"],
+    ["Pass With Issues", "pass_with_issues"], ["fail", "fail"], ["FAIL", "fail"], ["failed", "fail"],
+  ] as const) {
+    const audit = auditResultSchema.parse(normalizeAuditResult({ verdict: written }));
+    assert.equal(audit.verdict, expected, written);
+  }
+  // A failure stays a failure: the worker stops on it and publishes nothing.
+  const failed = auditResultSchema.parse(normalizeAuditResult({ verdict: "FAIL" }));
+  assert.equal(failed.verdict, "fail");
+  assert.equal(failed.corrections.length, 0);
+});
+
+
+test("a missing rating and a missing source stay empty, and are shown as quality issues", () => {
+  const parsed = compiledDraftSchema.parse(normalizeCompiledDraft(JSON.stringify({
+    pages: [{
+      pageType: "view",
+      slug: "view-two-firms",
+      title: "两家公司",
+      stances: [
+        { analyst: "张三", institution: "某券商", argument: "渠道库存低位" },
+        { analyst: "王五", institution: "另一券商", stance: "中性", sourceRef: "S2", argument: "动销恢复偏慢" },
+      ],
+    }],
+    sources: [
+      { ref: "S1", institution: "某券商", authors: ["张三"] },
+      { ref: "S2", institution: "另一券商", authors: ["王五"] },
+    ],
+  })));
+  const stances = parsed.pages[0]!.stances;
+  assert.equal(stances[0]?.stance, "", "a missing rating is not a neutral one");
+  assert.equal(stances[0]?.sourceRef, "", "a missing source is not the first source of the material");
+  assert.equal(stances[1]?.stance, "中性", "an explicit rating keeps its value");
+  assert.equal(stances[1]?.sourceRef, "S2", "an explicit source keeps its value");
+  const findings = lintPage(parsed.pages[0]!, new Set());
+  assert.ok(findings.some(finding => finding.category === "stance-missing"), "the missing rating is a quality issue");
+  assert.ok(findings.some(finding => finding.category === "source-missing"), "the missing source is a quality issue");
+  assert.ok(!findings.some(finding => finding.category === "stance-vocabulary"), "an empty rating is not a wrong word");
+  const body = renderPage(parsed.pages[0]!, parsed.sources, "doc-1").bodyMd;
+  assert.match(body, /\| 张三 \| 某券商 \| 未知 \| 未知 \| 渠道库存低位 \| 未知 \|/, "the page shows unknown, not a neutral rating and no citation");
+  assert.match(body, /\| 王五 \| 另一券商 \| 中性 \| 未知 \| 动销恢复偏慢 \| \[S2\]/, "an explicit rating and source are kept");
 });
 
 
@@ -498,7 +598,7 @@ test("the auditor's verdict is read into the platform's own shape", () => {
     ],
     issues: [{ type: "attribution", detail: "作者写成了机构" }],
   })));
-  assert.equal(audit.verdict, "pass_with_issues", "a verdict the platform does not hold becomes the middle one");
+  assert.equal(audit.verdict, "pass", "a verdict the model wrote in capitals keeps its meaning");
   assert.equal(audit.corrections.length, 1, "a correction the platform cannot apply is not kept");
   assert.equal(audit.corrections[0]?.index, 1, "an index written as text is still an index");
   assert.equal(audit.corrections[0]?.field, "date");

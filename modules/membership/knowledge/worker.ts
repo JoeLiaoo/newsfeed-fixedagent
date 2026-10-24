@@ -11,7 +11,7 @@ import { lintDraft, blockingFindings } from "./lint.ts";
 import { capExtraction, detectFormat, extractMaterial } from "./extract.ts";
 import { publishBuildPages } from "./publish.ts";
 import { DEFAULT_BASE_ID, baseSlugOf } from "./bases.ts";
-import { compiledDraftSchema, auditResultSchema, type CompiledDraft, type Finding } from "./schema.ts";
+import { compiledDraftSchema, auditResultSchema, type AuditResult, type CompiledDraft, type Finding } from "./schema.ts";
 import { MAX_EXTRACTED_CHARS, MAX_WIKI_ATTEMPTS, TASK_ERRORS } from "./catalog.ts";
 
 type TaskRow = {
@@ -49,6 +49,7 @@ function failureCode(error: unknown): { code: string; message: string } {
   if (code === "knowledge_text_unavailable" || code === "knowledge_file_unreadable") return { code, message: "未能读取材料内容，未生成知识页。" };
   if (code === "knowledge_text_empty") return { code, message: TASK_ERRORS.knowledge_text_empty };
   if (code === "knowledge_audit_failed") return { code, message: TASK_ERRORS.knowledge_audit_failed };
+  if (code === "knowledge_audit_invalid") return { code, message: TASK_ERRORS.knowledge_audit_invalid };
   if (code === "knowledge_lint_blocked") return { code, message: TASK_ERRORS.knowledge_lint_blocked };
   if (code === "knowledge_publish_stale") return { code, message: TASK_ERRORS.knowledge_publish_stale };
   if (code === "knowledge_document_withdrawn") return { code, message: TASK_ERRORS.knowledge_document_withdrawn };
@@ -188,6 +189,13 @@ async function publish(task: TaskRow, version: VersionRow, draft: CompiledDraft,
   return pages;
 }
 
+/** The review of a checkpointed build, read again. A checkpoint that no longer parses is not a review. */
+function readAuditCheckpoint(value: unknown): AuditResult {
+  const parsed = auditResultSchema.safeParse(value);
+  if (!parsed.success) throw new Error("knowledge_audit_invalid");
+  return parsed.data;
+}
+
 /** Runs one build. A failure leaves the task failed with a code the page can show, and the pages that were published before stay. */
 export async function runWikiTask(taskId: string): Promise<void> {
   const leaseToken = randomUUID();
@@ -217,7 +225,7 @@ export async function runWikiTask(taskId: string): Promise<void> {
     }
     await advanceStage(taskId, leaseToken, "auditing");
 
-    const audit = task.audit ? auditResultSchema.parse(task.audit) : await auditMaterial(materialInput(task, version, text), draft);
+    const audit = task.audit ? readAuditCheckpoint(task.audit) : await auditMaterial(materialInput(task, version, text), draft);
     await saveCheckpoint(taskId, leaseToken, "audit", audit);
 
     const corrected = applyCorrections(draft, audit.corrections);
