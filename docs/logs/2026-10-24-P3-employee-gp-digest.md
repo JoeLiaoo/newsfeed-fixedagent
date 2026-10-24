@@ -27,4 +27,4 @@
 
 - Web digest 展示已审核的投资项目，不证明主体核对、数据同步、微信通知或 P3 业务验收完成。
 - `npm ci` 报告锁文件依赖有 5 项安全审计告警（1 low、2 moderate、2 high）；本次没有依赖变更，也没有运行自动升级。
-- P3-01～P3-04 保持未勾选。PR 状态与最终 head SHA 待提交并推送后补记。
+- P3-01～P3-04 保持未勾选。PR [#54](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/54) 已打开，尚未合并；当前首个提交为 `048c5ba`。后续治理文档同步提交另记在 PR head。
