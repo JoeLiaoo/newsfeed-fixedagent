@@ -6,15 +6,15 @@ export function KnowledgeDetailSkeleton({ kind }: { kind: "document" | "target" 
   return <div role="status" className="mt-5" aria-label={document ? "正在加载材料…" : "正在加载知识页…"}>
     <span className="sr-only">{document ? "正在加载材料…" : "正在加载知识页…"}</span>
     <div aria-hidden="true" className="motion-safe:animate-pulse">
-      <div className="h-7 w-2/5 max-w-72 rounded bg-bg-sunk" />
-      <div className="mt-3 h-3 w-3/5 max-w-96 rounded bg-bg-sunk" />
-      <div className="mt-3 h-3 w-24 rounded bg-bg-sunk" />
+      <div className="h-7 w-2/5 max-w-72 rounded-mark bg-bg-sunk" />
+      <div className="mt-3 h-3 w-3/5 max-w-96 rounded-mark bg-bg-sunk" />
+      <div className="mt-3 h-3 w-24 rounded-mark bg-bg-sunk" />
       <Card className="mt-6">
-        {document && <CardHeader><div className="h-5 w-16 rounded bg-bg-sunk" /></CardHeader>}
+        {document && <CardHeader><div className="h-5 w-16 rounded-mark bg-bg-sunk" /></CardHeader>}
         <CardContent className={document ? "" : "pt-5"}>
-          <div className="h-4 w-4/5 rounded bg-bg-sunk" />
-          <div className="mt-3 h-4 w-full rounded bg-bg-sunk" />
-          <div className="mt-3 h-4 w-2/3 rounded bg-bg-sunk" />
+          <div className="h-4 w-4/5 rounded-mark bg-bg-sunk" />
+          <div className="mt-3 h-4 w-full rounded-mark bg-bg-sunk" />
+          <div className="mt-3 h-4 w-2/3 rounded-mark bg-bg-sunk" />
         </CardContent>
       </Card>
     </div>
