@@ -1,7 +1,7 @@
 # 2026-10-26 · P2-06 赛道同业公开资料检索
 
 - 对应任务：P2-06。
-- 状态：实现与定向验证完成，PR 已创建且 CI 全绿，待 PR 评审；未合并、未部署、未做真实员工验收。
+- 状态：实现与定向验证完成；PR #100 已合并（`cc1a5af`）并于 2026-10-26 00:50–00:56 随 release `cc1a5af` 发布到生产。未做真实员工验收，生产未发起真实 Search／Fetch 调用。
 - 基线：独立 worktree 从 `origin/main` `036cb10` 建立；未触碰其他 worktree 或原工作目录中的未提交改动。
 
 ## 做了什么
@@ -27,7 +27,7 @@
 - 单任务上限：4 次 Search × 最多 5 条结果 + 最多 3 次 Fetch + 1 次结构化模型请求；无翻页、无模型生成的新搜索词、无新华财经或专有企业数据。HTML 继续作为预览与下载产物。
 - 日期沿用搜索元数据的日期；Fetch 不足以证明事实日期时显示「未提供」，不推断融资或产品事件发生时间。公开检索不是全量覆盖，不披露不等于不存在。
 - 不新增迁移：Search / Fetch 收据记录复用现有 `deepseek` 服务预算，`purpose` 区分检索、抓取与模型整理；每次 Search / Fetch 返回非空结果按 ¥5/1000 次记 ¥0.005 估算；空结果记 ¥0。
-- 因为功能还未发布，未修改员工端站点更新日志；待合并与发布后按实际状态同步。
+- 功能已发布到生产；员工端站点更新日志按实际状态另行同步。
 
 ## 定向验证
 
@@ -40,5 +40,5 @@
 
 ## 下一步
 
-- PR：[PR #100](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/100)，目标 `main`，状态 Open、未合并。实现提交 `e390415ba040e6710dbe2ec1ae3acb6440aef1d7` 的 `quality`、`links`、`postgres-integration` 检查均通过。
-- 合并、生产发布和员工对看板来源及覆盖范围的验收分别记录；这条记录不代表完成生产或业务验收。
+- PR：[PR #100](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/100)，目标 `main`，已合并为 `cc1a5af`。实现提交 `e390415ba040e6710dbe2ec1ae3acb6440aef1d7` 的 `quality`、`links`、`postgres-integration` 检查均通过。
+- 生产发布已完成（2026-10-26 00:50–00:56，release `cc1a5af`，0 条新迁移，镜像内 standalone 回归 151/151 通过），见[发布记录](2026-10-26-P4-pr100-deployment.md)。真实 Search／Fetch 调用、员工账号体验与事实准确率仍待验收；这条记录不代表完成业务验收。

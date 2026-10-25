@@ -220,6 +220,17 @@
 - PR #93 的 `BILINGUAL_TERMS`、`podcastQueryVariants`、`expandQuery`、`skippedWithoutChinese` 与 `editorialSourceLabel` 均在运行镜像中确认存在；镜像内独立回归套件以 `--network none` 重跑 147/147 通过（上一版 144 条，新增 3 条来自 PR #93）。
 - Hermes 网关、Nginx、证书续期、数据库容器与命名卷未改动，四个 P3 开关保持 `true`，未清理旧发布目录与旧镜像。登录后用「具身智能」与「embodied intelligence」各跑一次前沿播客的复验仍待人工完成，详见[PR #93 部署日志](logs/2026-10-25-P4-pr93-deployment.md)。
 
+### PR #100 赛道同业竞争看板公开资料检索发布（2026-10-26）
+
+- [PR #100](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/100) 已合并，提交 `cc1a5afef96415e6829982479cfa41485b95b697` 已发布到 `/opt/citic-newsfeed/releases/cc1a5afef96415e6829982479cfa41485b95b697`。该版本把「赛道同业竞争看板」从 P0 空看板换成有调用上限的公开网页检索与页面抓取：每个任务固定 4 次 Search、至多 3 次 Fetch、至多 1 次结构化模型整理，来源标题／URL／日期只取自检索结果，模型结论须引用本次来源 ID，无可靠证据时保留「未披露／未检索到」并列出检索缺口。
+- 发布前公网 `/api/health` 仍为上一版 `e2daacd533086a711eed996096d75189104034df`（PR #96 + #97 + #99 的 2026-10-26 00:29–00:50 发布），与预期一致后才开始发布。发布包取自重新拉取的 `origin/main` tip，归档 sha256 与主机逐字节一致，发布目录 1,026 个文件逐文件 sha256 比对与本地 `git archive` 完全相同。
+- **0 条新迁移**：`git diff e2daacd..cc1a5af -- '*.sql'` 为空，发布目录含 164 个 `.sql` 文件。setup 先于新代码上线运行，退出码 0，输出「database is up to date / sources: 0 added, 26 already there / experts: the platform's own catalog entries are in place」；`schema_migrations` 164 → 164，最大版本仍是 `0190_member_experts_status_coming_soon_validate.sql`。专家目录行就地更新（`sector-peer-landscape` 的 `version` 由 `0.1.0` 改为 `1.0.0`），未产生重复行。
+- 发布前保存 `.env.before-release-cc1a5af-20261026` 与 `backups/db-before-cc1a5af-20261026.dump`，权限均为 `0600`，转储在数据库容器内经 `pg_restore --list` 检查可读（573 条 TOC，未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变。
+- 构建使用 `-f docker-compose.yml -f compose.volcengine.yml` 并指定完整发布号，未产生游离的 `aihot-app` 镜像。web、API、worker 运行 `citic-newsfeed:cc1a5afef96415e6829982479cfa41485b95b697`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login`、`/register` 与 `/favicon.ico` 返回 200，`/experts`、`/experts/sector-peer-landscape`、`/experts/outbound-investment-panorama`、`/experts/frontier-podcast`、`/tasks`、`/knowledge` 按会话鉴权 302 跳转登录页。
+- PR #100 的标记均在运行镜像中确认：`deepseek-search.ts`、`searchSectorPeerSources`、`validateSectorPeerBoard`、`renderSectorPeerDashboard`、`runSectorPeer`、新的错误码与员工提示均在 api／worker／web bundle 中存在；旧的「P0 空看板」「数据源未接入 · 暂无同业名单」等措辞在 api 与 web bundle 中均为 0 处。员工侧产物中供应商品牌名为 0 处（web bundle 内 `grep -ril deepseek` 无命中）。镜像内独立回归套件以 `--network none` 重跑 **151/151** 通过（上一版 `e2daacd` 为 149 条，新增 2 条来自 PR #100）。
+- 生产侧无需改动任何配置：`.env` 没有 `DEEPSEEK_BASE_URL`／`DEEPSEEK_API_KEY`，检索提供方的默认回退地址与生产 `LLM_BASE_URL` 主机一致，凭据文件在 api 与 worker 容器内均可读，`MODEL_CALLS_ENABLED=true`。**本轮没有发起真实的 Search／Fetch 请求**，该链路的实际行为仍未验证。
+- Hermes 网关、Nginx、证书续期、数据库容器与命名卷未改动，四个 P3 开关保持 `true`，未清理旧发布目录与旧镜像。登录后用真实企业／赛道跑一次赛道同业竞争看板，确认 HTML 看板、检索缺口、来源链接与产物下载的复验仍待人工完成，详见[PR #100 发布日志](logs/2026-10-26-P4-pr100-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
