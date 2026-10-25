@@ -9,7 +9,7 @@
 - [全景图真实名称关系标签修复](logs/2026-10-25-P2-05-panorama-relation-labels-codex.md)：短品牌前缀候选的母公司／分支提示、同名记录去重及近似候选约束；待 PR 评审和员工复测。
 - [员工全局任务记录](logs/2026-10-25-employee-global-tasks.md)：增加跨专家分页任务历史与单任务详情读取，待 PR 评审和员工验收。
 - [知识库问答 502 修复](logs/2026-10-25-P5-04-knowledge-answer-502.md)：脚注编号由平台给出、核不上回 422 而非 502、拒给的回答释放回执让下次重新调用模型；待部署后由员工复测。
-- [赛道同业竞争看板 P0](logs/2026-10-25-P5-sector-peer-landscape-p0.md)：以可运行的公开数据 HTML 空看板替换舆情开发中入口；记录本地验证与 P1 数据接入待办；[PR #79](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/79) 已合并并随 release `b8eb08b` 发布上线，登录后的空看板预览与下载待复测。
+- [赛道同业竞争看板 P0](logs/2026-10-25-P5-sector-peer-landscape-p0.md)：以可运行的公开数据 HTML 空看板替换舆情开发中入口；记录本地验证与 P1 数据接入待办；已随 PR #79 以 release `b8eb08b` 发布，目录收敛修复随 PR #81 以 release `e3465e5` 发布，登录后显示仍待人工复验。
 - [前沿播客专家](logs/2026-10-25-P2-frontier-podcast.md)：输入话题读取公开播客文字库，产出 beautiful-article 风格的网页摘要与 Markdown 产物；记录覆盖口径、失败原因与未验证事项，尚未部署。
 - [前沿播客双语检索与中文正文](logs/2026-10-25-P2-frontier-podcast-bilingual.md)：原词与另一语言关键词合并检索；英文源优先库的中文版本，记录跳过与覆盖边界，待评审部署。
 - [产品需求基线](PLAN.md)：v0.84；需求讨论与确认范围，不代表功能已验收。
@@ -49,6 +49,7 @@
 - [主线（PR #50–#54）火山云发布](logs/2026-10-24-P4-main-gp-projects-deployment.md)：release `8e20afb`（`main` 尖端，含 PR #50–#54 与员工端已投 GP 清单）的发布、备份、**零新增迁移**、健康检查与未验收边界；`/projects/invested-gp` 未登录按会话鉴权 302 跳转登录页，生产库暂无已核实 GP 投资记录，登录后列表预计为空。
 - [PR #70 生产冒烟跟进火山云发布](logs/2026-10-25-P4-pr70-prod-smoke-followups-deployment.md)：release `d0713cc` 的发布、备份、0 条新迁移、健康检查与未验收边界；含 PR #70 冒烟修复与 PR #64 界面键盘修复，员工问答 422／200 与 GP 真实来源仍待验收。
 - [PR #79 赛道同业竞争看板 P0 火山云发布](logs/2026-10-25-P4-pr79-deployment.md)：release `b8eb08b` 的发布、备份、0 条新迁移（`schema_migrations` 保持 164／`0190`）、健康检查与未验收边界；目录播种惰性，登录后的空 HTML 预览与下载仍待复测。
+- [PR #81 目录收敛火山云发布](logs/2026-10-25-P4-pr81-deployment.md)：release `e3465e5` 的发布、备份、0 条新迁移、setup 播种输出与健康检查；目录不再依赖第一位员工登录，登录后的目录显示仍待人工复验。
 - [2026-10-23 进度文档同步](logs/2026-10-23-progress-refresh.md)：同步 PR #22 部署、双用户 iLink `accepted` 抽测结果和未完成验收边界。
 - [Issue #26 信源与新华财经专家失败修复](logs/2026-10-23-i26-sources-xinhua-fix.md)：员工添加信源失败的阶段化错误码与可中止检查；新华财经候选短名兜底、画像宽时间窗口和可区分错误；生产复现证据与未验证边界。
 - [Issue #26 PR #32 复核第 1 轮](logs/2026-10-23-i26-review-r1.md)：已复审通过并合并（`ae410106b873`）；已随 2026-10-24 的发布上线，员工验收待办。整次检查的超时在原文页阶段同样返回 `source_timeout` 且不落库；两层回归（后端 standalone、路由数据库）与实体检索行的文档同步。

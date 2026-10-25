@@ -169,6 +169,14 @@
 - web、API、worker 运行 `citic-newsfeed:b8eb08bb75f708f6b309d58f61b3d98427f9d519`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200、`/favicon.ico` 返回 200，`/experts`、`/experts/sector-peer-landscape` 按会话鉴权 302 跳转登录页。
 - 目录播种是惰性的：`seedBuiltin()` 在鉴权通过后执行，本次发布后 `member_experts` 仍是发布前的 3 行，新目录行会在第一位员工首次打开专家目录时写入。赛道的空 HTML 预览与下载仍需登录后复测，详见[PR #79 部署日志](logs/2026-10-25-P4-pr79-deployment.md)。
 
+### PR #81 目录收敛发布（2026-10-25）
+
+- [PR #81](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/81) 已合并，提交 `e3465e58bea25b18f4f273ae60baf135721fb66f`（短 `e3465e5`）已发布到 `/opt/citic-newsfeed/releases/e3465e58bea25b18f4f273ae60baf135721fb66f`。平台自带专家的播种从路由搬到 `modules/membership/experts/seed.ts`，setup 阶段即收敛目录，且 `sector-peer-landscape` 的 `ON CONFLICT` 分支会把 `status` 写回，目录不再依赖第一位员工登录触发惰性播种。
+- 发布前保存 `.env.before-release-e3465e5-20261025` 与 `backups/db-before-e3465e5-20261025.dump`，权限均为 `0600`，转储经 `pg_restore --list` 检查可读（573 条 TOC，未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变。
+- **0 条新迁移**：PR #81 不含任何 `.sql` 变更，`schema_migrations` 发布前后均为 164 条、最大仍为 `0190`。setup 退出码 0，输出 `experts: the platform's own catalog entries are in place`；信源未重复写入。
+- web、API、worker 运行 `citic-newsfeed:e3465e58bea25b18f4f273ae60baf135721fb66f`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200，`/experts`、`/experts/sector-peer-landscape` 按会话鉴权 302 跳转登录页。
+- 发布后只读核对：`sector-peer-landscape` = `available`、`company-sentiment-report` = `hidden`；登录后的目录显示仍待人工复验，详见[PR #81 部署日志](logs/2026-10-25-P4-pr81-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
