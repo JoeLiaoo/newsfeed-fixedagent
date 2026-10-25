@@ -5,6 +5,7 @@ import { enqueueOn } from "@aihot/backend/jobs/queue";
 import { GP_QUEUE } from "./queue.ts";
 import { GP_TAGS, canReviewInvestment, normalizeAliases, validSectorTags } from "./core.ts";
 import type { MemberSession } from "../server.ts";
+import { employeeSource } from "./source.ts";
 
 type Auth = (req:FastifyRequest)=>Promise<MemberSession|null>;
 const body=(req:FastifyRequest)=>req.body && typeof req.body==="object" ? req.body as Record<string,unknown> : {};
@@ -28,7 +29,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const offset=Math.min(100_000,Math.max(0,requestedOffset));
     const interests=matched?await sql<{tag:string}[]>`SELECT tag FROM member_interest_tags WHERE user_id=${user.id} ORDER BY tag`:[];
     const interestTags=interests.map(row=>row.tag);
-    const rows=await sql`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.sector_tags,
+    const rows=await sql<Array<{id:string;gp_name:string;investee_name:string;sector_tags:string[];event_date:string|null;status:string;source_url:string|null}>>`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.sector_tags,
       i.approved_event_date::text AS event_date,'verified'::text AS status,i.approved_source_url AS source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       WHERE i.status='verified' AND g.status='active' AND g.entity_role='gp'
@@ -39,7 +40,10 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       ORDER BY i.approved_event_date DESC NULLS LAST,i.approved_at DESC NULLS LAST,i.id
       LIMIT ${limit+1} OFFSET ${offset}`;
     const hasMore=rows.length>limit;
-    return {investments:rows.slice(0,limit),pagination:{limit,offset,nextOffset:hasMore?offset+limit:null},...(matched?{interest_tags:interestTags}: {})};
+    return {investments:rows.slice(0,limit).map(row => {
+      const source = employeeSource(row.source_url);
+      return { ...row, source_url: source.url, source_placeholder: source.placeholder };
+    }),pagination:{limit,offset,nextOffset:hasMore?offset+limit:null},...(matched?{interest_tags:interestTags}: {})};
   });
 
   async function admin(req:FastifyRequest,reply:FastifyReply) {

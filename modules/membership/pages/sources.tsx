@@ -42,15 +42,27 @@ export default function SourcesPage() {
   const [coverage, setCoverage] = useState<Coverage[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [activeSources, setActiveSources] = useState(0);
+  const [aboutSnapshotSources, setAboutSnapshotSources] = useState<number | null>(null);
 
   async function load() {
     const response = await fetch("/api/v1/membership/sources");
-    if (!response.ok) { setMessage("请先登录后查看信源。"); return; }
-    const data = await response.json() as { sources: Source[]; coverage: Coverage[] };
+    if (!response.ok) { setLoaded(false); setMessage(response.status === 401 ? "请先登录后查看信源。" : "加载信源失败，请刷新重试。"); return; }
+    const data = await response.json() as { sources?: Source[]; coverage?: Coverage[]; activeSources?: number };
+    if (!Array.isArray(data.sources) || !Array.isArray(data.coverage) || typeof data.activeSources !== "number") throw new Error("invalid_sources_response");
     setSources(data.sources); setCoverage(data.coverage);
+    setActiveSources(data.activeSources); setLoaded(true);
+    if (!data.sources.length) {
+      try {
+        const snapshot = await fetch("/api/site/stats");
+        const stats = await snapshot.json() as { sources?: number };
+        setAboutSnapshotSources(snapshot.ok && typeof stats.sources === "number" ? stats.sources : null);
+      } catch { setAboutSnapshotSources(null); }
+    } else setAboutSnapshotSources(null);
   }
 
-  useEffect(() => { void load().catch(() => setMessage("加载信源失败，请刷新重试。")); }, []);
+  useEffect(() => { void load().catch(() => { setLoaded(false); setMessage("加载信源失败，请刷新重试。"); }); }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setMessage("正在检查公开内容和重复项…");
@@ -75,6 +87,7 @@ export default function SourcesPage() {
   return <main className="mx-auto w-full max-w-6xl px-5 py-8">
     <header className="mb-6"><h1 className="text-2xl font-semibold tracking-tight">资讯信源</h1><p className="mt-2 max-w-5xl text-sm leading-relaxed text-ink-3">RSS/Atom、sitemap 或文章列表页先经过公开地址、内容和重复检查。提交网站首页时会探测页面 RSS、robots.txt 和常见 sitemap 地址；若未发现，则只采集你提交的列表页。每位员工每小时最多检查 3 次，全站同时最多 4 次检查。系统只采集公开内容；下表持续显示实际采用的范围、首次预览数量和近 7 天收录量，不能据此保证覆盖全站。</p></header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
+    {loaded && !sources.length && aboutSnapshotSources !== null && aboutSnapshotSources > 0 && <Alert className="mb-5" role="alert">实时信源列表为空，但「关于」页最近快照显示 {aboutSnapshotSources} 个启用信源。两处数据不一致，请管理员核对 API 与数据库状态。</Alert>}
     <Card className="mb-6">
       <CardHeader><CardTitle>添加公开信源</CardTitle><CardDescription>新信源经检查后加入全员共享采集池。</CardDescription></CardHeader>
       <CardContent><form onSubmit={submit} className="grid gap-4 md:grid-cols-[1fr_2fr_1fr_auto] md:items-end">
@@ -86,11 +99,11 @@ export default function SourcesPage() {
     </Card>
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_2fr]">
       <Card>
-        <CardHeader><CardTitle>赛道覆盖</CardTitle><CardDescription>近 7 天已发布的精选内容</CardDescription></CardHeader>
-        <CardContent>{coverage.length ? <ul className="flex flex-wrap gap-2">{coverage.map(item => <li key={item.tag}><Badge variant="outline">{item.tag} · {item.count}</Badge></li>)}</ul> : <p className="text-sm text-ink-3">近 7 天暂无已发布的赛道内容。</p>}</CardContent>
+        <CardHeader><CardTitle>赛道覆盖</CardTitle><CardDescription>近 7 天已发布的精选内容；资讯列表也可显示更早的内容。</CardDescription></CardHeader>
+        <CardContent>{!loaded ? <p className="text-sm text-ink-3">正在读取共享数据…</p> : coverage.length ? <ul className="flex flex-wrap gap-2">{coverage.map(item => <li key={item.tag}><Badge variant="outline">{item.tag} · {item.count}</Badge></li>)}</ul> : <p className="text-sm text-ink-3">近 7 天暂无已发布的赛道内容。</p>}</CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>共享信源健康情况</CardTitle><CardDescription>数据反映实际采集范围，不保证覆盖整个站点。</CardDescription></CardHeader>
+        <CardHeader><CardTitle>共享信源健康情况</CardTitle><CardDescription>{loaded ? `全员共享 ${sources.length} 个信源，其中 ${activeSources} 个启用。` : "正在读取共享信源…"}数据反映实际采集范围。</CardDescription></CardHeader>
         <CardContent className="p-0 sm:px-5">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left text-sm">
@@ -106,7 +119,7 @@ export default function SourcesPage() {
               </tr>)}</tbody>
             </table>
           </div>
-          {!sources.length && <p className="px-4 py-5 text-sm text-ink-3 sm:px-0">暂无共享信源。</p>}
+          {loaded && !sources.length && <p className="px-4 py-5 text-sm text-ink-3 sm:px-0">采集池中暂无共享信源。</p>}
         </CardContent>
       </Card>
     </div>

@@ -262,7 +262,7 @@ test("the shared library is open to approved employees and closed to everyone el
   assert.ok((await answered).answer.coverage.analysts >= 1);
   assert.ok((await answered).answer.coverage.reports >= 1);
   const uncovered = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { question: "完全没有覆盖的问题主题" } });
-  assert.equal(uncovered.statusCode, 404);
+  assert.equal(uncovered.statusCode, 422);
   assert.equal((await uncovered.json() as { error: string }).error, "knowledge_no_coverage");
 
   // An answer that cites something the library never offered is refused.

@@ -231,7 +231,7 @@ export function registerMembership(app: FastifyInstance) {
   app.get("/api/v1/membership/sources", async (req, reply) => {
     noStore(reply);
     if (!(await memberSession(req))) return reply.code(401).send({ error: "login_required" });
-    const sources = await sql`
+    const sources = await sql<Array<{ id: string; name: string; kind: string; enabled: boolean; health: string; last_ok_at: Date | null; discovery_scope: string | null; discovery_method: string | null; preview_count: number | null; items_7d: number }>>`
       SELECT s.id, s.name, s.kind, s.enabled, s.health, s.last_ok_at,
         s.config->'_aihot'->>'discoveryScope' AS discovery_scope,
         s.config->'_aihot'->>'discoveryMethod' AS discovery_method,
@@ -246,7 +246,7 @@ export function registerMembership(app: FastifyInstance) {
       WHERE ${listedCondition(now)} AND p.timeline_at > ${now}::timestamptz - interval '7 days'
       GROUP BY tag ORDER BY count DESC, tag
     `;
-    return { sources, coverage };
+    return { sources, coverage, activeSources: sources.filter(source => source.enabled).length };
   });
 
   app.post("/api/v1/membership/sources", async (req, reply) => {

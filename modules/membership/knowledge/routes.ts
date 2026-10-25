@@ -414,6 +414,11 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       .send(material.body);
   });
 
+  app.get("/api/v1/membership/knowledge/answers", async (_req, reply) => {
+    noStore(reply);
+    return reply.code(405).header("Allow", "POST").send({ error: "method_not_allowed", message: "请在知识库页面提交问题。" });
+  });
+
   /** Asking the library a question. It answers from the published pages only. */
   app.post("/api/v1/membership/knowledge/answers", async (req, reply) => {
     noStore(reply);
@@ -467,7 +472,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       },
     }));
     const routed = routePages(question, candidates);
-    if (!routed.length) return reply.code(404).send({ error: "knowledge_no_coverage", message: TASK_ERRORS.knowledge_no_coverage });
+    if (!routed.length) return reply.code(422).send({ error: "knowledge_no_coverage", message: TASK_ERRORS.knowledge_no_coverage });
     let answer;
     try { answer = await answerQuestion(question, routed.map(entry => entry.page)); }
     catch (error) {

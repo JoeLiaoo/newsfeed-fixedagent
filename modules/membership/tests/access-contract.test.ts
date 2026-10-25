@@ -71,7 +71,10 @@ test("employee content boundary, member isolation, and immutable daily digest sn
     await sql`INSERT INTO publications (article_id, eligible, title, summary, tags, source_id, channel, url, discovered_at, timeline_at, sort_at, story_id)
       VALUES (${articleId}, true, ${`Report ${index}`}, 'Shared summary', ${sql.array([accounts[0]!.interest])}::text[], ${sourceId}, 'news', ${`https://example.test/${articleId}`}, ${publishedAt}, ${publishedAt}, ${publishedAt}, ${story!.id})`;
   }
-  const sourceReport = await (await app.inject({ method: "GET", url: "/api/v1/membership/sources", headers: { cookie: cookies[0]! } })).json() as { sources: Array<{ id: string; discovery_scope: string; discovery_method: string; preview_count: number; items_7d: number }> };
+  const sourceReport = await (await app.inject({ method: "GET", url: "/api/v1/membership/sources", headers: { cookie: cookies[0]! } })).json() as { activeSources: number; coverage: Array<{ tag: string; count: number }>; sources: Array<{ id: string; enabled: boolean; discovery_scope: string; discovery_method: string; preview_count: number; items_7d: number }> };
+  assert.equal(sourceReport.activeSources, sourceReport.sources.filter(source => source.enabled).length, "employee view counts the same shared pool it lists");
+  assert.ok(sourceReport.activeSources >= 2);
+  assert.ok(sourceReport.coverage.some(row => row.tag === accounts[0]!.interest && row.count >= 2));
   const reportedSource = sourceReport.sources.find((source) => source.id === sourceIds[0]);
   assert.equal(reportedSource?.discovery_scope, "sitemap");
   assert.equal(reportedSource?.discovery_method, "robots_txt");

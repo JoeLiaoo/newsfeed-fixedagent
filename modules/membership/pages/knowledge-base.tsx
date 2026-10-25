@@ -6,6 +6,7 @@ import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@aihot/web/components/member-ui/card";
 import { Input } from "@aihot/web/components/member-ui/input";
+import { FileInput } from "@aihot/web/components/member-ui/file-input";
 import { Label } from "@aihot/web/components/member-ui/label";
 import { renderMarkdown } from "@aihot/web/lib/markdown";
 import { pageMeta, siteUrl } from "@aihot/web/lib/seo";
@@ -76,6 +77,7 @@ export default function KnowledgeBasePage() {
   const [busy, setBusy] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<Answer | null>(null);
+  const [answerMessage, setAnswerMessage] = useState("");
   const [withdrawing, setWithdrawing] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [missing, setMissing] = useState(false);
@@ -162,18 +164,21 @@ export default function KnowledgeBasePage() {
 
   async function ask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (question.trim().length < 2) { setMessage("请输入要问的问题。"); return; }
+    if (question.trim().length < 2) { setAnswerMessage("请输入要问的问题。"); return; }
     setBusy(true);
     setAnswer(null);
-    setMessage("正在从共享库检索…");
+    setAnswerMessage("正在从共享库检索…");
     try {
       const response = await fetch(`${ENDPOINT}answers`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ baseId, question }) });
-      const result = await response.json() as { answer?: Answer; error?: string; message?: string };
-      if (!response.ok) { setMessage(result.message ?? "问答失败，请重试。"); return; }
-      if (!result.answer) { setMessage("问答失败，请重试。"); return; }
+      const result = await response.json().catch(() => ({})) as { answer?: Answer; error?: string; message?: string };
+      if (!response.ok) {
+        setAnswerMessage(result.message ?? (result.error === "knowledge_base_not_found" ? "该知识库不存在或已停用，请返回知识库列表。" : result.error === "knowledge_no_coverage" ? TASK_ERRORS.knowledge_no_coverage : response.status === 404 ? "问答接口不可用，请联系管理员核对 API 发布版本。" : response.status === 401 ? "登录已失效，请重新登录后提问。" : "问答失败，请重试。"));
+        return;
+      }
+      if (!result.answer) { setAnswerMessage("问答未返回结果，请重试。"); return; }
       setAnswer(result.answer);
-      setMessage("");
-    } catch { setMessage("问答请求失败，请检查网络后重试。"); }
+      setAnswerMessage("");
+    } catch { setAnswerMessage("问答请求失败，请检查网络后重试。"); }
     finally { setBusy(false); }
   }
 
@@ -207,7 +212,7 @@ export default function KnowledgeBasePage() {
           <form onSubmit={upload} className="grid gap-4">
             <div className="grid gap-2">
               <Label htmlFor="wiki-file">文件</Label>
-              <Input id="wiki-file" name="file" type="file" accept=".pdf,.docx,.pptx,.md,.markdown,.txt,application/pdf" onChange={event => setFile(event.target.files?.[0] ?? null)} required />
+              <FileInput id="wiki-file" name="file" accept=".pdf,.docx,.pptx,.md,.markdown,.txt,application/pdf" onChange={event => setFile(event.target.files?.[0] ?? null)} required />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2"><Label htmlFor="wiki-title">标题</Label><Input id="wiki-title" name="title" maxLength={200} placeholder="留空则用文件名" /></div>
@@ -304,6 +309,7 @@ export default function KnowledgeBasePage() {
             </div>
             <Button type="submit" variant="outline" disabled={busy}><MessageSquare size={16} aria-hidden="true" />{busy ? "检索中…" : "提问"}</Button>
           </form>
+          {answerMessage && <Alert role="status">{answerMessage}</Alert>}
           {answer && <div className="grid gap-3">
             <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(answer.answerMd, siteUrl()).html }} />
             <div className="grid gap-1 border-t border-line pt-3">

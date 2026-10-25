@@ -6,6 +6,7 @@ import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@aihot/web/components/member-ui/card";
 import { Input } from "@aihot/web/components/member-ui/input";
+import { FileInput } from "@aihot/web/components/member-ui/file-input";
 import { Label } from "@aihot/web/components/member-ui/label";
 import { Textarea } from "@aihot/web/components/member-ui/textarea";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
@@ -64,7 +65,11 @@ export default function ExpertDetailPage() {
   }, [tasks]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setMessage("任务已提交…");
+    event.preventDefault();
+    if (modeNeedsEntity(expert?.execution_mode ?? "") && companyName.trim().length < 2) {
+      setMessage("请填写至少 2 个字的目标企业名称。"); return;
+    }
+    setBusy(true); setMessage("任务已提交…");
     try {
       if (files.length > 3 || files.some(file => file.size > 5 * 1024 * 1024) || files.reduce((sum, file) => sum + file.size, 0) > 10 * 1024 * 1024) { setMessage("最多上传 3 个文件，单个不超过 5 MB，总计不超过 10 MB。"); return; }
       const materials = await Promise.all(files.map(async file => {
@@ -139,12 +144,12 @@ export default function ExpertDetailPage() {
         <CardContent>
           <form onSubmit={submit} className="grid gap-4">
             {modeNeedsEntity(expert.execution_mode) ? <>
-              <div className="grid gap-2"><Label htmlFor="company-name">目标企业名称</Label><Input id="company-name" required minLength={2} maxLength={200} value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder="输入待核查主体" /></div>
+              <div className="grid gap-2"><Label htmlFor="company-name">目标企业名称</Label><Input id="company-name" required minLength={2} maxLength={200} value={companyName} onInvalid={() => setMessage("请填写至少 2 个字的目标企业名称。")} onChange={event => setCompanyName(event.target.value)} placeholder="输入待核查主体" /></div>
               <p className="text-xs leading-relaxed text-ink-3">示例：{SAMPLE_COMPANIES.join("；")}。系统先检索同名候选，须由你确认主体后才查询。{expert.execution_mode === "xinhua_panorama" ? "确认后逐层核查。默认预算为最多 4 层、25 个主体、90 次查询，每个主体最多处理 20 条关系；达到上限或遇到无法核实的数据时，报告会标明不完整并列出缺口。" : "当前仅生成一层直接投资底稿，不代表完整穿透。"}</p>
             </> : null}
             {expert.execution_mode === "text_only" && <div className="grid gap-2"><Label htmlFor="task-notes">任务要求</Label><Textarea id="task-notes" required minLength={2} maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={5} /></div>}
             {modeNeedsEntity(expert.execution_mode) && <div className="grid gap-2"><Label htmlFor="task-notes">核查备注（内置专家可选）</Label><Textarea id="task-notes" required={!BUILTIN_SLUGS.has(slug ?? "")} minLength={BUILTIN_SLUGS.has(slug ?? "") ? undefined : 2} maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={4} /></div>}
-            <div className="grid gap-2"><Label htmlFor="task-materials">任务材料（可选）</Label><Input id="task-materials" type="file" multiple accept=".pdf,.docx,.pptx,.md,.markdown,.txt" onChange={event => setFiles(Array.from(event.target.files ?? []))} /><p className="text-xs text-ink-3">PDF、DOCX、PPTX、Markdown；最多 3 个，单个 5 MB、总计 10 MB。材料与报告仅本人可访问，七天后清理。</p></div>
+            <div className="grid gap-2"><Label htmlFor="task-materials">任务材料（可选）</Label><FileInput id="task-materials" multiple accept=".pdf,.docx,.pptx,.md,.markdown,.txt" onChange={event => setFiles(Array.from(event.target.files ?? []))} /><p className="text-xs text-ink-3">PDF、DOCX、PPTX、Markdown；最多 3 个，单个 5 MB、总计 10 MB。材料与报告仅本人可访问，七天后清理。</p></div>
             <Button type="submit" disabled={busy}>{busy ? "请稍候…" : "提交任务"}</Button>
           </form>
         </CardContent>

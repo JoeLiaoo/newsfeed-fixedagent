@@ -75,6 +75,8 @@ test("GP project list requires an active member and only exposes approved active
   assert.equal(body.investments[0]?.event_date, "2026-10-20");
   assert.deepEqual(body.investments[0]?.sector_tags, ["光伏"]);
   assert.equal(body.investments[0]?.status, "verified");
+  assert.equal(body.investments[0]?.source_url, null, "demo evidence is not linked as a provenance source");
+  assert.equal(body.investments[0]?.source_placeholder, true);
   assert.equal("raw_evidence" in body.investments[0]!, false);
   assert.equal("approved_by" in body.investments[0]!, false);
   assert.equal("approved_at" in body.investments[0]!, false);

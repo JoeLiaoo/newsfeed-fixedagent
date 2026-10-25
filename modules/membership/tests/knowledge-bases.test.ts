@@ -75,6 +75,8 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
     { username: `base-b-${suffix}`, realName: "员工乙", password: "long-test-password-123" },
   ];
   const common = { host: "newsfeed.test", origin: "http://newsfeed.test" };
+  const wrongMethod = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/answers", headers: common });
+  assert.equal(wrongMethod.statusCode, 401, "the employee boundary protects the registered answer route");
   for (const account of accounts) {
     const registered = await app.inject({ method: "POST", url: "/api/v1/membership/register", headers: common, payload: account });
     assert.equal(registered.statusCode, 201);
@@ -87,6 +89,9 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
     const setCookie = login.headers["set-cookie"];
     cookies.push((Array.isArray(setCookie) ? setCookie[0]! : setCookie!).split(";", 1)[0]!);
   }
+  const answerGet = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[0]!, ...common } });
+  assert.equal(answerGet.statusCode, 405);
+  assert.equal(answerGet.headers.allow, "POST");
 
   // A visitor is turned away before any route runs.
   assert.equal((await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/bases", headers: common })).statusCode, 401);
@@ -155,8 +160,11 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
   assert.equal(answer.statusCode, 200);
   const answered = await answer.json() as { answer: { citations: Array<{ pageSlug: string }> } };
   assert.deepEqual(answered.answer.citations.map(citation => citation.pageSlug), [`${base.id}-${PAGE_SLUG}`]);
+  const genericQuestion = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { baseId: base.id, question: "这是什么知识库" } });
+  assert.equal(genericQuestion.statusCode, 422);
+  assert.equal((await genericQuestion.json() as { error: string }).error, "knowledge_no_coverage");
   const otherAnswer = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { baseId: DEFAULT_BASE_ID, question: "某公司现在怎么看？" } });
-  assert.equal(otherAnswer.statusCode, 404, "the other base has no page to answer from");
+  assert.equal(otherAnswer.statusCode, 422, "the other base has no page to answer from");
   assert.equal((await otherAnswer.json() as { error: string }).error, "knowledge_no_coverage");
 
   // The same target in the shared base is a page of its own.

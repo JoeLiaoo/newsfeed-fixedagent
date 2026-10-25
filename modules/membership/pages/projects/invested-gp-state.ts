@@ -1,4 +1,4 @@
-type Investment={id:string;gp_name:string;investee_name:string;sector_tags:string[];event_date:string|null;status:"verified";source_url:string|null};
+type Investment={id:string;gp_name:string;investee_name:string;sector_tags:string[];event_date:string|null;status:"verified";source_url:string|null;source_placeholder:boolean};
 type Page={investments:Investment[];pagination:{nextOffset:number|null};interest_tags?:string[]};
 export type GpProjectsState={items:Investment[];interestTags:string[];nextOffset:number|null;loading:boolean;loadingMore:boolean;message:string;retry:{offset:number;append:boolean}};
 export const initialGpProjectsState:GpProjectsState={items:[],interestTags:[],nextOffset:null,loading:true,loadingMore:false,message:"",retry:{offset:0,append:false}};
