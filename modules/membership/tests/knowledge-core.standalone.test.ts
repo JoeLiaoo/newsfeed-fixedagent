@@ -362,8 +362,8 @@ test("an answer may number its footnotes the way the turn numbered them, or quot
     slug: page.slug, title: page.title, pageType: page.pageType, targetName: page.targetName,
     track: page.track, bodyMd: "published", coverage: { ...coverageOf(page), last_report: "2026-10-01" }, revisionId: "r1",
     citations: [
-      { id: "c1", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2026-01-01", anchor: null, sourceTitle: "一", versionId: "v1" },
-      { id: "c2", label: "S2", analyst: "李四", organization: "券商", publishedOn: "2026-01-02", anchor: null, sourceTitle: "二", versionId: "v2" },
+      { id: "c1", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2026-01-01", anchor: null, sourceTitle: "一", versionId: "v1", documentId: "d1", documentTitle: "材料一", fileName: "one.md" },
+      { id: "c2", label: "S2", analyst: "李四", organization: "券商", publishedOn: "2026-01-02", anchor: null, sourceTitle: "二", versionId: "v2", documentId: "d2", documentTitle: "材料二", fileName: "two.md" },
     ],
   }];
   const numbered = verifyAnswer(answerSchema.parse({
@@ -395,7 +395,7 @@ test("a page name the model cut short still names the same page", () => {
   const pages = [{
     slug, title: "某公司", pageType: "view", targetName: "某公司", track: null,
     bodyMd: "published", coverage: { ...coverageOf(page), last_report: "2026-10-01" }, revisionId: "r1",
-    citations: [{ id: "c1", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2026-01-01", anchor: null, sourceTitle: "一", versionId: "v1" }],
+    citations: [{ id: "c1", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2026-01-01", anchor: null, sourceTitle: "一", versionId: "v1", documentId: "d1", documentTitle: "材料一", fileName: "one.md" }],
   }];
   const truncated = verifyAnswer(answerSchema.parse({
     answer: "第一点[^1]。",
@@ -413,8 +413,8 @@ test("a footnote the model decorated, and a label of another source, are told ap
     slug: page.slug, title: page.title, pageType: page.pageType, targetName: page.targetName,
     track: page.track, bodyMd: "published", coverage: { ...coverageOf(page), last_report: "2026-10-01" }, revisionId: "r1",
     citations: [
-      { id: "c1", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2026-01-01", anchor: null, sourceTitle: "一", versionId: "v1" },
-      { id: "c2", label: "S2", analyst: "李四", organization: "券商", publishedOn: "2026-01-02", anchor: null, sourceTitle: "二", versionId: "v2" },
+      { id: "c1", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2026-01-01", anchor: null, sourceTitle: "一", versionId: "v1", documentId: "d1", documentTitle: "材料一", fileName: "one.md" },
+      { id: "c2", label: "S2", analyst: "李四", organization: "券商", publishedOn: "2026-01-02", anchor: null, sourceTitle: "二", versionId: "v2", documentId: "d2", documentTitle: "材料二", fileName: "two.md" },
     ],
   }];
   const decorated = verifyAnswer(answerSchema.parse({
@@ -434,7 +434,7 @@ test("the citations of a turn are numbered once, and the numbering belongs to th
   const pages = [{
     slug: page.slug, title: page.title, pageType: page.pageType, targetName: page.targetName,
     track: page.track, bodyMd: "published", coverage: { ...coverageOf(page), last_report: "2026-10-01" }, revisionId: "r1",
-    citations: [{ id: "c1", label: "S1", analyst: "张三", organization: null, publishedOn: null, anchor: null, sourceTitle: null, versionId: "v1" }],
+    citations: [{ id: "c1", label: "S1", analyst: "张三", organization: null, publishedOn: null, anchor: null, sourceTitle: null, versionId: "v1", documentId: "d1", documentTitle: "材料一", fileName: "one.md" }],
   }];
   const offered = offeredCitations(pages);
   assert.equal(offered.length, 1);

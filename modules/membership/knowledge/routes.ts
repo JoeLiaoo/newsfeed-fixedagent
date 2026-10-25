@@ -59,16 +59,6 @@ function dateText(value: unknown): string | null {
   return null;
 }
 
-/** Stable page windows for employee lists, which otherwise silently stopped at the first 100 rows. */
-function pageWindow(req: FastifyRequest): { limit: number; offset: number } {
-  const query = typeof req.query === "object" && req.query ? req.query as Record<string, unknown> : {};
-  const number = (value: unknown, fallback: number) => {
-    const parsed = typeof value === "string" ? Number.parseInt(value, 10) : NaN;
-    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
-  };
-  return { limit: Math.min(100, Math.max(1, number(query.limit, 50))), offset: number(query.offset, 0) };
-}
-
 /**
  * The materials of a target, one row per material. A material that wrote more than one page about
  * the same target left more than one contribution behind; it is still one material, and it is shown
