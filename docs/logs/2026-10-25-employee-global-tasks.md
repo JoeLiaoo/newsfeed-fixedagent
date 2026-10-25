@@ -32,7 +32,7 @@
 - `expert-task-detail.test.ts`：通过；使用临时 PostgreSQL 17 容器，含访客 401、他人任务 404、本人详情、过期清理、分页字段及列表/详情行结构检查。
 - `node scripts/check-doc-links.ts`：通过，423 个本地 Markdown 链接目标存在。
 - `git diff --check`：通过。
-- PR #86 已 Open；Docs links 已通过，quality 与 PostgreSQL integration checks 正在 CI 运行。
+- PR #86 已 Open；截至提交 `d0805e4`，quality、Docs links 与 PostgreSQL integration checks 全部通过。仍未合并或部署。
 - 代码尚未部署；员工真实验收未做。
 
 ## 风险与后续
