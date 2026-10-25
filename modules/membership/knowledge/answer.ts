@@ -22,6 +22,10 @@ export type TrustedCitation = {
   anchor: string | null;
   citationId: string;
   versionId: string;
+  /** The material the citation may be read in, and the file itself: the way back to the evidence. */
+  documentId: string;
+  documentTitle: string;
+  fileName: string;
 };
 
 export type TrustedAnswer = {
@@ -236,6 +240,9 @@ export function verifyAnswer(answer: AnswerResult, pages: RoutablePage[], now = 
       anchor: entry.citation.anchor,
       citationId: entry.citation.id,
       versionId: entry.citation.versionId,
+      documentId: entry.citation.documentId,
+      documentTitle: entry.citation.documentTitle,
+      fileName: entry.citation.fileName,
     });
   }
   if (!citations.length || [...markers.keys()].some(label => !seen.has(label))) return fail();
