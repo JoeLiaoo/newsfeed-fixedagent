@@ -3,6 +3,7 @@
 ## 从这里开始
 
 - [项目 README](../README.md)：本地启动、各阶段代码与上线状态。
+- [PR #113 membership JSON 模式提示词生产发布（release `781f6d1`）](logs/2026-10-26-P4-pr113-deployment.md)：一层核查、全景摘要、自定义技能导入与 GP 赛道分类的提示词在生产上的发布事实；发布前为 `4a68295`（PR #112），0 条新迁移、健康检查与未登录路由通过，镜像内回归 164/164；**未发起真实模型调用**，业务效果与员工验收仍待人工确认。
 - [员工端更新日志补齐](logs/2026-10-25-employee-changelog.md)：按已合并功能与用户提供的生产版本，补录员工可见变更及保留的验收边界。
 - [对外投资全景图生产冒烟修复](logs/2026-10-25-P2-05-panorama-e2e-smoke.md)：候选按页检索并反查母公司登记名、模型摘要失败不再带走底稿、失败原因落地、任务卡显示查询与已确认主体；已随 PR #83 以 release `b44e574` 发布，登录后的端到端复验仍待人工完成。
 - [全景图母公司候选排序修复](logs/2026-10-25-P2-05-panorama-candidate-ranking.md)：PR #88 补强母公司优先排序及候选关系标签，已随 PR #88 以 release `d169c6b` 发布，登录后的生产样例复验仍待人工完成。
@@ -14,8 +15,8 @@
 - [知识库问答 502 修复](logs/2026-10-25-P5-04-knowledge-answer-502.md)：脚注编号由平台给出、核不上回 422 而非 502、拒给的回答释放回执让下次重新调用模型；已随 PR #84 以 release `b44e574` 发布，登录后的问答复验仍待人工完成。
 - [赛道同业竞争看板 P0](logs/2026-10-25-P5-sector-peer-landscape-p0.md)：以可运行的公开数据 HTML 空看板替换舆情开发中入口；记录本地验证与 P1 数据接入待办；已随 PR #79 以 release `b8eb08b` 发布，目录收敛修复随 PR #81 以 release `e3465e5` 发布，登录后显示仍待人工复验。
 - [赛道同业公开资料检索](logs/2026-10-26-P2-06-sector-peer-search.md)：以有限次公开网页检索与页面抓取生成逐项引用来源的 HTML 看板；PR #100 已合并并部署，真实员工任务暴露的模型拒绝见下一条。
-- [赛道同业模型拒绝与输入显示修复](logs/2026-10-26-P2-06-sector-peer-model-reject.md)：生产收据定位 JSON 模式 HTTP 400、补齐提示词、区分模型错误并显示查询词；待修复 PR 评审与员工复测。
-- [剩余 membership JSON 模式提示词维护](logs/2026-10-26-P2-P3-chatjson-prompts.md)：一层、全景、自定义技能与 GP 分类提示词明确 JSON 对象字段并递增版本；待 PR 评审、发布与真实业务复验。
+- [赛道同业模型拒绝与输入显示修复](logs/2026-10-26-P2-06-sector-peer-model-reject.md)：生产收据定位 JSON 模式 HTTP 400、补齐提示词、区分模型错误并显示查询词；[PR #112](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/112) 已合并（`4a68295`）并发布到生产，真实员工复测待完成。
+- [剩余 membership JSON 模式提示词维护](logs/2026-10-26-P2-P3-chatjson-prompts.md)：一层、全景、自定义技能与 GP 分类提示词明确 JSON 对象字段并递增版本；[PR #113](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/113) 已合并（`781f6d1`）并发布到生产，未发起真实模型调用，业务效果待人工复验。
 - [前沿播客专家](logs/2026-10-25-P2-frontier-podcast.md)：输入话题读取公开播客文字库，产出 beautiful-article 风格的网页摘要与 Markdown 产物；记录覆盖口径、失败原因与未验证事项，尚未部署。
 - [前沿播客双语检索与中文正文](logs/2026-10-25-P2-frontier-podcast-bilingual.md)：原词与另一语言关键词合并检索；英文源优先库的中文版本，记录跳过与覆盖边界，待评审部署。
 - [前沿播客检索排序改进](logs/2026-10-26-P2-frontier-podcast-search-quality.md)：记录八个 BidClub 实时探测、增强决策、别名扩展与标题相关性排序；PR #104 已合并（`281ac12`），未部署或员工验收。
