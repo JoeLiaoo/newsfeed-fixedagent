@@ -48,6 +48,9 @@ test("old sentiment is hidden and public search configuration errors fail the ta
   const short = await app.inject({ method: "POST", url: "/api/v1/membership/expert-tasks", headers, payload: { slug: SECTOR_PEER_EXPERT_SLUG, query: " A " } });
   assert.equal(short.statusCode, 400);
   assert.equal((short.json() as { error: string }).error, "sector_query_required");
+  const blank = await app.inject({ method: "POST", url: "/api/v1/membership/expert-tasks", headers, payload: { slug: SECTOR_PEER_EXPERT_SLUG, query: "  \u3000 " } });
+  assert.equal(blank.statusCode, 400);
+  assert.equal((blank.json() as { error: string }).error, "sector_query_required");
   const digitsOnly = await app.inject({ method: "POST", url: "/api/v1/membership/expert-tasks", headers, payload: { slug: SECTOR_PEER_EXPERT_SLUG, query: "12345" } });
   assert.equal(digitsOnly.statusCode, 400);
   const created = await app.inject({ method: "POST", url: "/api/v1/membership/expert-tasks", headers: { ...headers, "idempotency-key": randomUUID() }, payload: { slug: SECTOR_PEER_EXPERT_SLUG, query: "  商业航天  ", notes: "公开资料" } });

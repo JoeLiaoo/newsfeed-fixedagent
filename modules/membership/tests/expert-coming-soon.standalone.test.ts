@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { HIDDEN_BUILTIN_SLUGS, SECTOR_PEER_EXPERT, SECTOR_PEER_EXPERT_SLUG, expertStatusBadge } from "../experts/catalog.ts";
+import { ProviderRejectedError } from "@aihot/backend/providers/receipts";
+import { errorText, SECTOR_PEER_SYNTHESIS_PROMPT } from "../experts/worker.ts";
 import { renderSectorPeerDashboard, validateSectorPeerBoard } from "../experts/sector-peer-html.ts";
 import type { PublicSearchSource } from "@aihot/backend/providers/deepseek-search";
 
@@ -52,4 +54,18 @@ test("employee detail uses a single query field and sandboxed HTML preview", () 
   assert.ok(detail.includes('name="query"'));
   assert.ok(detail.includes('srcDoc={task.result.html} sandbox=""'));
   assert.ok(detail.includes("sector_query_required"));
+});
+
+test("sector-peer synthesis explicitly requests JSON for the provider's JSON response mode", () => {
+  assert.match(SECTOR_PEER_SYNTHESIS_PROMPT, /JSON/i);
+  assert.match(SECTOR_PEER_SYNTHESIS_PROMPT, /没有可核实事实的栏目返回空数组/);
+  assert.match(SECTOR_PEER_SYNTHESIS_PROMPT, /不要补造公司或事件/);
+});
+
+test("model refusals distinguish a bad request, unavailable access, and a temporary outage", () => {
+  assert.deepEqual(errorText(new ProviderRejectedError("invalid JSON request", 400, false)), {
+    code: "expert_model_request_invalid", message: "文字整理请求未被服务接受，任务未完成；请联系管理员检查配置和任务记录。",
+  });
+  assert.equal(errorText(new ProviderRejectedError("access denied", 403, false, true)).code, "expert_model_access_refused");
+  assert.equal(errorText(new ProviderRejectedError("rate limited", 429, true)).code, "expert_model_rejected");
 });

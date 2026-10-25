@@ -45,7 +45,7 @@ npm run typecheck
 
 生产四项 P3 开关已按用户指示启用；双用户连通性测试消息均获 iLink `accepted`，且两台手机均已确认收到。跨日投递、失效恢复与 GP 业务仍待验收，详见 [P3 运维与验收手册](docs/P3-OPERATIONS.md)。
 
-「赛道同业竞争看板」公开资料检索实现位于当前待评审分支：每个任务固定执行 4 次公开网页检索，至多抓取 3 个来源页，再整理为带来源链接与可得日期的 HTML 看板；没有可靠证据时保留“未披露／未检索到”提示。代码尚未合并、部署或由员工验收，见[实施记录](docs/logs/2026-10-26-P2-06-sector-peer-search.md)。
+「赛道同业竞争看板」公开资料检索已随 PR #100 合并并部署：每个任务固定执行 4 次公开网页检索，至多抓取 3 个来源页，再整理为带来源链接与可得日期的 HTML 看板；没有可靠证据时保留“未披露／未检索到”提示。2026-10-26 首次员工试用发现模型 JSON 请求被拒，修复与验收边界见[故障记录](docs/logs/2026-10-26-P2-06-sector-peer-model-reject.md)；修复尚未部署，不能视为真实业务验收通过。
 
 「前沿播客」已随 [PR #93](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/93) 合并：员工提交中文或英文话题，平台用双语检索词读取公开播客文字库，优先展示标题直接提及话题的节目；宁德时代/CATL、机器人/具身智能等常见中英别名会扩展检索。英文源节目使用该库中文版，缺少中文版的集数跳过。网页摘要为单文件静态 HTML（按 beautiful-article / reacticle 的 press 主题排版），并提供 Markdown 产物；要点与摘要标明是该库的整理稿且平台未逐条核验。检索排序增强已随 [PR #104](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/104) 合并（`281ac12`），尚未部署或做真实员工验收。员工摘要调整与全部可用匹配节目的展示另见[本轮实施记录](docs/logs/2026-10-26-P2-frontier-podcast-ux.md)；检索探测、验证与限制见[检索排序改进记录](docs/logs/2026-10-26-P2-frontier-podcast-search-quality.md)和[双语改进记录](docs/logs/2026-10-25-P2-frontier-podcast-bilingual.md)。
 
