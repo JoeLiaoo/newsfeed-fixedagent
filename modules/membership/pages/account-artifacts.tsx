@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
 import { Download, FileText, ChevronRight } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
@@ -37,9 +38,12 @@ const FILTERS = [
 /** My own task records and the products they left behind, across every expert. */
 export default function AccountArtifactsPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [offset, setOffset] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const offsetParam = Number(searchParams.get("offset") ?? 0);
+  const offset = Number.isSafeInteger(offsetParam) && offsetParam >= 0 ? Math.floor(offsetParam / PAGE_SIZE) * PAGE_SIZE : 0;
+  const requestedFilter = searchParams.get("state") ?? "";
+  const filter = FILTERS.some(entry => entry.id === requestedFilter) ? requestedFilter : "";
   const [nextOffset, setNextOffset] = useState<number | null>(null);
-  const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
@@ -69,7 +73,18 @@ export default function AccountArtifactsPage() {
   }, [offset, filter, reload]);
 
   function turn(next: number) {
-    setOffset(Math.max(0, next));
+    const params = new URLSearchParams(searchParams);
+    if (next > 0) params.set("offset", String(next));
+    else params.delete("offset");
+    setSearchParams(params);
+  }
+
+  function chooseFilter(next: string) {
+    const params = new URLSearchParams(searchParams);
+    if (next) params.set("state", next);
+    else params.delete("state");
+    params.delete("offset");
+    setSearchParams(params);
   }
 
   return <main className="mx-auto w-full max-w-4xl px-5 py-8">
@@ -78,7 +93,7 @@ export default function AccountArtifactsPage() {
     </header>
     <div className="mb-5 flex flex-wrap gap-2" aria-label="任务状态">
       {FILTERS.map(entry => <Button key={entry.label} type="button" size="sm" variant={filter === entry.id ? "default" : "outline"} aria-pressed={filter === entry.id}
-        onClick={() => { setFilter(entry.id); setOffset(0); }}>{entry.label}</Button>)}
+        onClick={() => chooseFilter(entry.id)}>{entry.label}</Button>)}
     </div>
     {error && <Alert role="alert" className="mb-5">{error} <Button type="button" size="sm" variant="outline" onClick={() => setReload(value => value + 1)}>重试</Button></Alert>}
     {loading

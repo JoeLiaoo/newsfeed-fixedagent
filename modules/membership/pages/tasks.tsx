@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
@@ -27,7 +28,9 @@ function timestamp(value: string) { const date = new Date(value); return Number.
 /** A paged, employee-wide history of tasks across every available expert. */
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [offset, setOffset] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const offsetParam = Number(searchParams.get("offset") ?? 0);
+  const offset = Number.isSafeInteger(offsetParam) && offsetParam >= 0 ? Math.floor(offsetParam / EXPERT_TASK_PAGE_SIZE) * EXPERT_TASK_PAGE_SIZE : 0;
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [paging, setPaging] = useState(false);
@@ -40,11 +43,16 @@ export default function TasksPage() {
     const data = await response.json() as { tasks: Task[]; pagination: { nextOffset: number | null } };
     setTasks(data.tasks);
     setNextOffset(data.pagination.nextOffset);
-    setOffset(pageOffset);
     setError("");
   }, []);
 
-  useEffect(() => { void load(0).catch(() => setError("任务记录加载失败，请重试。" )).finally(() => setLoading(false)); }, [load]);
+  useEffect(() => {
+    setLoading(true);
+    setPaging(true);
+    void load(offset)
+      .catch(() => setError("任务记录加载失败，请重试。"))
+      .finally(() => { setLoading(false); setPaging(false); });
+  }, [load, offset]);
   useEffect(() => {
     if (!tasks.some(task => ["queued", "running", "waiting_input"].includes(task.state))) return;
     const timer = setInterval(() => { void load(offset).catch(() => undefined); }, 5000);
@@ -52,9 +60,10 @@ export default function TasksPage() {
   }, [load, offset, tasks]);
 
   async function turn(next: number) {
-    setPaging(true);
-    try { await load(next); } catch { setError("任务记录加载失败，请重试。" ); }
-    finally { setPaging(false); }
+    const params = new URLSearchParams(searchParams);
+    if (next > 0) params.set("offset", String(next));
+    else params.delete("offset");
+    setSearchParams(params);
   }
 
   return <main className="mx-auto w-full max-w-5xl px-5 py-8">
@@ -66,7 +75,10 @@ export default function TasksPage() {
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle>全部任务</CardTitle>
-        <Button type="button" variant="outline" size="sm" disabled={paging} onClick={() => void turn(offset)}><RefreshCw size={14} aria-hidden="true" />刷新</Button>
+        <Button type="button" variant="outline" size="sm" disabled={paging} onClick={() => {
+          setPaging(true);
+          void load(offset).catch(() => setError("任务记录加载失败，请重试。" )).finally(() => setPaging(false));
+        }}><RefreshCw size={14} aria-hidden="true" />刷新</Button>
       </CardHeader>
       <CardContent>
         {loading ? <p className="text-sm text-ink-3" role="status">正在加载任务记录…</p>

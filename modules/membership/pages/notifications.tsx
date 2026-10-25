@@ -133,7 +133,7 @@ export default function NotificationsPage(){
           <Button asChild className="justify-self-start"><a href={scan.qrUrl} target="_blank" rel="noopener noreferrer"><ExternalLink aria-hidden="true" />打开微信官方二维码</a></Button>
           <p className="text-sm text-ink-3">{scanStatusText(scan.status)}</p>
           {scan.status==="need_verifycode"&&<div className="flex gap-2">
-            <input value={verifyCode} onChange={e=>setVerifyCode(e.target.value)} placeholder="微信要求的验证码" className="min-w-0 rounded-control border border-line px-3 py-2" inputMode="numeric" maxLength={8} />
+            <input value={verifyCode} onChange={e=>setVerifyCode(e.target.value)} placeholder="微信要求的验证码" className="min-w-0 rounded-control border border-line px-3 py-2 text-base sm:text-sm" inputMode="numeric" maxLength={8} />
             <Button disabled={busy||!/^[0-9]{4,8}$/.test(verifyCode)} onClick={()=>void submitVerification()}>验证</Button>
           </div>}
         </div>:<Button disabled={busy||!data?.bindingAvailable} onClick={()=>void startScan()} className="justify-self-start">扫码绑定微信</Button>}
