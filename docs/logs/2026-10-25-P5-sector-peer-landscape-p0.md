@@ -42,7 +42,7 @@
 
 ## 目录展示修复（2026-10-25）
 
-- 现象与结论：「赛道同业竞争看板」卡片缺失、「企业舆情报告」仍显示「开发中」的观察来自**发布前**的会话，不是发布后的目录。Nginx 访问日志里 `GET /api/v1/membership/experts` 在 18:59（发布前，release `bd4b150`）返回 674 字节的旧目录，在 19:48:59（发布后，release `b8eb08b`，第一位员工打开目录）返回 739 字节的新目录，之后三次请求同为 739 字节；生产 `member_experts` 里 `sector-peer-landscape` 行的 `created_at` 为 2026-10-25 11:48:59Z，正是那次请求触发的惰性播种。当前生产目录正确：新卡片 `available`，旧舆情行 `hidden`。
+- 现象与结论：「赛道同业竞争看板」卡片缺失、「企业舆情报告」仍显示「开发中」的观察来自**发布前**的会话，不是发布后的目录（[PR #81](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/81)）。Nginx 访问日志里 `GET /api/v1/membership/experts` 在 18:59（发布前，release `bd4b150`）返回 674 字节的旧目录，在 19:48:59（发布后，release `b8eb08b`，第一位员工打开目录）返回 739 字节的新目录，之后三次请求同为 739 字节；生产 `member_experts` 里 `sector-peer-landscape` 行的 `created_at` 为 2026-10-25 11:48:59Z，正是那次请求触发的惰性播种。当前生产目录正确：新卡片 `available`，旧舆情行 `hidden`。
 - 真正的缺陷（发布后目录仍可能停在旧行）：目录播种只在 `GET /api/v1/membership/experts` 鉴权通过后执行，setup 容器不播种，所以发布后的库里仍是旧行（旧舆情 `coming_soon`、没有新卡片行），要等第一位员工打开目录才收敛；并且 `sector-peer-landscape` 的 `ON CONFLICT` 分支没有把 `status` 写回，一行已经存在的旧状态（如 `coming_soon`）不会被下一次播种纠正，目录会继续以「开发中」显示这张卡片，创建任务也会被 `expert_coming_soon` 拒绝。
 - 修改文件：`modules/membership/experts/seed.ts`（新增）把平台自带专家的播种从路由里搬出来，并给 `sector-peer-landscape` 的冲突分支补上 `status = EXCLUDED.status`；`modules/membership/experts/routes.ts` 改为调用搬出的播种；`modules/membership/package.json` 导出 `./experts/seed`；`scripts/seed.ts` 在 setup 阶段调用它，发布时目录即收敛，不再依赖第一位员工登录；`modules/membership/tests/expert-catalog-seed.test.ts`（新增）覆盖「旧行状态 → setup 播种 → 目录列出新卡片、隐藏旧入口、新卡片可建任务」，并加入 CI 的 postgres-integration 列表。
 - 关键决定：不用迁移回填数据——仓库的在线迁移词表（`scripts/migration-safety.ts`）只接受结构变更与并发索引，写数据的回填要走 setup 之外的路径；因此收敛放在 setup 播种里，迁移数为 0。全景图那一行的 `status` 仍不写回，保持原行为；P0 的看板 HTML、`beijingStamp` 时间戳与任务接口均未改动。
