@@ -49,18 +49,49 @@ export type PodcastEpisode = PodcastMatch & {
   focus: string[];
 };
 
-/** Common bilingual topic terms, available even when the model cannot expand a query. */
-const BILINGUAL_TERMS: [string, string][] = [
-  ["具身智能", "embodied intelligence"], ["机器人", "robotics"],
+/** High-confidence search aliases, available even when the model cannot expand a query. */
+const BILINGUAL_TERMS: string[][] = [
+  ["具身智能", "embodied intelligence", "robotics", "机器人", "embodied ai", "具身"],
+  ["机器人", "robotics", "具身智能", "embodied intelligence", "robot", "具身"],
+  ["宁德时代", "catl"],
   ["人工智能", "artificial intelligence"], ["半导体", "semiconductors"],
-  ["大模型", "large language models"], ["自动驾驶", "autonomous driving"],
+  ["大模型", "large language models", "llm"], ["自动驾驶", "autonomous driving"],
   ["生物技术", "biotechnology"], ["气候科技", "climate tech"],
 ];
 
 export function podcastQueryVariants(query: string): string[] {
   const normalized = query.trim().toLocaleLowerCase();
-  const pair = BILINGUAL_TERMS.find(([zh, en]) => normalized === zh || normalized === en);
-  return pair ? [normalized === pair[0] ? pair[1] : pair[0]] : [];
+  const preferredVariants: Record<string, string[]> = {
+    "具身智能": ["embodied intelligence", "robotics"],
+    "embodied intelligence": ["具身智能", "robotics"],
+    "机器人": ["robotics", "具身智能"],
+    robotics: ["机器人", "具身智能"],
+  };
+  if (preferredVariants[normalized]) return preferredVariants[normalized]!;
+  const group = BILINGUAL_TERMS.find(terms => terms.some(term => term.toLocaleLowerCase() === normalized));
+  return group ? group.filter(term => term.toLocaleLowerCase() !== normalized) : [];
+}
+
+function topicAliases(query: string, queries: string[]): string[] {
+  const terms = [query, ...queries].map(term => term.trim().toLocaleLowerCase()).filter(Boolean);
+  for (const group of BILINGUAL_TERMS) {
+    if (group.some(term => terms.includes(term.toLocaleLowerCase()))) terms.push(...group.map(term => term.toLocaleLowerCase()));
+  }
+  return [...new Set(terms)];
+}
+
+/** Rank exact topic mentions above broad semantic/search matches while retaining every candidate. */
+export function podcastMatchRelevance(match: PodcastMatch, query: string, queries: string[]): number {
+  const aliases = topicAliases(query, queries);
+  const title = (match.title ?? "").toLocaleLowerCase();
+  const dek = (match.dek ?? "").toLocaleLowerCase();
+  let score = 0;
+  for (const alias of aliases) {
+    const isOriginal = alias === query.trim().toLocaleLowerCase();
+    if (title.includes(alias)) score = Math.max(score, isOriginal ? 110 : 100);
+    else if (dek.includes(alias)) score = Math.max(score, isOriginal ? 30 : 20);
+  }
+  return score;
 }
 
 /** What one search answered. `partial` marks a fallback match over a window of recent episodes. */
@@ -303,6 +334,14 @@ export async function collectPodcastEpisodes(query: string, options: { client?: 
       if (match && !seen.has(match.slug)) { seen.add(match.slug); ordered.push(match); }
     }
   }
+  // Search results can rank broad AI mentions above episodes whose title names the requested topic.
+  // Keep the library's order for ties and retain lower-scoring matches for recall.
+  const relevance = new Map(ordered.map((match, index) => [match.slug, { score: podcastMatchRelevance(match, original, queries), index }]));
+  ordered.sort((a, b) => {
+    const left = relevance.get(a.slug)!;
+    const right = relevance.get(b.slug)!;
+    return right.score - left.score || left.index - right.index;
+  });
   const episodes: PodcastEpisode[] = [];
   let failed = 0;
   let failureCode: string | null = null;

@@ -3,12 +3,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { collectPodcastEpisodes, createPodcastClient, PodcastSourceError, podcastSummaryUrl } from "../experts/bidclub.ts";
+import { collectPodcastEpisodes, createPodcastClient, PodcastSourceError, podcastQueryVariants, podcastSummaryUrl } from "../experts/bidclub.ts";
 import { FRONTIER_PODCAST_EXPERT, FRONTIER_PODCAST_EXPERT_SLUG, HTML_PREVIEW_EXPERT_SLUGS, PANORAMA_EXPERT_SLUG, QUERY_EXPERT_SLUGS } from "../experts/catalog.ts";
 import { renderFrontierPodcastHtml } from "../experts/frontier-podcast-html.ts";
 import { renderFrontierPodcastMarkdown } from "../experts/frontier-podcast-markdown.ts";
 import type { FrontierPodcastView } from "../experts/frontier-podcast-view.ts";
-import type { PodcastEpisode } from "../experts/bidclub.ts";
+import type { PodcastEpisode, PodcastMatch } from "../experts/bidclub.ts";
 
 const SEARCH_PAYLOAD = {
   q: "具身智能",
@@ -122,6 +122,31 @@ test("the library client reads the search and one episode as the service answere
   assert.deepEqual(read.focus, ["公司建设", "技术"]);
 });
 
+test("high-confidence bilingual variants cover CATL and embodied robotics synonyms", () => {
+  assert.deepEqual(podcastQueryVariants("宁德时代"), ["catl"]);
+  assert.deepEqual(podcastQueryVariants("CATL"), ["宁德时代"]);
+  assert.ok(podcastQueryVariants("具身智能").includes("robotics"));
+  assert.ok(podcastQueryVariants("embodied intelligence").includes("具身智能"));
+  assert.ok(podcastQueryVariants("机器人").includes("robotics"));
+});
+
+test("title-relevant episodes rank ahead of broad semantic matches", async () => {
+  const asMatch = (slug: string, title: string, dek: string): PodcastMatch => ({ slug, title, dek, showName: null, date: null, publishedAt: null, durationMin: null, lang: "EN", sourceUrl: null, sourceLabel: null });
+  const broad = asMatch("broad", "AI and the Future", "A general AI discussion.");
+  const topical = asMatch("topical", "184: Embodied Robotics Quarterly", "A robotics discussion.");
+  const client = {
+    search: async (term: string) => ({
+      matches: term === "embodied intelligence" ? [broad, topical] : [],
+      count: term === "embodied intelligence" ? 2 : 0,
+      partial: true,
+      searchedRecent: 300,
+    }),
+    episode: async (slug: string) => episode({ slug, title: slug === "topical" ? topical.title : broad.title, lang: "EN", tldrLang: "ZH", digestLang: "ZH" }),
+  };
+  const collected = await collectPodcastEpisodes("embodied intelligence", { client });
+  assert.equal(collected.episodes[0]?.slug, "topical");
+});
+
 test("an episode without a Chinese text keeps the language it does have", async () => {
   // The library keeps the text of an episode in `lang` and the other language in `lang_alt`.
   const englishOnly = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: stubFetch({ "en-only": { ...EPISODE_PAYLOAD, slug: "en-only", lang: "EN", lang_alt: null, tldr_md: "- English points.", tldr_md_alt: null, digest_md: "### English", digest_md_alt: null } }) as typeof fetch });
@@ -156,7 +181,7 @@ test("a Chinese topic also finds English-source episodes through the English sea
       dek: slug === "en" ? "English introduction" : "中文导语。" });
   }) as typeof fetch });
   const collected = await collectPodcastEpisodes("具身智能", { client });
-  assert.deepEqual(queries, ["具身智能", "embodied intelligence"]);
+  assert.deepEqual(queries, ["具身智能", "embodied intelligence", "robotics"]);
   assert.deepEqual(collected.episodes.map(item => item.slug), ["zh", "en", "shared"]);
   assert.equal(collected.count, 3, "a shared slug is deduplicated");
   const english = collected.episodes[1]!;
@@ -196,7 +221,7 @@ test("an English query searches Chinese too, and a failed expansion stays intern
     episode: async () => episode({ slug: "en", lang: "EN", tldrLang: "ZH", digestLang: "ZH" }),
   };
   const collected = await collectPodcastEpisodes("embodied intelligence", { client });
-  assert.deepEqual(calls, ["embodied intelligence", "具身智能"]);
+  assert.deepEqual(calls, ["embodied intelligence", "具身智能", "robotics"]);
   assert.equal(collected.searchFailed, true);
   assert.equal(collected.episodes.length, 1);
   const markdown = renderFrontierPodcastMarkdown(view({ episodes: collected.episodes, queries: collected.queries, searchFailed: true }));
