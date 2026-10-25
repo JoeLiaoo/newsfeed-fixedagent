@@ -202,6 +202,14 @@
 - web、API、worker 运行 `citic-newsfeed:8a1a3cf6d5e6b7ad17c83647debcf51a801deea3`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 与 `/favicon.ico` 返回 200，`/experts`、`/experts/frontier-podcast`、`/experts/outbound-investment-panorama`、`/tasks`、`/knowledge` 按会话鉴权 302 跳转登录页。随镜像发布的回归用例在生产镜像内 `--network none` 跑通 141/141。
 - 「前沿播客」的目录、提交、网页预览与 Markdown 下载，以及 `/tasks` 与全景图「宁德时代」排序均未做登录后验收，详见[PR #87 部署日志](logs/2026-10-25-P4-pr87-deployment.md)。
 
+### PR #92 全景图品牌前缀关系提示发布（2026-10-25）
+
+- [PR #92](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/92) 已 squash 合并，提交 `7858842dc2c04d1f2e1b1527df05b66fcd152e4d` 已发布到 `/opt/citic-newsfeed/releases/7858842dc2c04d1f2e1b1527df05b66fcd152e4d`。该版本为短品牌前缀查询（如「宁德时代」）的候选补上关系提示：「母公司候选」「分支机构」，并在登记名重复时按大陆统一社会信用代码去重；`/experts/:slug` 与 `/tasks/:id` 共用同一条规则。
+- 发布前确认生产 release 为 `8a1a3cf`（PR #87）。发布前保存 `.env.before-release-7858842-20261025` 与 `backups/db-before-7858842-20261025.dump`，权限均为 `0600`，转储经 `pg_restore --list` 检查可读（未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变。
+- **0 条新迁移**：PR #92 只改专家数据与界面，setup 输出 `database is up to date`，`schema_migrations` 164 → 164（最大仍为 `0190`），信源 0 新增、26 条已存在。
+- web、API、worker 运行 `citic-newsfeed:7858842dc2c04d1f2e1b1527df05b66fcd152e4d`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 与 `/favicon.ico` 返回 200，`/experts`、`/experts/outbound-investment-panorama`、`/tasks`、`/tasks/x1` 按会话鉴权 302 跳转登录页。
+- 候选徽标的登录后人工复测仍未完成，详见[PR #92 部署日志](logs/2026-10-25-P4-pr92-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
