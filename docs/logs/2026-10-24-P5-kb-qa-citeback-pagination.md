@@ -59,3 +59,8 @@
 - `npx tsc -p modules`：通过；知识库 standalone：33/33 通过；知识库访问与多库数据库测试：2/2 通过（本机 PostgreSQL）；`node scripts/check-doc-links.ts`：485 个链接通过；`git diff --check`：通过。
 - `hasCheckpoint` 与员工采集台账下载入口检查：未在 `/tasks`、任务详情页或专家详情页发现相关 UI/API 引用。
 - 当前复基提交为 `dd6b245`。未部署；真实员工验收仍待执行，P5-02～P5-04 保持未勾选。
+
+## 2026-10-26 合并状态
+
+- PR #56 基于 PR #55 合并后的 main 复基，`links`、`quality`、`postgres-integration` 全部通过，已 squash 合并为 `c207c01d122778a8611183bf66878ece05050ea8`。
+- 尚未部署；P5-02～P5-04 的真实员工验收待执行。

@@ -58,3 +58,8 @@ PR：[#58](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/58)，分支 `fe
 - `postgres-integration`（含新增的 `knowledge-answer-history.test.ts`，数据库用例 33/33）：通过。
 - `links`（文档链接 386 个）：通过。
 - 这些结果来自复基前的 tip `23557f1`，不代表 2026-10-26 复基 head 的 CI 状态。
+
+## 2026-10-26 合并状态
+
+- PR #58 基于 PR #55/#56 合并后的 main 复基，`links`、`quality`、`postgres-integration` 全部通过，已 squash 合并为 `b2dd6f872dabe83e5d955d770ad31f7a9f1482a9`。
+- 尚未部署；P5-02～P5-04 的真实员工验收待执行。
