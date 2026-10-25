@@ -62,3 +62,11 @@
   - 复审本 PR；本 PR 不合并、不部署。
   - 合并后按常规发布流程发 api 与 web（无新增迁移），再用两份不同机构、不同日期的真实材料跑一次构建，核对：两份材料在目标页并列、缺失项显示「未知」、时效按材料自己的日期给出。
   - PR：[#55](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/55)（`feat/kb-attribution-harden-v1` → `main`，代码提交 `6af2b75`）。本 PR 不合并、不部署。
+
+## 2026-10-26 基于最新 main 的复基与验证
+
+- 将 PR #55 复基到当前 `origin/main`（含 #86、#97、#100 等后续合并）；保留主线材料正文加载和关联页解析，同时整合本 PR 的时间线材料、修订记录、来源分页和未知归因显示。
+- 解决冲突的文件：`docs/IMPLEMENTATION.md`、`docs/README.md`、`modules/membership/knowledge/routes.ts`、`modules/membership/pages/knowledge-base.tsx`、`modules/membership/pages/knowledge-document.tsx`、`modules/membership/pages/knowledge-target.tsx`。
+- 验证：`npx tsc -p modules` 通过；知识库 standalone 33/33 通过；知识库访问与多库数据库测试 2/2 通过（本机 PostgreSQL）；文档链接 482 条通过；`git diff --check` 通过。
+- 全仓 `npm run typecheck` 在 `@aihot/web` 处失败：当前 worktree 未安装 `@radix-ui/react-dropdown-menu` 与 `@radix-ui/react-toggle-group`，并引发 `Tabs.tsx` 中的隐式 any 错误；模块 TypeScript 检查通过，GitHub CI 新 head 检查仍须完成。
+- 复基 head：`657eab7`。本次未部署，未进行真实员工验收；P5-02～P5-04 继续未勾选。
