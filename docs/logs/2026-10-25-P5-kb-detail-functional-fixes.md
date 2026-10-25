@@ -1,8 +1,8 @@
 # 2026-10-25 · P5 知识库详情功能测试修复
 
 - 对应任务：P5-02～P5-04 的生产详细功能测试维护；真实员工验收标准尚未满足，实施计划勾选不变。
-- 基线：用户报告生产与本分支基线均为 `46a5b38`。本轮没有连接或修改生产。
-- [PR #77](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/77) 已创建，状态 Open；未合并或部署。
+- 基线：用户报告生产与本分支基线均为 `46a5b38`。本轮实现阶段没有连接或修改生产。
+- [PR #77](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/77) 已合并（squash 提交 `bd4b150afb49cebb408215713827b1e02b8ed432`），并已随该提交发布到生产；发布过程、备份路径与未验收项见[PR #77 发布记录](2026-10-25-P4-pr77-deployment.md)。
 
 ## 本次改动
 
