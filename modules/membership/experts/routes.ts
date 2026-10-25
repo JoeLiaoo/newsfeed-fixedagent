@@ -5,7 +5,7 @@ import { enqueueOn } from "@aihot/backend/jobs/queue";
 import type { MemberSession } from "../server.ts";
 import { EXPERT_QUEUE } from "./queue.ts";
 import { parseSkillUpload, expertSlug, executionMode } from "./import.ts";
-import { COMING_SOON_EXPERT_STATUS, EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, SECTOR_PEER_EXPERT_SLUG } from "./catalog.ts";
+import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, QUERY_EXPERT_SLUGS, SECTOR_PEER_EXPERT_SLUG } from "./catalog.ts";
 import { seedBuiltinExperts } from "./seed.ts";
 import { parseTaskMaterials, MAX_TOTAL_MATERIAL_BYTES } from "./materials.ts";
 import { getTaskArtifact } from "./worker.ts";
@@ -38,9 +38,9 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     if (!user) return reply.code(401).send({ error: "login_required" });
     await seedBuiltinExperts();
     const experts = await sql<{ slug: string; name: string; description: string; version: string; status: string; missing_dependencies: string[]; execution_mode: string; created_at: Date }[]>`
-      SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${PANORAMA_EXPERT_SLUG} THEN 'xinhua_panorama' WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
+      SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${PANORAMA_EXPERT_SLUG} THEN 'xinhua_panorama' WHEN slug=${FRONTIER_PODCAST_EXPERT_SLUG} THEN 'podcast_search' WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
       WHERE status <> ${HIDDEN_EXPERT_STATUS} AND (status IN ('available', ${COMING_SOON_EXPERT_STATUS}) OR owner_id = ${user.id} OR ${user.role === "admin"})
-      ORDER BY (status = 'available') DESC, (slug = ${PANORAMA_EXPERT_SLUG}) DESC, (slug = ${SECTOR_PEER_EXPERT_SLUG}) DESC, created_at DESC`;
+      ORDER BY (status = 'available') DESC, (slug = ${PANORAMA_EXPERT_SLUG}) DESC, (slug = ${SECTOR_PEER_EXPERT_SLUG}) DESC, (slug = ${FRONTIER_PODCAST_EXPERT_SLUG}) DESC, created_at DESC`;
     return { experts };
   });
 
@@ -122,13 +122,22 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     // A hidden builtin is not offered as a catalog entry, so it reads as absent: it starts no task.
     const hidden = (typeof slug === "string" && HIDDEN_BUILTIN_SLUGS.has(slug)) || expert?.status === HIDDEN_EXPERT_STATUS;
     if (hidden || !expert || expert.status !== "available") return reply.code(404).send({ error: hidden || !expert ? "expert_not_found" : "expert_dependencies_missing" });
-    const mode = slug === EXPERT_SLUG ? "xinhua_trial" : slug === PANORAMA_EXPERT_SLUG ? "xinhua_panorama" : executionMode(expert.manifest);
+    const mode = slug === EXPERT_SLUG ? "xinhua_trial" : slug === PANORAMA_EXPERT_SLUG ? "xinhua_panorama" : slug === FRONTIER_PODCAST_EXPERT_SLUG ? "podcast_search" : executionMode(expert.manifest);
     if (mode === "xinhua_trial" && companyName.length < 2) return reply.code(400).send({ error: "company_name_required" });
     if (mode === "xinhua_panorama" && companyName.length < 2) return reply.code(400).send({ error: "company_name_required" });
     if (slug === SECTOR_PEER_EXPERT_SLUG && [...query.trim()].filter(char => /[\p{Script=Han}\p{Script=Latin}]/u.test(char)).length < 2) return reply.code(400).send({ error: "sector_query_required" });
-    if (slug !== EXPERT_SLUG && slug !== PANORAMA_EXPERT_SLUG && slug !== SECTOR_PEER_EXPERT_SLUG && notes.length < 2) return reply.code(400).send({ error: "task_text_required" });
+    // The podcast expert takes the topic the employee wants to hear about; the library needs at least
+    // two characters to search and refuses more than a hundred, so both ends are checked here.
+    if (slug === FRONTIER_PODCAST_EXPERT_SLUG) {
+      const characters = [...query.trim()].filter(char => /[\p{Script=Han}\p{Script=Latin}\p{Nd}]/u.test(char)).length;
+      if (characters < 2 || query.trim().length > 100) return reply.code(400).send({ error: "podcast_query_required" });
+    }
+    // A written brief is what a custom expert runs on. The shipped experts read an entity or a topic
+    // instead, so they start without one.
+    const slugText = typeof slug === "string" ? slug : "";
+    if (!BUILTIN_SLUGS.has(slugText) && !QUERY_EXPERT_SLUGS.has(slugText) && notes.length < 2) return reply.code(400).send({ error: "task_text_required" });
     const id = taskId();
-    const input = { ...(slug === SECTOR_PEER_EXPERT_SLUG ? { query } : mode === "text_only" ? {} : { companyName }), notes };
+    const input = { ...(QUERY_EXPERT_SLUGS.has(slugText) ? { query } : mode === "text_only" ? {} : { companyName }), notes };
     const rawKey = req.headers["idempotency-key"];
     const idempotencyKey = typeof rawKey === "string" && /^[a-zA-Z0-9._:-]{8,128}$/.test(rawKey) ? rawKey : null;
     const accepted = await sql.begin(async tx => {
