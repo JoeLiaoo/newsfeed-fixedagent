@@ -9,7 +9,7 @@ import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_SLUG, FRONTIER_PODCAST
 import { seedBuiltinExperts } from "./seed.ts";
 import { parseTaskMaterials, MAX_TOTAL_MATERIAL_BYTES } from "./materials.ts";
 import { getTaskArtifact } from "./worker.ts";
-import { expertTaskPagination, parseExpertTaskPage } from "./task-page.ts";
+import { parseTaskPage, taskPagination, type TaskPageQuery } from "./task-query.ts";
 
 type Authenticate = (request: FastifyRequest, allowPending?: boolean) => Promise<MemberSession | null>;
 
@@ -29,6 +29,9 @@ function body(req: FastifyRequest): Record<string, unknown> {
 }
 
 function taskId() { return randomBytes(16).toString("hex"); }
+
+/** The list preview is enough to recognise a task without returning the full private brief. */
+const NOTES_PREVIEW = 200;
 
 export function registerExpertRoutes(app: FastifyInstance, authenticate: Authenticate) {
   app.get("/api/v1/membership/experts", async (req, reply) => {
@@ -68,19 +71,21 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     noStore(reply);
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
-    const page = parseExpertTaskPage(req.query as { limit?: unknown; offset?: unknown; expertSlug?: unknown });
-    if (!page) return reply.code(400).send({ error: "invalid_query" });
-    const slugFilter = page.expertSlug ? sql`AND t.expert_slug = ${page.expertSlug}` : sql``;
-    const rows = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
+    const parsed = parseTaskPage(req.query as TaskPageQuery);
+    if (!parsed.ok) return reply.code(400).send({ error: parsed.error });
+    const { limit, offset, expertSlug, states } = parsed.page;
+    const slugFilter = expertSlug ? sql`AND t.expert_slug = ${expertSlug}` : sql``;
+    const stateFilter = states.length ? sql`AND t.state = ANY(${sql.array(states)}::text[])` : sql``;
+    const rows = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage,
+        json_build_object('companyName', t.input->>'companyName', 'query', t.input->>'query', 'notes', left(coalesce(t.input->>'notes',''), ${NOTES_PREVIEW}), 'notesTruncated', length(coalesce(t.input->>'notes','')) > ${NOTES_PREVIEW}) AS input,
         t.selected_entity AS "selectedEntity", t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
         t.expires_at AS "expiresAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
         COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
-      WHERE t.user_id=${user.id} AND t.expires_at > now() ${slugFilter}
-      ORDER BY t.created_at DESC, t.id DESC LIMIT ${page.limit + 1} OFFSET ${page.offset}`;
-    const tasks = rows.slice(0, page.limit);
-    return { tasks, pagination: expertTaskPagination(page.limit, page.offset, rows.length) };
+      WHERE t.user_id=${user.id} AND t.expires_at > now() ${slugFilter} ${stateFilter}
+      ORDER BY t.created_at DESC, t.id DESC LIMIT ${limit + 1} OFFSET ${offset}`;
+    return { tasks: rows.slice(0, limit), pagination: taskPagination(limit, offset, rows.length) };
   });
 
   app.get("/api/v1/membership/expert-tasks/:id", async (req, reply) => {

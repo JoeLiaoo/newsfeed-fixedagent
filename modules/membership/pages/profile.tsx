@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { Bell, ChevronRight, LogOut, SlidersHorizontal } from "lucide-react";
+import { Bell, ChevronRight, FolderOpen, LogOut, SlidersHorizontal } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Button } from "@aihot/web/components/member-ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@aihot/web/components/member-ui/card";
@@ -38,6 +38,9 @@ export default function ProfilePage() {
         </Button>
         <Button asChild variant="outline" size="lg" className="h-auto min-h-14 w-full justify-start whitespace-normal text-left">
           <Link to="/settings/notifications"><Bell aria-hidden="true" />绑定微信<ChevronRight aria-hidden="true" className="ml-auto" /></Link>
+        </Button>
+        <Button asChild variant="outline" size="lg" className="h-auto min-h-14 w-full justify-start whitespace-normal text-left">
+          <Link to="/account/artifacts"><FolderOpen aria-hidden="true" />我的任务与产物<ChevronRight aria-hidden="true" className="ml-auto" /></Link>
         </Button>
         <Button type="button" variant="outline" size="lg" disabled={busy} onClick={() => void logout()} className="h-auto min-h-14 w-full cursor-pointer justify-start whitespace-normal text-left">
           <LogOut aria-hidden="true" />退出登录
