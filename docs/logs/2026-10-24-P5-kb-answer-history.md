@@ -2,7 +2,7 @@
 
 - Agent：pi（MiniMax-M3.1-Flash）
 - 对应任务：维护任务（补充 P5-04 的可用性，不改动 P5-02～P5-04 的验收勾选）
-- 完成状态：代码与测试完成，PR 已开，未合并、未部署；真实员工验收待执行
+- 完成状态：PR #58 已于 2026-10-26 合并（`b2dd6f8`），已随 release `55244fc` 发布到生产；真实员工验收待执行
 
 ## 本次改动
 
@@ -63,3 +63,9 @@ PR：[#58](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/58)，分支 `fe
 
 - PR #58 基于 PR #55/#56 合并后的 main 复基，`links`、`quality`、`postgres-integration` 全部通过，已 squash 合并为 `b2dd6f872dabe83e5d955d770ad31f7a9f1482a9`。
 - 尚未部署；P5-02～P5-04 的真实员工验收待执行。
+
+## 2026-10-26 生产发布
+
+- 已随 release `55244fc81cde5e88dbde777b1c59d62826204245`（短 `55244fc`）发布到火山云 `ai-work` 生产；发布窗口 2026-10-26 01:42–01:56，0 条新迁移（`schema_migrations` 仍为 164 条、最大 `0190`），镜像内 membership 回归 158/158 通过。
+- 问答记录与引用回跳代码已在最终运行镜像中确认（`enrichCitations`、`enrichAllCitations`、`readCoverage`、`readFreshness`）。
+- 登录后的员工侧复验仍待人工完成；本项的验收勾选状态不变。发布记录见[功能批次生产发布日志](2026-10-26-P4-feat-batch-deployment.md)。

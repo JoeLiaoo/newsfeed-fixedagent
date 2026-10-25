@@ -220,6 +220,18 @@
 - PR #93 的 `BILINGUAL_TERMS`、`podcastQueryVariants`、`expandQuery`、`skippedWithoutChinese` 与 `editorialSourceLabel` 均在运行镜像中确认存在；镜像内独立回归套件以 `--network none` 重跑 147/147 通过（上一版 144 条，新增 3 条来自 PR #93）。
 - Hermes 网关、Nginx、证书续期、数据库容器与命名卷未改动，四个 P3 开关保持 `true`，未清理旧发布目录与旧镜像。登录后用「具身智能」与「embodied intelligence」各跑一次前沿播客的复验仍待人工完成，详见[PR #93 部署日志](logs/2026-10-25-P4-pr93-deployment.md)。
 
+### 功能批次（PR #55–#59 / #69 + #103 + #104 / #105）发布（2026-10-26）
+
+- 本轮把整个功能批次发布到生产，最终生产版本为 `55244fc81cde5e88dbde777b1c59d62826204245`（短 `55244fc`，[PR #105](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/105) tip），发布目录 `/opt/citic-newsfeed/releases/55244fc81cde5e88dbde777b1c59d62826204245`。批次内容：PR #55（知识库归因与时间线可见性，P5-03）、PR #56（问答引用可跳回材料与原件、构建列表分页，P5-04）、PR #57（专家任务列表分页与按专家过滤）、PR #58（知识库问答记录，可回看自己的回答并跳回材料与原件）、PR #59（员工个人任务与产物库 `/account/artifacts`）、PR #69（知识库与专家任务停止接收 PPT 材料）、文档同步 PR #103，以及前沿播客检索排序改进 PR #104（`281ac12`）。[PR #60](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/60) 已关闭且未合并（功能被 PR #86 覆盖），本轮没有从它发布任何内容。
+- 发布前公网 `/api/health` 仍为上一版 `cc1a5afef96415e6829982479cfa41485b95b697`（PR #100，2026-10-26 00:50–00:56 的上一轮发布），与预期一致后才开始发布。任务预期 tip 为 `6cd7739`（PR #103），首次拉取时 `origin/main` 恰为该 SHA；**窗口内 `origin/main` 又移动两次**（PR #104 `281ac12`、PR #105 `55244fc`），两次都重新拉取、确认为 `6cd7739` 的快进并用同一流程重新发布，最终版本为 `55244fc`。
+- **0 条新迁移（三个版本都是）**：`git diff cc1a5af..6cd7739 -- '*.sql'` 为空，三个发布目录各含 164 个 `.sql` 文件。setup 先于新代码上线运行，每个版本退出码均为 0，输出「database is up to date / sources: 0 added, 26 already there / experts: the platform's own catalog entries are in place」；`schema_migrations` 164 → 164，最大版本仍是 `0190_member_experts_status_coming_soon_validate.sql`。
+- 每个版本发布前分别保存 `.env.before-release-<sha>-20261026` 与 `backups/db-before-<sha>-20261026.dump`，权限均为 `0600`，转储在数据库容器内经 `pg_restore --list` 检查可读（573 条 TOC，未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变。
+- 构建使用 `-f docker-compose.yml -f compose.volcengine.yml` 并指定完整发布号，未产生游离的 `aihot-app` 镜像。web、API、worker 运行 `citic-newsfeed:55244fc81cde5e88dbde777b1c59d62826204245`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login`、`/register`、`/favicon.ico` 返回 200，`/experts`、`/experts/frontier-podcast`、`/experts/sector-peer-landscape`、`/experts/outbound-investment-panorama`、`/tasks`、`/knowledge`、`/knowledge-bases`、`/account/artifacts`、`/profile` 按会话鉴权 302 跳转登录页。
+- 本批次代码均在最终运行镜像中确认：`expert_material_format_unsupported`（PR #69）存在，旧允许清单 `pdf", "docx", "pptx", "markdown"]` 与知识库侧 `pdf", "docx", "markdown"]` 均为 0 处；`TASK_PAGE_SIZE = 20` 与 `parseTaskPage`／`taskPagination`（PR #57）存在；`enrichCitations`／`enrichAllCitations`／`readCoverage`／`readFreshness`（PR #55／#56／#58）存在；`AccountArtifactsPage` 与 `/account/artifacts` 路由（PR #59）存在；`podcastMatchRelevance` 与扩展别名组（PR #104）存在。web bundle 中含「我的任务与产物」「问答记录」「每页」，且全 bundle `grep -ril deepseek` 为 0 个文件（员工侧不出现供应商品牌名）。
+- 镜像内独立回归套件以 `--network none` 重跑：membership 范围 **158/158 通过**（发布前基线 `cc1a5af` 为 151/151），全量 `test:standalone` 范围 386／371 通过／15 失败——那 15 个失败在发布前基线镜像上完全相同，属既有环境性失败，非本次发布引入。
+- Hermes 网关、Nginx、证书续期、数据库容器与命名卷未改动，四个 P3 开关保持 `true`，未清理旧发布目录与旧镜像（发布目录与镜像各 28 → 31，三个版本都可按镜像 tag 回退）。**登录后未做任何人工冒烟**：任务分页与按专家过滤、问答记录与引用回跳、`/account/artifacts` 产物库、PPT 上传被拒、播客新排序都待员工复验；详见[功能批次发布日志](logs/2026-10-26-P4-feat-batch-deployment.md)。
+- 记录 release `e2daacd`（PR #96 + #97 + #99）的文档 PR [#101](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/101) 与记录 release `cc1a5af`（PR #100）的文档 PR [#102](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/102) **仍处于打开状态**，二者描述的是本轮之前的版本；合并时按发布顺序保留各自小节与日志文件即可。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。

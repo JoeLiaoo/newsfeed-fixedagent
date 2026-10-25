@@ -2,7 +2,7 @@
 
 - Agent：pi（MiniMax-M3.1-Flash）
 - 对应任务：维护任务（不对应 P0–P5 的新增勾选）；落实 `docs/PLAN.md` 4.2 的 `/account/artifacts` 路由
-- 完成状态：PR #59 已于 2026-10-26 合并（`0cd880f`）；未部署，真实员工试用待做
+- 完成状态：PR #59 已于 2026-10-26 合并（`0cd880f`），已随 release `55244fc` 发布到生产；真实员工试用待做
 
 ## 本次改动
 
@@ -54,3 +54,9 @@
 - PR #59 复基后的 head `45a3997` 上 `links`、`quality`、`postgres-integration` 全部通过，已 squash 合并为 `0cd880f83d05c6c496c5f3c3123ccab0a1d5cb22`。
 - 本机数据库集成测试因未设置 throwaway `DATABASE_URL` 未执行；GitHub PostgreSQL 集成检查通过。模块 TypeScript 与 6 项任务分页 standalone 用例通过；本机 web 类型检查因缺少 Radix 依赖未通过，GitHub `quality` 检查通过。
 - 尚未部署；真实员工页面、筛选及材料/产物下载体验待试用。P2-05 继续保持未勾选。
+
+## 2026-10-26 生产发布
+
+- 已随 release `55244fc81cde5e88dbde777b1c59d62826204245`（短 `55244fc`）发布到火山云 `ai-work` 生产；发布窗口 2026-10-26 01:42–01:56，0 条新迁移（`schema_migrations` 仍为 164 条、最大 `0190`），镜像内 membership 回归 158/158 通过。
+- 产物库页面与路由已在最终运行镜像中确认（`AccountArtifactsPage`、`我的任务与产物`、`/account/artifacts`）。
+- 登录后的员工侧复验仍待人工完成；本项的验收勾选状态不变。发布记录见[功能批次生产发布日志](2026-10-26-P4-feat-batch-deployment.md)。
