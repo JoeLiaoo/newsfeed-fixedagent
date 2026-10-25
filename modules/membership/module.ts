@@ -12,6 +12,7 @@ export const membershipModule: ModuleDeclaration = {
     { path: "experts/new", file: "pages/expert-new.tsx" },
     { path: "experts/:slug", file: "pages/expert-detail.tsx" },
     { path: "projects/invested-gp", file: "pages/projects/invested-gp.tsx" },
+    { path: "projects/invested-gp/:id", file: "pages/projects/invested-gp-detail.tsx" },
     { path: "projects/citic-alliance", file: "pages/projects/citic-alliance.tsx" },
     { path: "projects/market-leaders", file: "pages/projects/market-leaders.tsx" },
     { path: "knowledge", file: "pages/knowledge.tsx" },

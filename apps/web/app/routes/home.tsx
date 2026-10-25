@@ -5,6 +5,7 @@ import type { Screen } from "../components/shell/screens";
 import { beijingDate, beijingTime } from "@aihot/contracts/time";
 import { Button } from "../components/member-ui/button";
 import { Settings2 } from "lucide-react";
+import { oneDigestPerDay } from "./home-history.ts";
 
 export const handle: Screen = { tab: "featured", name: "我的日报" };
 type Digest = {
@@ -31,7 +32,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     fetch(`${API_BASE_URL}/api/v1/membership/digest/history`, { headers, cache: "no-store" }),
   ]);
   const history = historyResponse.ok ? (await historyResponse.json() as { digests: DigestHistory[] }).digests : [];
-  return { digest, history };
+  return { digest, history: oneDigestPerDay(history) };
 }
 export function headers() { return { "Cache-Control": "private, no-store", Vary: "Cookie" }; }
 export function meta() { return [{ title: "我的日报 · 中信私募ai平台" }]; }

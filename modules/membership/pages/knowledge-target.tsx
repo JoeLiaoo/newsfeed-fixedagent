@@ -37,6 +37,7 @@ export default function KnowledgeTargetPage() {
   const [citations, setCitations] = useState<Citation[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     const response = await fetch(`${ENDPOINT}pages/${encodeURIComponent(slug ?? "")}`);
@@ -47,10 +48,11 @@ export default function KnowledgeTargetPage() {
     setIssues(result.issues);
   }, [slug]);
 
-  useEffect(() => { void load().catch(() => setMessage("加载失败，请刷新重试。")); }, [load]);
+  useEffect(() => { void load().catch(() => setMessage("加载失败，请刷新重试。")).finally(() => setLoading(false)); }, [load]);
 
   if (!page) return <main className="mx-auto w-full max-w-4xl px-5 py-8">
     <h1 className="text-2xl font-semibold tracking-tight text-ink">知识页</h1>
+    {loading && <p className="mt-4 text-sm text-ink-3" role="status">正在加载知识页…</p>}
     {message && <Alert className="mt-4" role="status">{message}</Alert>}
     <p className="mt-4"><Link to="/knowledge" className="text-sm text-accent underline-offset-4 hover:underline">返回知识库</Link></p>
   </main>;

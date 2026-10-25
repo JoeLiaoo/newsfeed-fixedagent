@@ -23,6 +23,10 @@ test("GP project list requires an active member and only exposes approved active
   const cookie = (Array.isArray(setCookie) ? setCookie[0]! : setCookie!).split(";", 1)[0]!;
   const [member] = await sql<{ id: string }[]>`SELECT id FROM member_users WHERE username=${username}`;
 
+  const favicon = await app.inject({ method: "GET", url: "/favicon.ico" });
+  assert.equal(favicon.statusCode, 200);
+  assert.match(String(favicon.headers["content-type"]), /image\/x-icon/);
+
   const unauthorized = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects" });
   assert.equal(unauthorized.statusCode, 401);
   for (const url of [
@@ -48,19 +52,19 @@ test("GP project list requires an active member and only exposes approved active
     VALUES(${activeGp},${"有效GP-" + suffix},'gp-entity','gp','active','https://example.org/gp',${admin!.id}),
           (${pausedGp},${"暂停GP-" + suffix},'paused-entity','gp','paused','https://example.org/paused',${admin!.id}),
           (${candidateManager},${"非GP主体-" + suffix},'manager-entity','manager','candidate','https://example.org/company',${admin!.id})`;
-  const approvedId = randomUUID();
+  const approvedId = randomUUID(), observedId = randomUUID(), pausedInvestmentId = randomUUID(), nonGpInvestmentId = randomUUID();
   await sql`INSERT INTO member_gp_investments(id,gp_id,investee_key,investee_name,raw_evidence,status,sector_tags,approved_event_date,approved_source_url,approved_by,approved_at)
     VALUES(${approvedId},${activeGp},'approved','已核实企业',${sql.json({privateEvidence:"must not be returned"})},'verified',ARRAY['光伏']::text[],'2026-10-20'::date,'https://example.org/evidence',${admin!.id},now()),
-      (${randomUUID()},${activeGp},'observed','待复核企业',${sql.json({})},'observed',ARRAY['光伏']::text[],NULL,NULL,NULL,NULL),
+      (${observedId},${activeGp},'observed','待复核企业',${sql.json({})},'observed',ARRAY['光伏']::text[],NULL,NULL,NULL,NULL),
       (${randomUUID()},${activeGp},'baseline','历史基线企业',${sql.json({})},'baseline',ARRAY[]::text[],NULL,NULL,NULL,NULL),
       (${randomUUID()},${activeGp},'retracted','已撤回企业',${sql.json({})},'retracted',ARRAY['光伏']::text[],NULL,NULL,NULL,NULL),
-      (${randomUUID()},${pausedGp},'paused','暂停 GP 企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-20'::date,'https://example.org/evidence',${admin!.id},now()),
+      (${pausedInvestmentId},${pausedGp},'paused','暂停 GP 企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-20'::date,'https://example.org/evidence',${admin!.id},now()),
       (${randomUUID()},${activeGp},'unmatched','未匹配企业',${sql.json({})},'verified',ARRAY['风电']::text[],'2026-10-17'::date,'https://example.org/unmatched',${admin!.id},now()),
       (${randomUUID()},${activeGp},'strategic','战略配售企业',${sql.json({})},'verified',ARRAY['战略配售']::text[],'2026-10-18'::date,'https://example.org/strategic',${admin!.id},now()),
       (${randomUUID()},${activeGp},'custom','自定义标签企业',${sql.json({})},'verified',ARRAY['自定义储能']::text[],'2026-10-19'::date,'https://example.org/custom',${admin!.id},now()),
       (${randomUUID()},${activeGp},'substring','标签子串企业',${sql.json({})},'verified',ARRAY['用户侧储能系统']::text[],'2026-10-18'::date,'https://example.org/substring',${admin!.id},now()),
       (${randomUUID()},${activeGp},'unknown-date','未知日期企业',${sql.json({})},'verified',ARRAY['光伏']::text[],NULL,'https://example.org/unknown-date',${admin!.id},now()),
-      (${randomUUID()},${candidateManager},'non-gp','非GP主体企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-21'::date,'https://example.org/non-gp',${admin!.id},now())`;
+      (${nonGpInvestmentId},${candidateManager},'non-gp','非GP主体企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-21'::date,'https://example.org/non-gp',${admin!.id},now())`;
   const secondApprovedId = randomUUID();
   await sql`INSERT INTO member_gp_investments(id,gp_id,investee_key,investee_name,raw_evidence,status,sector_tags,approved_event_date,approved_source_url,approved_by,approved_at)
     VALUES(${secondApprovedId},${activeGp},'approved-older','较早核实企业',${sql.json({})},'verified',ARRAY[]::text[],'2026-09-20'::date,'https://example.org/older',${admin!.id},now())`;
@@ -82,9 +86,25 @@ test("GP project list requires an active member and only exposes approved active
   assert.equal("approved_at" in body.investments[0]!, false);
   assert.equal(body.pagination.nextOffset, 1);
 
+  const detailPath = `/api/v1/membership/gp-projects/${approvedId}`;
+  assert.equal((await app.inject({ method: "GET", url: detailPath })).statusCode, 401);
+  for (const hiddenId of [randomUUID(), observedId, pausedInvestmentId, nonGpInvestmentId]) {
+    assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/gp-projects/${hiddenId}`, headers: { cookie } })).statusCode, 404);
+  }
+  const detail = await app.inject({ method: "GET", url: detailPath, headers: { cookie } });
+  assert.equal(detail.statusCode, 200);
+  assert.equal(detail.headers["cache-control"], "private, no-store");
+  const investment = (await detail.json() as { investment: Record<string, unknown> }).investment;
+  assert.equal(investment.id, approvedId);
+  assert.equal(investment.investee_name, "已核实企业");
+  assert.equal(investment.source_url, null);
+  assert.equal(investment.source_placeholder, true);
+  assert.ok(!["raw_evidence", "approved_by", "approved_at", "gp_id"].some(field => field in investment));
+
   await sql`UPDATE member_users SET status='pending' WHERE id=${member!.id}`;
   const inactive = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects", headers: { cookie } });
   assert.equal(inactive.statusCode, 401);
+  assert.equal((await app.inject({ method: "GET", url: detailPath, headers: { cookie } })).statusCode, 401);
   await sql`UPDATE member_users SET status='active' WHERE id=${member!.id}`;
 
   await sql`INSERT INTO member_interest_tags(user_id,tag) VALUES(${member!.id},'光伏'),(${member!.id},'战略配售'),(${member!.id},'自定义储能'),(${member!.id},'储能')`;

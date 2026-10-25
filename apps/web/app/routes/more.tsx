@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useRouteLoaderData } from "react-router";
 import { Settings2 } from "lucide-react";
 import { POLICY, SITE } from "@aihot/site";
@@ -69,12 +69,25 @@ function RowLink({ row, dot = false }: { row: Row; dot?: boolean }) {
 
 export default function MorePage() {
   const root = useRouteLoaderData<typeof rootLoader>("root");
+  const [member, setMember] = useState<{ realName: string; username: string } | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/v1/membership/me", { signal: controller.signal })
+      .then(async response => {
+        if (response.status === 401) { location.href = "/login"; return; }
+        if (!response.ok) return;
+        const result = await response.json() as { user: { realName: string; username: string } };
+        setMember(result.user);
+      }).catch(() => undefined);
+    return () => controller.abort();
+  }, []);
   const changelogDot = useChangelogDot(root?.changelogVersion ?? null);
   const font = useFontPreference();
   return (
     <div className="mx-auto max-w-[var(--page-max-reading)] pb-8">
       <PhoneBar title="我的" large />
       <h1 className="hidden pb-4 pt-1 text-[22px] font-bold text-ink lg:block">我的</h1>
+      {member && <p className="px-4 text-sm text-ink-3"><span className="font-medium text-ink">{member.realName}</span> · @{member.username}</p>}
       <div className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-4 2xl:grid-cols-3">
         <section>
           <h2 className="px-4 pb-2 pt-6 text-[13px] font-semibold text-ink-3">导航</h2>

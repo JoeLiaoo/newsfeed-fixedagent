@@ -6,7 +6,7 @@ import { runPanorama, type PanoramaRunResult } from "../experts/panorama-run.ts"
 import { mapProfile, mapRelations, mapShareholders } from "../experts/panorama-fields.ts";
 import { renderPanorama } from "../experts/panorama-markdown.ts";
 import { executionMode } from "../experts/import.ts";
-import { BUILTIN_EXPERT, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG, XINHUA_ALLOWED_TOOLS } from "../experts/catalog.ts";
+import { BUILTIN_EXPERT, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG, XINHUA_ALLOWED_TOOLS, modeNeedsEntity } from "../experts/catalog.ts";
 import type { XinhuaCall } from "../experts/xinhua.ts";
 
 type Relation = Partial<PanoramaRelation>;
@@ -419,6 +419,17 @@ test("the employee-facing copy names capabilities, not data sources or models", 
   assert.ok(PANORAMA_EXPERT.description.length > 0 && !/悟道|新华财经|DeepSeek/i.test(PANORAMA_EXPERT.description));
   assert.ok(!/悟道|新华财经|DeepSeek|wudao/i.test(PANORAMA_EXPERT.skillMd), "内置专家的技能文本也要按能力表述");
   assert.equal(PANORAMA_EXPERT.slug, PANORAMA_EXPERT_SLUG);
+});
+
+test("panorama uses the expert detail form and shows its empty company error by the input", () => {
+  const module = readFileSync(new URL("../module.ts", import.meta.url), "utf8");
+  const detail = readFileSync(new URL("../pages/expert-detail.tsx", import.meta.url), "utf8");
+  assert.ok(module.includes('path: "experts/:slug", file: "pages/expert-detail.tsx"'));
+  assert.equal(PANORAMA_EXPERT.slug, PANORAMA_EXPERT_SLUG);
+  assert.equal(modeNeedsEntity("xinhua_panorama"), true);
+  assert.ok(detail.includes('companyName.trim().length < 2'));
+  assert.ok(detail.includes('onInvalid={() => setCompanyError('));
+  assert.ok(detail.includes('id="company-name-error"'));
 });
 
 
