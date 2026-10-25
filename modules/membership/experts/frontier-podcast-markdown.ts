@@ -1,7 +1,7 @@
 // The Markdown product of the 前沿播客 result: the points and the summary of every episode that was
 // read, in full, each with the source it came from. The file is what the employee keeps and quotes.
 import { beijingStamp } from "@aihot/contracts/time";
-import { clipped, countLine, coverageLine, dateLabel, durationLabel, languageLabel, MARKDOWN_TEXT_LIMIT, sourceLink, summaryDownloadUrl, type FrontierPodcastView } from "./frontier-podcast-view.ts";
+import { clipped, countLine, coverageLine, dateLabel, durationLabel, editorialSourceLabel, languageLabel, MARKDOWN_TEXT_LIMIT, sourceLink, summaryDownloadUrl, type FrontierPodcastView } from "./frontier-podcast-view.ts";
 
 function cell(value: string) {
   return value.replace(/[|\r\n\t]/g, " ").trim();
@@ -17,6 +17,8 @@ function episodeSection(view: FrontierPodcastView, index: number): string {
     ["日期", dateLabel(episode.date, episode.publishedAt)],
     ["时长", durationLabel(episode.durationMin)],
     ["摘要语言", languageLabel(episode.tldrLang ?? episode.digestLang)],
+    ["原节目语言", languageLabel(episode.lang)],
+    ["正文来源", editorialSourceLabel(episode)],
     ["参与者", episode.people.length ? episode.people.join("、") : "未提供"],
     ["标签", [...episode.sectors, ...episode.focus].join("、") || "未提供"],
   ].map(([key, value]) => `- ${key}：${cell(value!)}`);
@@ -47,7 +49,7 @@ export function renderFrontierPodcastMarkdown(view: FrontierPodcastView): string
   return [
     `# 前沿播客 · ${cell(view.query)}`,
     ``,
-    `> 公开播客文字库检索结果。要点与摘要是该库对原节目的整理稿，平台未逐条核验；引用前请回到来源页面核对。`,
+    `> 中英文检索的公开播客文字库结果。英文节目只收录该库提供中文正文的版本；正文来源逐集标明。要点与摘要是该库对原节目的整理稿，平台未逐条核验；引用前请回到来源页面核对。`,
     ``,
     `- 话题：${cell(view.query)}`,
     `- 收录：${cell(countLine(view))}`,

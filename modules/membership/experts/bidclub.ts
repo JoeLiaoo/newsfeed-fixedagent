@@ -6,7 +6,7 @@
 /** The public API root. Fixed on purpose: the service needs no credentials, so there is nothing to configure. */
 export const PODCAST_API_BASE = "https://bidclub.ai";
 
-/** How many episodes one task reads. The search returns up to 20 matches; the digest stays readable at six. */
+/** How many episodes one task includes. More candidates may be read when an English edition lacks Chinese. */
 export const PODCAST_MAX_EPISODES = 6;
 /** How many episodes are read at the same time. The library asks for modest parallelism. */
 export const PODCAST_FETCH_CONCURRENCY = 3;
@@ -50,6 +50,20 @@ export type PodcastEpisode = PodcastMatch & {
   sectors: string[];
   focus: string[];
 };
+
+/** Common bilingual topic terms, available even when the model cannot expand a query. */
+const BILINGUAL_TERMS: [string, string][] = [
+  ["具身智能", "embodied intelligence"], ["机器人", "robotics"],
+  ["人工智能", "artificial intelligence"], ["半导体", "semiconductors"],
+  ["大模型", "large language models"], ["自动驾驶", "autonomous driving"],
+  ["生物技术", "biotechnology"], ["气候科技", "climate tech"],
+];
+
+export function podcastQueryVariants(query: string): string[] {
+  const normalized = query.trim().toLocaleLowerCase();
+  const pair = BILINGUAL_TERMS.find(([zh, en]) => normalized === zh || normalized === en);
+  return pair ? [normalized === pair[0] ? pair[1] : pair[0]] : [];
+}
 
 /** What one search answered. `partial` marks a fallback match over a window of recent episodes. */
 export type PodcastSearchResult = {
@@ -161,15 +175,17 @@ function toEpisode(row: Record<string, unknown>): PodcastEpisode | null {
   if (!slug) return null;
   const base = toMatch({ ...row, slug });
   if (!base) return null;
-  const tldr = pickEditorial(text(row.tldr_md), text(row.lang), text(row.tldr_md_alt), text(row.lang_alt));
-  const digest = pickEditorial(text(row.digest_md), text(row.lang), text(row.digest_md_alt), text(row.lang_alt));
+  const primaryLang = text(row.lang)?.toUpperCase() ?? null;
+  const alternateLang = text(row.lang_alt)?.toUpperCase() ?? null;
+  const tldr = pickEditorial(text(row.tldr_md), primaryLang, text(row.tldr_md_alt), alternateLang);
+  const digest = pickEditorial(text(row.digest_md), primaryLang, text(row.digest_md_alt), alternateLang);
   return {
     ...base,
     tldr: tldr.text,
     tldrLang: tldr.lang,
     digest: digest.text,
     digestLang: digest.lang,
-    altLang: text(row.lang_alt),
+    altLang: alternateLang,
     people: people(row.chips),
     sectors: tags(row.tag_sectors, SECTOR_LABELS),
     focus: tags(row.tag_focus, FOCUS_LABELS),
@@ -245,22 +261,59 @@ export type PodcastCollection = {
   failed: number;
   /** Why an episode could not be read, when the reason is known; the report names it instead of blaming the topic. */
   failureCode: string | null;
+  queries: string[];
+  searchFailed: boolean;
+  skippedWithoutChinese: number;
 };
 
 /**
- * The episodes one task reads: the search first, then the episodes of the leading matches, at most
- * `max` of them and with modest parallelism. A single episode that cannot be read does not stop the
- * others; the count of unread ones travels with the result so the report can say so.
+ * Search both languages, then read candidates with modest parallelism until the report has `max`
+ * Chinese-backed episodes or the candidates are exhausted. A failed read does not stop the others;
+ * its count travels with the result so the report can say so.
  */
-export async function collectPodcastEpisodes(query: string, options: { client?: PodcastClient; max?: number } = {}): Promise<PodcastCollection> {
+export async function collectPodcastEpisodes(query: string, options: { client?: PodcastClient; max?: number; expandQuery?: (query: string) => Promise<string[]> } = {}): Promise<PodcastCollection> {
   const client = options.client ?? createPodcastClient();
-  const search = await client.search(query);
-  const max = Math.max(1, Math.min(options.max ?? PODCAST_MAX_EPISODES, search.matches.length));
+  const original = query.trim();
+  if (original.length < PODCAST_QUERY_MIN || original.length > PODCAST_QUERY_MAX) throw new PodcastSourceError("podcast_query_invalid");
+  const variants = podcastQueryVariants(original);
+  if (!variants.length && options.expandQuery) variants.push(...await options.expandQuery(original));
+  const queries = [...new Map([original, ...variants]
+    .map(value => value.trim())
+    .filter(value => value.length >= PODCAST_QUERY_MIN && value.length <= PODCAST_QUERY_MAX)
+    .map(value => [value.toLocaleLowerCase(), value])).values()].slice(0, 3);
+  const searches: { term: string; result: PodcastSearchResult }[] = [];
+  let searchFailed = false;
+  for (const term of queries) {
+    try { searches.push({ term, result: await client.search(term) }); }
+    catch (error) {
+      if (term === original) throw error;
+      searchFailed = true;
+    }
+  }
+  const ordered: PodcastMatch[] = [];
+  const seen = new Set<string>();
+  const ranked = searches.map(({ term, result }) => {
+    const preferred = /[\u3400-\u9fff]/u.test(term) ? "ZH" : "EN";
+    return [
+      ...result.matches.filter(match => match.lang?.toUpperCase() === preferred),
+      ...result.matches.filter(match => match.lang?.toUpperCase() !== preferred),
+    ];
+  });
+  const depth = Math.max(0, ...ranked.map(matches => matches.length));
+  for (let index = 0; index < depth; index++) {
+    for (const matches of ranked) {
+      const match = matches[index];
+      if (match && !seen.has(match.slug)) { seen.add(match.slug); ordered.push(match); }
+    }
+  }
+  const max = Math.max(1, Math.min(options.max ?? PODCAST_MAX_EPISODES, PODCAST_MAX_EPISODES));
   const episodes: PodcastEpisode[] = [];
   let failed = 0;
   let failureCode: string | null = null;
-  for (let start = 0; start < max; start += PODCAST_FETCH_CONCURRENCY) {
-    const batch = search.matches.slice(start, start + PODCAST_FETCH_CONCURRENCY);
+  let skippedWithoutChinese = 0;
+  for (let start = 0; start < ordered.length && episodes.length < max;) {
+    const batch = ordered.slice(start, start + Math.min(PODCAST_FETCH_CONCURRENCY, max - episodes.length));
+    start += batch.length;
     const read = await Promise.all(batch.map(async (match) => {
       try { return await client.episode(match.slug); }
       catch (error) {
@@ -269,9 +322,14 @@ export async function collectPodcastEpisodes(query: string, options: { client?: 
       }
     }));
     for (const episode of read) {
-      if (episode) episodes.push(episode);
-      else failed += 1;
+      if (!episode) { failed += 1; continue; }
+      if (episode.lang?.toUpperCase() === "EN" && ((episode.tldr && episode.tldrLang !== "ZH") || (episode.digest && episode.digestLang !== "ZH") || (!episode.tldr && !episode.digest))) {
+        skippedWithoutChinese += 1;
+        continue;
+      }
+      episodes.push(episode);
     }
   }
-  return { episodes, matches: search.matches, partial: search.partial, searchedRecent: search.searchedRecent, count: search.count, failed, failureCode };
+  const windows = searches.map(search => search.result.searchedRecent).filter((value): value is number => value !== null);
+  return { episodes, matches: ordered, partial: searches.some(search => search.result.partial) || searchFailed, searchedRecent: windows.length ? Math.min(...windows) : null, count: ordered.length, failed, failureCode, queries, searchFailed, skippedWithoutChinese };
 }

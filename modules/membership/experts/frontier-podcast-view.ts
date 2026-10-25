@@ -12,6 +12,9 @@ export type FrontierPodcastView = {
   searchedRecent: number | null;
   /** How many of the chosen matches could not be read. */
   failed: number;
+  queries?: string[];
+  searchFailed?: boolean;
+  skippedWithoutChinese?: number;
   generatedAt: Date;
 };
 
@@ -59,11 +62,19 @@ export function clipped(text: string | null, limit: number) {
 
 /** The line both presentations use for what the result covers. */
 export function coverageLine(view: FrontierPodcastView) {
+  const queries = view.queries?.length ? `检索词：${view.queries.join("、")}。` : "";
+  const failed = view.searchFailed ? "部分扩展检索失败，可能遗漏相关节目。" : "";
+  const skipped = view.skippedWithoutChinese ? `另有 ${view.skippedWithoutChinese} 集英文节目缺少中文正文，未收录。` : "";
   if (view.partial) {
     const window = view.searchedRecent ? `最近 ${view.searchedRecent} 集` : "最近的节目";
-    return `结果不完整：检索回退到${window}的子串匹配，可能遗漏更早的相关内容。`;
+    return `${queries}结果不完整：检索回退到${window}的子串匹配，可能遗漏更早的相关内容。${failed}${skipped}`;
   }
-  return "结果范围：检索接口返回的完整匹配结果。";
+  return `${queries}结果范围：检索接口返回的完整匹配结果。${failed}${skipped}`;
+}
+
+export function editorialSourceLabel(episode: PodcastEpisode) {
+  if (episode.lang?.toUpperCase() === "EN" && (episode.tldrLang === "ZH" || episode.digestLang === "ZH")) return "公开播客文字库中文版";
+  return "公开播客文字库原文";
 }
 
 /** The line both presentations use for how many episodes the report holds. */
