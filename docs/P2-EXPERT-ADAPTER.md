@@ -75,7 +75,7 @@
 - 单个主体读取失败只影响该主体：它留在底稿里并带缺口说明，其余主体继续处理。任何预算截断或单体读取缺口都会在报告和任务卡片标为「结果不完整」；错误说明使用平台能力文案，不回显原始服务错误文本。
 - 服务端对某主体回答 `not_found`（无此记录）时写成对应缺口，不写成「分页未读完」，也不据此断定该主体没有对外投资。
 - 底稿的文字摘要由模型写；摘要一步失败（模型未配置、输出不可用、调用结果未知、服务端拒绝）时，底稿仍然生成，摘要位置写明缺的是哪一部分，缺口清单同步记一条，错误码与中文原因按模型侧的具体原因区分，不落到笼统的「请检查配置」。
-- 成功的全景任务在专家页和任务详情页显示 sandboxed 单文件静态 HTML 预览，并提供 `.md` / `text/markdown` 底稿下载；预览与下载使用同一份 Markdown 草稿，HTML 不含脚本或外部资源。检查点仍保存在服务端供任务续跑，不作为员工下载产物。该实现已随 [PR #97](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/97) 合并（`aa1323a`），quality、PostgreSQL integration 与 docs links 检查通过；尚无生产发布或真实员工产物验收记录。
+- 成功的全景任务在专家页和任务详情页显示 sandboxed 单文件静态 HTML 预览，并提供 `.md` / `text/markdown` 底稿下载；预览与下载使用同一份 Markdown 草稿，HTML 不含脚本或外部资源。检查点仍保存在服务端供任务续跑，不作为员工下载产物。该实现已随 [PR #97](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/97) 合并（`aa1323a`），quality、PostgreSQL integration 与 docs links 检查通过，并随 2026-10-26 的 release `e2daacd` 发布到生产；真实员工产物验收仍未完成，见[发布记录](logs/2026-10-26-P4-pr96-pr97-deployment.md)。
 
 ### 底稿结构
 
