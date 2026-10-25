@@ -193,6 +193,15 @@
 - web、API、worker 运行 `citic-newsfeed:d169c6b8c8114f5d7ed47f0f4b8ecc2599b0bfa8`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200，`/experts`、`/experts/outbound-investment-panorama`、`/tasks`、`/tasks/:id`、`/knowledge` 按会话鉴权 302 跳转登录页。发布镜像自带的 standalone 回归 129 个用例全部通过（不连数据库）。
 - **登录后复验仍待人工完成**：全景图以「宁德时代」发起一次端到端，确认母公司候选排在前面且关系标签正确；员工全局任务记录能分页浏览并进入单条任务详情。详见[PR #88 + PR #86 发布日志](logs/2026-10-25-P4-pr88-pr86-deployment.md)。
 
+### PR #87 前沿播客专家发布（2026-10-25）
+
+- [PR #87](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/87) 已合并，提交 `8a1a3cf6d5e6b7ad17c83647debcf51a801deea3` 已发布到 `/opt/citic-newsfeed/releases/8a1a3cf6d5e6b7ad17c83647debcf51a801deea3`。新增内置专家「前沿播客」（slug `frontier-podcast`，执行模式 `podcast_search`）：按话题读取公开播客文字库，产出 beautiful-article 单文件网页摘要与 Markdown 产物；同一提交修掉了「非自定义专家被要求写备注」的回归，备注要求改为只留给导入的自定义专家。
+- 上一个生产版本为 `d169c6b8c8114f5d7ed47f0f4b8ecc2599b0bfa8`（PR #88 + PR #86），发布前经公网 `/api/health` 与现场 `current` 链接确认。本轮**没有代码改动**，只部署 `main` 上已有的提交。
+- **0 条新迁移**：`git diff d169c6b..8a1a3cf -- '*.sql'` 为空，两版迁移文件清单一致。setup 先于新代码上线，退出码 0，报告 `database is up to date`、`sources: 0 added, 26 already there`；`schema_migrations` 发布前后都是 164 行（最大 `0190_…`）。目录播种可重入：`frontier-podcast` 以 `ON CONFLICT(slug) DO UPDATE` 写入，发布前该行不存在，发布后为 `available` / `0.1.0`。
+- 发布前保存 `.env.before-release-8a1a3cf-20261025` 与 `backups/db-before-8a1a3cf-20261025.dump`，权限均为 `0600`，转储经 `pg_restore --list` 在 db 容器内检查可读（573 条 TOC，未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变。
+- web、API、worker 运行 `citic-newsfeed:8a1a3cf6d5e6b7ad17c83647debcf51a801deea3`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 与 `/favicon.ico` 返回 200，`/experts`、`/experts/frontier-podcast`、`/experts/outbound-investment-panorama`、`/tasks`、`/knowledge` 按会话鉴权 302 跳转登录页。随镜像发布的回归用例在生产镜像内 `--network none` 跑通 141/141。
+- 「前沿播客」的目录、提交、网页预览与 Markdown 下载，以及 `/tasks` 与全景图「宁德时代」排序均未做登录后验收，详见[PR #87 部署日志](logs/2026-10-25-P4-pr87-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
