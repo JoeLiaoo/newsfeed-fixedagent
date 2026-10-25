@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { chatJson } from "@aihot/backend/providers/llm";
-import { redactMembershipTaskResponses } from "@aihot/backend/providers/receipts";
+import { ModelOutputError, ModelUnavailableError, ProviderRejectedError, ReceiptUnknownError, redactMembershipTaskResponses } from "@aihot/backend/providers/receipts";
 import { sql, type Db } from "@aihot/backend/db";
 import { BUILTIN_EXPERT, COMING_SOON_EXPERT_SLUG, EXPERT_SLUG, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, PANORAMA_TOOL_LABELS, SECTOR_PEER_EXPERT_SLUG, XINHUA_BASE_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
 import { renderSectorPeerDashboard } from "./sector-peer-html.ts";
 import { ExpertProviderError, withXinhua, type XinhuaCall } from "./xinhua.ts";
-import { candidateSearchOutcome, mapCompanyCandidates, mapInvestmentEvidence, parseInvestmentPage, querySelectedCompanyProfile, relaxedCompanyKeywords, textField, type EntityCandidate } from "./data.ts";
+import { candidateSearchOutcome, carriesQuery, mapCompanyCandidates, mapInvestmentEvidence, markBranchRelations, parseInvestmentPage, parentNameCandidates, querySelectedCompanyProfile, rankCompanyCandidates, relaxedCompanyKeywords, textField, type EntityCandidate } from "./data.ts";
 import { collectProviderPages, investmentRowIdentity } from "../provider-pages.ts";
 import { executionMode } from "./import.ts";
 import { materialContext } from "./materials.ts";
@@ -20,7 +20,12 @@ type TaskRow = { id: string; user_id: string; expert_slug: string; input: Record
 type EvidenceRow = { id: string; name: string; pct: string | null; subscribed: string | null; date: string | null; source: string };
 
 function errorText(error: unknown) {
-  const code = error instanceof ExpertProviderError ? error.code : error instanceof Error && error.message === "expert_material_unreadable" ? error.message : "expert_execution_failed";
+  const code = error instanceof ExpertProviderError ? error.code
+    : error instanceof ModelUnavailableError ? "expert_model_unavailable"
+    : error instanceof ModelOutputError ? "expert_model_output_invalid"
+    : error instanceof ReceiptUnknownError ? "expert_model_unknown"
+    : error instanceof ProviderRejectedError ? "expert_model_rejected"
+    : error instanceof Error && error.message === "expert_material_unreadable" ? error.message : "expert_execution_failed";
   const messages: Record<string, string> = {
     xinhua_not_configured: "平台企业信息查询服务尚未配置。请联系管理员。",
     xinhua_endpoint_invalid: "平台企业信息查询服务地址配置无效，任务已停止。",
@@ -33,34 +38,89 @@ function errorText(error: unknown) {
     xinhua_entity_mismatch: "平台企业信息查询返回的企业与已确认主体不一致，未生成报告。",
     xinhua_unavailable: "平台企业信息查询服务暂时不可用，任务可重新提交。",
     expert_material_unreadable: "任务材料无法提取文字，请换用有文字层的 PDF、DOCX、PPTX 或 UTF-8 Markdown。",
-    expert_execution_failed: "专家执行未完成；没有生成成功结果。",
+    expert_model_unavailable: "文字整理模型未配置或已停用，任务未完成；请联系管理员。",
+    expert_model_output_invalid: "文字整理模型返回的内容无法使用，任务未完成；可稍后重试。",
+    expert_model_unknown: "文字整理模型的调用结果未知（可能已计费），任务未完成；请联系管理员核对后重试。",
+    expert_model_rejected: "文字整理服务暂时拒绝了请求，任务未完成；可稍后重试。",
+    expert_execution_failed: "专家执行未完成，未生成成功结果；请重试，若仍失败请联系管理员核对任务记录。",
   };
   return { code, message: messages[code] ?? messages.expert_execution_failed! };
 }
 
+/** Why the text step failed, in the words the employee reads; the internal detail stays out of the draft. */
+function modelFailureText(error: unknown) {
+  if (error instanceof ModelUnavailableError) return "文字整理模型未配置或已停用";
+  if (error instanceof ModelOutputError) return "文字整理模型返回的内容无法使用";
+  if (error instanceof ReceiptUnknownError) return "文字整理模型的调用结果未知，可能已计费";
+  if (error instanceof ProviderRejectedError) return "文字整理服务暂时拒绝了请求";
+  return "文字整理模型调用失败";
+}
+
 function markdownCell(value: string) { return value.replace(/[|\r\n\t]/g, " ").trim(); }
 
+/** One page of candidates holds this many rows; a well-known company has more matches than one page. */
+const CANDIDATE_PAGE_SIZE = 10;
+/** How many provider searches one entity lookup may make. */
+const MAX_CANDIDATE_CALLS = 5;
+/** How many candidates one task offers to the employee. */
+const MAX_CANDIDATES = 12;
+
 /**
- * The candidates the provider offers for a typed name. The exact name is asked for first; when it
- * matches nothing, the shorter forms of the same name are tried, so a subject that is registered
- * under a slightly different wording can still be chosen. Only rows with a subject ID are offered:
- * an ID is what the later profile read is verified against.
+ * The candidates the provider offers for a typed name. The exact name is asked for first, page by
+ * page: a listed company has many branches, and the parent the employee meant often sits behind the
+ * first page of near matches. When no candidate carries the typed name, the registered names the near
+ * matches are built on are asked for too, so the parent can still be chosen. Only rows with a subject
+ * ID are offered: an ID is what the later profile read is verified against.
  */
 export async function companyCandidates(name: string): Promise<{ candidates: EntityCandidate[]; approximate: boolean }> {
-  const keywords = [name, ...relaxedCompanyKeywords(name)];
-  return withXinhua(async call => {
-    for (const [index, keyword] of keywords.entries()) {
-      const raw = await call("fuzzy_search_company_list", { keyword, limit: 10, offset: 0 });
+  return withXinhua(call => searchCompanyCandidates(call, name));
+}
+
+/**
+ * The candidate search itself, over a provider call: the typed name is asked for first, page by page;
+ * a listed company has many branches, and the parent the employee meant often sits behind the first
+ * page of near matches. When no candidate carries the typed name, the registered names the near
+ * matches are built on are asked for too, so the parent can still be chosen. Only rows with a subject
+ * ID are offered: an ID is what the later profile read is verified against.
+ */
+export async function searchCompanyCandidates(call: XinhuaCall, name: string): Promise<{ candidates: EntityCandidate[]; approximate: boolean }> {
+  const typed = name.trim();
+  const found = new Map<string, EntityCandidate>();
+  let rowsSeen = 0;
+  let calls = 0;
+  const search = async (keyword: string, pages: number, strict: boolean) => {
+    for (let page = 0; page < pages; page++) {
+      if (calls >= MAX_CANDIDATE_CALLS) return;
+      calls += 1;
+      const raw = await call("fuzzy_search_company_list", { keyword, limit: CANDIDATE_PAGE_SIZE, offset: page * CANDIDATE_PAGE_SIZE });
       const outcome = candidateSearchOutcome(raw);
       // The provider answered without a candidate list: the answer cannot be read as one.
-      if (!outcome.present) throw new ExpertProviderError("xinhua_response_invalid");
-      if (!outcome.rows.length) continue;
-      const candidates = mapCompanyCandidates(outcome.rows, name).filter(candidate => candidate.id);
-      if (!candidates.length) throw new ExpertProviderError("xinhua_entity_id_missing");
-      return { candidates, approximate: index > 0 };
+      if (!outcome.present) { if (strict) throw new ExpertProviderError("xinhua_response_invalid"); return; }
+      if (!outcome.rows.length) return;
+      rowsSeen += outcome.rows.length;
+      for (const candidate of mapCompanyCandidates(outcome.rows, typed)) {
+        if (candidate.id && !found.has(candidate.id)) found.set(candidate.id, candidate);
+      }
+      if (outcome.rows.length < CANDIDATE_PAGE_SIZE) return;
     }
+  };
+  // The typed name, first page and the one behind it.
+  await search(typed, 2, true);
+  const exact = () => [...found.values()].some(candidate => candidate.name.trim() === typed);
+  if (!exact()) {
+    // The shorter forms of the typed name, then the names the near matches are built on.
+    for (const keyword of relaxedCompanyKeywords(typed).slice(0, 2)) await search(keyword, 1, false);
+    for (const parent of parentNameCandidates([...found.values()].map(candidate => candidate.name)).slice(0, 2)) await search(parent, 1, false);
+  }
+  if (!found.size) {
+    if (rowsSeen) throw new ExpertProviderError("xinhua_entity_id_missing");
     throw new ExpertProviderError("xinhua_no_candidates");
-  });
+  }
+  const ranked = rankCompanyCandidates([...found.values()], typed);
+  const candidates = markBranchRelations(ranked).slice(0, MAX_CANDIDATES);
+  // The candidates are near matches when none of them carries the name the employee typed.
+  const approximate = !candidates.some(candidate => carriesQuery(candidate.name, typed));
+  return { candidates, approximate };
 }
 
 export async function investmentEvidence(call: XinhuaCall, query: string, queryType: string) {
@@ -227,13 +287,24 @@ async function runPanoramaExpert(task: TaskRow, leaseToken: string, options: { b
   run.stats.calls += identityCalls;
   await assertRunning(task.id, leaseToken);
   const materials = options.materials ?? await taskMaterials(task, leaseToken);
-  const narrative = await panoramaNarrative(task, run, { ...options, materials });
+  // The words are the model's part; the tables and the gaps are the platform's. A text step that
+  // fails leaves the draft standing, and the draft says which part is missing.
+  let narrative: { summary: string; openQuestions: string[] } | undefined;
+  let narrativeNote: string | undefined;
+  try {
+    narrative = await panoramaNarrative(task, run, { ...options, materials });
+  } catch (error) {
+    narrativeNote = `本次未生成文字摘要（${modelFailureText(error)}）；逐层明细、结构树、缺口清单与采集台账不受影响。`;
+    run.gaps.push({ scope: root.name, text: `文字摘要未生成：${modelFailureText(error)}。` });
+    run.stats.incomplete = true;
+  }
   const rendered = renderPanorama({
     run,
     root: { name: root.name, id: root.companyId ?? "" },
     queriedAt: new Date().toISOString(),
     toolLabels: PANORAMA_TOOL_LABELS,
     narrative,
+    narrativeNote,
   });
   return { markdown: rendered.markdown, incomplete: run.stats.incomplete, gapCount: run.gaps.length, limits: run.stats.limits };
 }
@@ -323,7 +394,7 @@ export async function runExpertTask(taskId: string) {
       const { candidates, approximate } = await companyCandidates(name);
       await assertRunning(taskId, leaseToken);
       if (!candidates.length) throw new ExpertProviderError("xinhua_no_candidates");
-      await sql`UPDATE member_expert_tasks SET state='waiting_input',stage='choose_entity',result=${sql.json({ candidates, approximate })},updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
+      await sql`UPDATE member_expert_tasks SET state='waiting_input',stage='choose_entity',result=${sql.json({ candidates, approximate, query: name })},updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
       return;
     }
     if (isSectorPeer) report = renderSectorPeerDashboard(String(task.input.query ?? ""), new Date());

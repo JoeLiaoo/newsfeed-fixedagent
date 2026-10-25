@@ -52,6 +52,13 @@ test("the panorama expert is published, needs a confirmed entity and keeps its c
   assert.equal(selected[0]?.selected_entity?.id, "root");
   assert.equal(selected[0]?.state, "queued");
 
+  // The task list says which subject a run is about: the name the employee typed and the subject
+  // they confirmed, so a card in the list can be recognised.
+  const listed = (await (await app.inject({ method: "GET", url: "/api/v1/membership/expert-tasks", headers: { cookie, ...common } })).json() as { tasks: Array<{ id: string; input: { companyName?: string }; selectedEntity: { name?: string; creditCode?: string } | null }> }).tasks;
+  const card = listed.find(task => task.id === taskId);
+  assert.equal(card?.input.companyName, "本方主体", "任务卡带着员工查询的企业名称");
+  assert.equal(card?.selectedEntity?.name, "本方主体", "任务卡带着已确认的工商主体");
+
   const emptyDownload = await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${taskId}/checkpoint`, headers: { cookie, ...common } });
   assert.equal(emptyDownload.statusCode, 404, "台账尚不存在时不应提供空 JSONL 下载");
 

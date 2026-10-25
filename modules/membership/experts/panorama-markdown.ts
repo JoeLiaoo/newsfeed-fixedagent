@@ -12,6 +12,8 @@ export type PanoramaRenderInput = {
   /** The capability names of the tools the run used. */
   toolLabels: string[];
   narrative?: { summary: string; openQuestions: string[] };
+  /** Why the words are missing, when the text step did not finish. */
+  narrativeNote?: string;
 };
 
 export type PanoramaRenderResult = { markdown: string; evidenceIds: string[] };
@@ -275,10 +277,10 @@ function ledgerSection(run: PanoramaRunResult) {
 }
 
 /** The summary the model wrote, checked against the evidence numbers the draft contains. */
-function narrativeSection(narrative: PanoramaRenderInput["narrative"], validIds: Set<string>) {
+function narrativeSection(narrative: PanoramaRenderInput["narrative"], validIds: Set<string>, note?: string) {
   const lines: string[] = ["## 九、摘要整理", ""];
   if (!narrative) {
-    lines.push("本次未生成文字摘要。");
+    lines.push(note ?? "本次未生成文字摘要。");
     lines.push("");
     return lines;
   }
@@ -321,7 +323,7 @@ export function renderPanorama(input: PanoramaRenderInput): PanoramaRenderResult
   lines.push(...annualSection(run));
   lines.push(...gapSection(run));
   lines.push(...ledgerSection(run));
-  lines.push(...narrativeSection(input.narrative, new Set(evidenceIds)));
+  lines.push(...narrativeSection(input.narrative, new Set(evidenceIds), input.narrativeNote));
   lines.push("## 十一、使用说明");
   lines.push("");
   lines.push("- 表格单元格只放数据与短标签；判断依据、剔除记录与能力缺口见各表表注与第七节。");

@@ -26,8 +26,10 @@ export function proxyToApi(req: IncomingMessage, res: ServerResponse, set: Outgo
   });
   upstream.on("error", (error) => {
     logError(error, { msg: "api proxy request failed", method: req.method, path: req.url });
-    res.statusCode = 502;
-    res.end("api unavailable");
+    // The api could not be reached: the answer says so in the same shape the api uses, so the page
+    // reads the reason instead of failing to read a plain-text body.
+    res.writeHead(502, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+    res.end(JSON.stringify({ error: "api_unavailable", message: "服务暂时不可用，请稍后重试。" }));
   });
   req.pipe(upstream);
 }

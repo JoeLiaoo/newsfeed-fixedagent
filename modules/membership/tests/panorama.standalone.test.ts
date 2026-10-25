@@ -470,3 +470,44 @@ for (const boundary of ["profile", "history", "shareholders"] as const) {
     for (const paid of previousCalls) assert.equal(calls.filter(value => value === paid).length, 1, "Do not repay checkpointed calls");
   });
 }
+
+test("a provider that has no record for the list says so, instead of reading it as an unfinished page", async () => {
+  const call: XinhuaCall = async (tool, args) => {
+    if (tool === "get_company_profile") return { company_id: "branch", company_name: "本方主体分公司", credit_code: "91350900MA33F5967F", company_status_name: "存续", company_type_name: "分公司", start_date: "2011-01-01" };
+    if (tool === "get_direct_investment") return { not_found: true };
+    if (tool === "get_company_annual_report_base_info") return { company_annual_report_base_info: [{ report_year: "2024", publish_date: "2025-04-30", is_invested: 1 }] };
+    if (tool === "get_company_annual_report_investment_info") return { not_found: true };
+    return {};
+  };
+  const run = await runPanorama({
+    call,
+    root: { key: "company:branch", name: "本方主体分公司", companyId: "branch", aliases: [], creditCode: "91350900MA33F5967F" },
+  });
+  assert.equal(run.edges.length, 0, "没有对外投资记录时不编造关系");
+  assert.ok(run.gaps.some(gap => gap.text.includes("not_found")), "平台没有记录是一条缺口，不是分页未读完");
+  assert.ok(!run.gaps.some(gap => gap.text.includes("分页未读完")), "不是 not_found 的回答不写成分页问题");
+  assert.ok(run.gaps.some(gap => gap.text.includes("年报对外投资明细")), "年报明细的 not_found 也要写进缺口");
+  assert.ok(run.gaps.some(gap => gap.text.includes("分支机构")), "分支机构要写明它不代表母公司的对外投资");
+  const { markdown } = renderPanorama({
+    run, root: { name: "本方主体分公司", id: "branch" }, queriedAt: "2026-10-24T00:00:00.000Z", toolLabels: [],
+    narrativeNote: "本次未生成文字摘要（文字整理模型调用失败）；逐层明细、结构树、缺口清单与采集台账不受影响。",
+  });
+  assert.ok(markdown.includes("not_found"));
+  assert.ok(markdown.includes("本次未生成文字摘要"), "文字步骤失败时底稿仍然成立，并说明缺的是哪一部分");
+});
+
+test("a draft without words still carries its tables, its gaps and its ledger", async () => {
+  const fixture = panoramaFixture();
+  const providerStub = provider(fixture);
+  const run = await runPanorama({
+    call: providerStub.call,
+    root: { key: "company:root", name: "本方主体", companyId: "root", aliases: [] },
+  });
+  const { markdown } = renderPanorama({
+    run, root: { name: "本方主体", id: "root" }, queriedAt: "2026-10-24T00:00:00.000Z", toolLabels: [],
+    narrativeNote: "本次未生成文字摘要（文字整理模型返回的内容无法使用）；逐层明细、结构树、缺口清单与采集台账不受影响。",
+  });
+  assert.ok(markdown.includes("采集台账"));
+  assert.ok(markdown.includes("缺口与待核清单"));
+  assert.ok(markdown.includes("文字整理模型返回的内容无法使用"));
+});

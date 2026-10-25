@@ -131,6 +131,18 @@ export const EXPERT_STATUS_BADGES: Record<string, { label: string; variant: "suc
   blocked: { label: "缺少依赖", variant: "warning" },
 };
 
+/** The stage of a task in the words the employee reads; an unknown stage keeps its own name. */
+export const EXPERT_STAGE_LABELS: Record<string, string> = {
+  queued: "排队中",
+  entity_search: "检索主体",
+  choose_entity: "等待选择主体",
+  processing: "执行中",
+  complete: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+  recovered: "已重新排队",
+};
+
 /** The badge of an expert's state; an unknown state keeps its own name instead of borrowing one. */
 export function expertStatusBadge(status: string) {
   return EXPERT_STATUS_BADGES[status] ?? { label: status, variant: "secondary" as const };
