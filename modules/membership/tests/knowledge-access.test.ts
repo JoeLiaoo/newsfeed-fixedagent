@@ -102,10 +102,18 @@ const provider = await stub(async (_hit, req) => {
   await hook?.();
   // The answer may only cite the citations it was given, and it may not say who said it: the
   // library reads the attribution from its own record.
-  const payload = JSON.parse(user) as { availablePages: Array<{ slug: string; availableCitations: Array<{ citationId: string; analyst: string | null }> }> };
+  const payload = JSON.parse(user) as { availablePages: Array<{ slug: string; availableCitations: Array<{ citationId: string; sourceLabel: string; analyst: string | null }> }> };
   const page = payload.availablePages[0];
   const citation = page?.availableCitations.find(item => item.analyst === "张三") ?? page?.availableCitations[0];
   const citationId = user.includes("BADCITATION") ? "00000000-0000-0000-0000-000000000000" : citation?.citationId ?? "";
+  // An answer that quotes the label of the source instead of the number of the turn.
+  if (user.includes("SOURCELABEL")) {
+    const sourceLabel = citation?.sourceLabel ?? "S1";
+    return { choices: [{ message: { content: JSON.stringify({
+      answer: `综合已覆盖的材料，某公司当前以张三/某券商的看好为主[^${sourceLabel}]。\n\n参考资料：\n[^${sourceLabel}]: 某公司 观点页`,
+      citations: [{ label: sourceLabel, pageSlug: page?.slug ?? "", citationId }],
+    }) } }] };
+  }
   return {
     choices: [{ message: { content: JSON.stringify({
       answer: "综合已覆盖的材料，某公司当前以张三/某券商的看好为主[^1]。\n\n参考资料：\n[^1]: 某公司 观点页",
@@ -275,10 +283,25 @@ test("the shared library is open to approved employees and closed to everyone el
   assert.equal(uncovered.statusCode, 422);
   assert.equal((await uncovered.json() as { error: string }).error, "knowledge_no_coverage");
 
-  // An answer that cites something the library never offered is refused.
+  // An answer that cites something the library never offered is refused. The request was understood
+  // and the answer was not: it is not a gateway failure.
   const unverifiable = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { question: "某公司 BADCITATION 怎么看？" } });
-  assert.equal(unverifiable.statusCode, 502);
+  assert.equal(unverifiable.statusCode, 422);
   assert.equal((await unverifiable.json() as { error: string }).error, "knowledge_answer_unverified");
+
+  // The refused answer is not handed back to the employee: the next attempt pays for a fresh one.
+  const hitsBeforeRetry = provider.hits();
+  const askedAgain = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { question: "某公司 BADCITATION 怎么看？" } });
+  assert.ok(provider.hits() > hitsBeforeRetry, "the refused answer was replayed instead of asked for again");
+  assert.equal(askedAgain.statusCode, 422);
+
+  // An answer that quotes the label of the source instead of the number of the turn is accepted.
+  const quoted = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/answers", headers: { cookie: cookies[1]!, ...common }, payload: { question: "某公司 SOURCELABEL 怎么看？" } });
+  assert.equal(quoted.statusCode, 200);
+  const quotedAnswer = await quoted.json() as { answer: { answerMd: string; citations: Array<{ label: string; analyst: string | null }> } };
+  assert.match(quotedAnswer.answer.citations[0]?.label ?? "", /^S\d+$/, "脚注用的是页面自己的来源编号");
+  assert.equal(quotedAnswer.answer.citations[0]?.analyst, "张三", "归因仍来自库里的记录");
+  assert.match(quotedAnswer.answer.answerMd, /\/knowledge\/targets\//);
 
   // Taking a material out of the library withdraws what it contributed; the other materials stay.
   const withdrawn = await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/documents/${uploaded.documentId}/withdraw`, headers: { cookie: cookies[0]!, ...common } });

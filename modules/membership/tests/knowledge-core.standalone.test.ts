@@ -1,7 +1,7 @@
 // The parts of the shared library that need no database: what a material is, what can be read out of
 // it, how a draft becomes a page, what the machine can check, and how a question finds its pages.
 import assert from "node:assert/strict";
-import { verifyAnswer } from "../knowledge/answer.ts";
+import { offeredCitations, verifyAnswer } from "../knowledge/answer.ts";
 import { answerSchema, auditResultSchema, compiledDraftSchema } from "../knowledge/schema.ts";
 import { test } from "node:test";
 import { strToU8, zipSync } from "fflate";
@@ -354,6 +354,92 @@ test("answer provenance rejects mixed or unbound citations and derives freshness
     { ...valid, citations: [citation, citation] },
     { ...valid, citations: [{ ...citation, pageSlug: "not-routed" }] },
   ]) assert.throws(() => verifyAnswer(invalid, pages), /knowledge_answer_unverified/);
+});
+
+
+test("an answer may number its footnotes the way the turn numbered them, or quote the source label", () => {
+  const pages = [{
+    slug: page.slug, title: page.title, pageType: page.pageType, targetName: page.targetName,
+    track: page.track, bodyMd: "published", coverage: { ...coverageOf(page), last_report: "2026-10-01" }, revisionId: "r1",
+    citations: [
+      { id: "c1", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2026-01-01", anchor: null, sourceTitle: "一", versionId: "v1" },
+      { id: "c2", label: "S2", analyst: "李四", organization: "券商", publishedOn: "2026-01-02", anchor: null, sourceTitle: "二", versionId: "v2" },
+    ],
+  }];
+  const numbered = verifyAnswer(answerSchema.parse({
+    answer: "第一点[^1]，第二点[^2]。",
+    citations: [{ label: "1", pageSlug: page.slug, citationId: "c1" }, { label: "2", pageSlug: page.slug, citationId: "c2" }],
+  }), pages, new Date("2026-10-24T00:00:00Z"));
+  assert.deepEqual(numbered.citations.map(citation => citation.label), ["1", "2"]);
+  assert.deepEqual(numbered.citations.map(citation => citation.analyst), ["张三", "李四"], "归因来自库里的记录");
+
+  // The model quoted the source label of the page instead of the number of the turn.
+  const quoted = verifyAnswer(answerSchema.parse({
+    answer: "第一点[^S1]，第二点[^S2]。",
+    citations: [{ label: "S1", pageSlug: page.slug, citationId: "c1" }, { label: "S2", pageSlug: page.slug, citationId: "c2" }],
+  }), pages, new Date("2026-10-24T00:00:00Z"));
+  assert.deepEqual(quoted.citations.map(citation => citation.label), ["S1", "S2"]);
+  assert.deepEqual(quoted.citations.map(citation => citation.analyst), ["张三", "李四"]);
+
+  // The model numbered the footnote itself and returned the label of the source.
+  const mixed = verifyAnswer(answerSchema.parse({
+    answer: "第一点[^1]。",
+    citations: [{ label: "S1", pageSlug: page.slug, citationId: "c1" }],
+  }), pages, new Date("2026-10-24T00:00:00Z"));
+  assert.equal(mixed.citations[0]?.label, "1");
+  assert.equal(mixed.citations[0]?.analyst, "张三");
+});
+
+test("a page name the model cut short still names the same page", () => {
+  const slug = "kb-4e7f876c7f74-view-company-example-12345678";
+  const pages = [{
+    slug, title: "某公司", pageType: "view", targetName: "某公司", track: null,
+    bodyMd: "published", coverage: { ...coverageOf(page), last_report: "2026-10-01" }, revisionId: "r1",
+    citations: [{ id: "c1", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2026-01-01", anchor: null, sourceTitle: "一", versionId: "v1" }],
+  }];
+  const truncated = verifyAnswer(answerSchema.parse({
+    answer: "第一点[^1]。",
+    citations: [{ label: "1", pageSlug: "kb-4e7f876c7f74-view-company-example", citationId: "c1" }],
+  }), pages, new Date("2026-10-24T00:00:00Z"));
+  assert.equal(truncated.citations[0]?.pageSlug, slug, "页面以库里的记录为准");
+  assert.throws(() => verifyAnswer(answerSchema.parse({
+    answer: "第一点[^1]。",
+    citations: [{ label: "1", pageSlug: "not-routed", citationId: "c1" }],
+  }), pages), /knowledge_answer_unverified/, "另一个页面的名字不是这个引用");
+});
+
+test("a footnote the model decorated, and a label of another source, are told apart", () => {
+  const pages = [{
+    slug: page.slug, title: page.title, pageType: page.pageType, targetName: page.targetName,
+    track: page.track, bodyMd: "published", coverage: { ...coverageOf(page), last_report: "2026-10-01" }, revisionId: "r1",
+    citations: [
+      { id: "c1", label: "S1", analyst: "张三", organization: "券商", publishedOn: "2026-01-01", anchor: null, sourceTitle: "一", versionId: "v1" },
+      { id: "c2", label: "S2", analyst: "李四", organization: "券商", publishedOn: "2026-01-02", anchor: null, sourceTitle: "二", versionId: "v2" },
+    ],
+  }];
+  const decorated = verifyAnswer(answerSchema.parse({
+    answer: "第一点[^1.]。",
+    citations: [{ label: "1", pageSlug: page.slug, citationId: "c1" }],
+  }), pages, new Date("2026-10-24T00:00:00Z"));
+  assert.equal(decorated.citations[0]?.label, "1.", "正文里的角标原样保留");
+  assert.equal(decorated.citations[0]?.analyst, "张三");
+  assert.throws(() => verifyAnswer(answerSchema.parse({
+    answer: "第一点[^S1]。",
+    citations: [{ label: "S1", pageSlug: page.slug, citationId: "c2" }],
+  }), pages), /knowledge_answer_unverified/, "引用了另一个来源的编号，脚注无从核对");
+});
+
+
+test("the citations of a turn are numbered once, and the numbering belongs to the turn", () => {
+  const pages = [{
+    slug: page.slug, title: page.title, pageType: page.pageType, targetName: page.targetName,
+    track: page.track, bodyMd: "published", coverage: { ...coverageOf(page), last_report: "2026-10-01" }, revisionId: "r1",
+    citations: [{ id: "c1", label: "S1", analyst: "张三", organization: null, publishedOn: null, anchor: null, sourceTitle: null, versionId: "v1" }],
+  }];
+  const offered = offeredCitations(pages);
+  assert.equal(offered.length, 1);
+  assert.equal(offered[0]?.footnote, 1);
+  assert.equal(offered[0]?.citation.id, "c1");
 });
 
 
