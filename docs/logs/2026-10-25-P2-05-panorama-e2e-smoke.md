@@ -24,9 +24,10 @@
 1. **候选检索**（`modules/membership/experts/data.ts`、`worker.ts`）：按页检索（每次 10 条、最多翻到第二页），命中即用；没有与查询词完全一致的主体时，再问一次更短的写法，并按法律形式反推分支所依附的母公司登记名去问一次。总调用次数上限 5，候选上限 12。候选按「与查询词完全一致 → 名称以查询词开头（短的在前）→ 其余」排序，母公司排在它自己的分支机构之前。
 2. **分支可辨**（`data.ts`、`modules/membership/pages/expert-detail.tsx`）：候选带上登记类型与「依附于哪个候选」；页面在候选上直接写明「该候选是分支机构，通常没有自己的对外投资记录」或「该候选的登记名称建立在「X」之上，可能是分支机构」。没有候选的登记名包含查询词时，页面说明这是近似候选。
 3. **`not_found` 是答案不是缺页**（`data.ts`、`panorama-run.ts`）：对外投资清单与年报对外投资明细的 `not_found` 写成对应缺口，不再写成「分页未读完」，也不据此断定该主体没有对外投资。
-4. **文字步骤失败不再带走底稿**（`worker.ts`、`panorama-markdown.ts`）：模型写摘要失败时，全景图仍然出报告，摘要位置写明缺的是哪一部分，缺口清单同步记一条。表格、结构树、年报交叉、缺口清单与采集台账不受影响。
-5. **失败原因落地**（`worker.ts`、`modules/membership/pages/expert-detail.tsx`）：模型未配置／输出不可用／结果未知（可能已计费）／服务端拒绝各有自己的错误码与中文说明；页面优先显示服务端给的中文原因，不再统一显示「请检查配置后重试」。
-6. **任务卡认得出来**（`modules/membership/experts/routes.ts`、`modules/membership/pages/expert-detail.tsx`）：任务列表返回 `selectedEntity`，卡片显示员工查询的名称与已确认的工商主体（名称与统一社会信用代码），时间改用 `@aihot/contracts/time` 的 `beijingStamp`，阶段名换成中文。
+4. **分支机构在底稿里说破**（`panorama-run.ts`）：已确认主体的登记类型是分支机构时，底稿写明「其对外投资清单通常为空；本次结果不代表母公司的对外投资」，空清单不会被读成母公司的完整结论。
+5. **文字步骤失败不再带走底稿**（`worker.ts`、`panorama-markdown.ts`）：模型写摘要失败时，全景图仍然出报告，摘要位置写明缺的是哪一部分，缺口清单同步记一条。表格、结构树、年报交叉、缺口清单与采集台账不受影响。
+6. **失败原因落地**（`worker.ts`、`modules/membership/pages/expert-detail.tsx`）：模型未配置／输出不可用／结果未知（可能已计费）／服务端拒绝各有自己的错误码与中文说明；页面优先显示服务端给的中文原因，不再统一显示「请检查配置后重试」。
+7. **任务卡认得出来**（`modules/membership/experts/routes.ts`、`modules/membership/pages/expert-detail.tsx`）：任务列表返回 `selectedEntity`，卡片显示员工查询的名称与已确认的工商主体（名称与统一社会信用代码），时间改用 `@aihot/contracts/time` 的 `beijingStamp`，阶段名换成中文。
 
 ## 修改文件
 
