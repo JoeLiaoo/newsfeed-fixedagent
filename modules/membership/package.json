@@ -8,6 +8,7 @@
     "./web": "./web.tsx",
     "./gp-queue": "./gp/queue.ts",
     "./gp-sync": "./gp/sync.ts",
+    "./experts/seed": "./experts/seed.ts",
     "./knowledge-queue": "./knowledge/queue.ts",
     "./knowledge-worker": "./knowledge/worker.ts",
     "./notifications-outbox": "./notifications/outbox.ts",

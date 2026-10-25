@@ -1,11 +1,14 @@
 // Seeds a fresh site from the industry pack: the demo sources (industry/sources.json, only the ones not
 // there yet, so admin edits are never undone). Topics need no seeding: they are read from industry/topics.json.
+// The employee platform's own experts are seeded here too, so a release that installs the platform leaves the
+// expert catalog in its current state instead of waiting for the first employee to open the catalog.
 // Re-runnable:  node --env-file=.env scripts/seed.ts
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { REPO_ROOT } from "@aihot/backend/config";
 import { closeDb, sql } from "@aihot/backend/db";
 import { assertSupportedConfig } from "@aihot/backend/sources/config-keys";
+import { seedBuiltinExperts } from "@citic/membership/experts/seed";
 
 interface SeedSource {
   id: string;
@@ -37,4 +40,7 @@ for (const s of sources) {
   added += inserted.length;
 }
 console.log(`sources: ${added} added, ${sources.length - added} already there`);
+// The platform's own experts: the catalog entries, their skill text and the status each card shows.
+await seedBuiltinExperts();
+console.log("experts: the platform's own catalog entries are in place");
 await closeDb();
