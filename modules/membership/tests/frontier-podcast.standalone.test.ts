@@ -122,6 +122,16 @@ test("the library client reads the search and one episode as the service answere
   assert.deepEqual(read.focus, ["公司建设", "技术"]);
 });
 
+test("the library client rejects a streamed response larger than its byte budget", async () => {
+  const client = createPodcastClient({ fetchImpl: async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(4 * 1024 * 1024 + 1));
+      controller.close();
+    },
+  }), { status: 200, headers: { "content-type": "application/json" } }) });
+  await assert.rejects(client.search("具身智能"), (error: unknown) => error instanceof PodcastSourceError && error.code === "podcast_response_invalid");
+});
+
 test("high-confidence bilingual variants cover CATL and embodied robotics synonyms", () => {
   assert.deepEqual(podcastQueryVariants("宁德时代"), ["catl"]);
   assert.deepEqual(podcastQueryVariants("CATL"), ["宁德时代"]);

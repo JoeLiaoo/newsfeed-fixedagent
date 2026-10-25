@@ -19,6 +19,8 @@ test("employee content boundary, member isolation, and immutable daily digest sn
   assert.equal((await app.inject({ method: "GET", url: "/feed.xml" })).statusCode, 401);
   assert.equal((await app.inject({ method: "GET", url: "/items/private-article/markdown" })).statusCode, 401);
   assert.equal((await app.inject({ method: "GET", url: "/og/story/private-story.png" })).statusCode, 401);
+  const malformedSession = await app.inject({ method: "GET", url: "/api/v1/membership/me", headers: { cookie: "citic_member_session=%" } });
+  assert.equal(malformedSession.statusCode, 401, "a malformed cookie is treated as no session");
 
   const suffix = tag();
   const accounts = [

@@ -215,4 +215,20 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
     payload: { baseId: "kb-does-not-exist", fileName: "材料.md", base64: material, title: "材料" },
   });
   assert.equal(unknown.statusCode, 404);
+
+  // Two simultaneous requests contend for the last slot. Exactly one succeeds, and the audit row
+  // is committed with the created base.
+  for (let index = 0; index < 18; index++) {
+    await sql`INSERT INTO member_wiki_bases(id,name,status,created_by) VALUES (${`limit-${suffix}-${index}`},${`并发测试库${index}`},'active',${owner!.id})`;
+  }
+  const contenders = await Promise.all(["最后一库甲", "最后一库乙"].map(name => app.inject({
+    method: "POST", url: "/api/v1/membership/knowledge/bases", headers: { cookie: cookies[0]!, ...common }, payload: { name },
+  })));
+  assert.deepEqual(contenders.map(response => response.statusCode).sort(), [201, 409]);
+  const [activeBases] = await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM member_wiki_bases WHERE status='active'`;
+  assert.equal(activeBases?.count, 20);
+  const successful = contenders.find(response => response.statusCode === 201)!;
+  const createdBaseId = (await successful.json() as { base: { id: string } }).base.id;
+  const [audit] = await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM member_wiki_audit_events WHERE event_type='knowledge.base.created' AND detail->>'baseId'=${createdBaseId}`;
+  assert.equal(audit?.count, 1);
 });

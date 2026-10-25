@@ -46,7 +46,9 @@ async function passwordMatches(password: string, encoded: string) {
 function cookieToken(req: FastifyRequest) {
   const cookie = req.headers.cookie ?? "";
   const value = cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
-  return value ? decodeURIComponent(value) : null;
+  if (!value) return null;
+  try { return decodeURIComponent(value); }
+  catch { return null; }
 }
 
 export async function memberSession(req: FastifyRequest, allowPending = false): Promise<MemberSession | null> {
