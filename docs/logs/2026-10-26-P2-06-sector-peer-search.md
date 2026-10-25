@@ -1,7 +1,7 @@
 # 2026-10-26 · P2-06 赛道同业公开资料检索
 
 - 对应任务：P2-06。
-- 状态：实现与定向验证完成，PR 已创建且 CI 全绿，待 PR 评审；未合并、未部署、未做真实员工验收。
+- 状态：实现与定向验证完成；PR #100 已合并，用户报告生产运行包含该变更的 `07488ac`；首次员工任务在模型整理阶段失败，见[故障记录](2026-10-26-P2-06-sector-peer-model-reject.md)，真实业务验收未完成。
 - 基线：独立 worktree 从 `origin/main` `036cb10` 建立；未触碰其他 worktree 或原工作目录中的未提交改动。
 
 ## 做了什么
@@ -40,5 +40,5 @@
 
 ## 下一步
 
-- PR：[PR #100](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/100)，目标 `main`，状态 Open、未合并。实现提交 `e390415ba040e6710dbe2ec1ae3acb6440aef1d7` 的 `quality`、`links`、`postgres-integration` 检查均通过。
-- 合并、生产发布和员工对看板来源及覆盖范围的验收分别记录；这条记录不代表完成生产或业务验收。
+- PR：[PR #100](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/100)，已合并（`cc1a5af`）；用户报告生产现为 `07488ac`，包含该变更。实现提交 `e390415ba040e6710dbe2ec1ae3acb6440aef1d7` 的 `quality`、`links`、`postgres-integration` 检查均通过。
+- 首次员工任务证实搜索成功、模型整理请求失败；修复与模型侧复验见[故障记录](2026-10-26-P2-06-sector-peer-model-reject.md)。员工对看板来源及覆盖范围的验收仍待完成。

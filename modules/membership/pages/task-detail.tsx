@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@aihot/web/components/
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS } from "../experts/catalog.ts";
+import { EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS, QUERY_EXPERT_SLUGS, SECTOR_PEER_EXPERT_SLUG } from "../experts/catalog.ts";
 import { companyRelationLabel } from "../experts/data.ts";
 
 export const handle: Screen = { tab: "me", name: "任务" };
@@ -120,6 +120,7 @@ export default function TaskDetailPage() {
   const isFailed = task.state === "failed";
   const candidates = task.result?.candidates ?? [];
   const notes = task.input?.notes?.trim() ?? "";
+  const query = QUERY_EXPERT_SLUGS.has(task.expertSlug) ? task.input?.query?.trim() ?? "" : "";
 
   return <main className="mx-auto w-full max-w-4xl px-5 py-8">
     <header className="mb-6">
@@ -141,8 +142,9 @@ export default function TaskDetailPage() {
         <CardHeader><CardTitle>任务信息</CardTitle></CardHeader>
         <CardContent className="grid gap-3 text-sm">
           {task.input?.companyName ? <p className="text-ink-2">核查主体：{task.input.companyName}</p> : null}
+          {query ? <p className="break-words text-ink-2">查询：{query}</p> : null}
           {notes ? <p className="max-h-40 overflow-auto whitespace-pre-wrap rounded-control bg-bg-sunk p-3 text-xs leading-relaxed text-ink-2">{notes}</p> : null}
-          {!task.input?.companyName && !notes ? <p className="text-ink-3">没有填写输入内容。</p> : null}
+          {!task.input?.companyName && !query && !notes ? <p className="text-ink-3">没有填写输入内容。</p> : null}
           <p className="text-xs text-ink-3">任务编号 {task.id}</p>
         </CardContent>
       </Card>
@@ -178,7 +180,7 @@ export default function TaskDetailPage() {
         <CardHeader><CardTitle>产物与材料</CardTitle></CardHeader>
         <CardContent className="grid gap-4">
           <div className="flex flex-wrap gap-2">
-            {task.hasArtifact && <Button asChild variant="outline" size="sm"><a href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}><Download size={14} aria-hidden="true" />下载 Markdown 产物</a></Button>}
+            {task.hasArtifact && <Button asChild variant="outline" size="sm"><a href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}><Download size={14} aria-hidden="true" />下载{task.expertSlug === SECTOR_PEER_EXPERT_SLUG ? " HTML 看板" : " Markdown 产物"}</a></Button>}
           </div>
           {task.materials.length === 0 ? <p className="text-sm text-ink-3">没有上传材料。</p> : <div className="grid gap-2 text-sm">
             {task.materials.map(material => <div key={material.id} className="flex flex-wrap items-center gap-2">

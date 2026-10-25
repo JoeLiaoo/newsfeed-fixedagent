@@ -45,6 +45,14 @@ test("the task page reads the one task it shows, and keeps the states of the emp
   assert.match(page, /IntentLink to=\{`\/experts\//, "任务所属专家可回到专家页");
 });
 
+test("query expert input is visible on the task page without changing company tasks", () => {
+  assert.match(page, /QUERY_EXPERT_SLUGS\.has\(task\.expertSlug\) \? task\.input\?\.query\?\.trim\(\)/);
+  assert.match(page, /查询：\{query\}/);
+  assert.match(page, /核查主体：\{task\.input\.companyName\}/);
+  assert.match(page, /!task\.input\?\.companyName && !query && !notes/, "有查询词或任务要求时不能显示空输入");
+  assert.match(page, /SECTOR_PEER_EXPERT_SLUG \? " HTML 看板"/, "看板产物按实际 HTML 格式命名");
+});
+
 test("the employee sees capability words, never the service or model behind the task", () => {
   const visible = `${page}\n${expertDetail}\n${Object.values(EXPERT_TASK_ERROR_LABELS).join("\n")}\n${Object.values(EXPERT_TASK_STAGE_LABELS).join("\n")}\n${Object.values(EXPERT_TASK_STATE_LABELS).join("\n")}`;
   assert.ok(!/悟道|新华财经|DeepSeek|BettaFish|微舆|wudao/i.test(visible), "员工界面不得出现供应商品牌名");
