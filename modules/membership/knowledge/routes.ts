@@ -59,6 +59,30 @@ function dateText(value: unknown): string | null {
   return null;
 }
 
+/** Stable page windows for employee lists, which otherwise silently stopped at the first 100 rows. */
+function pageWindow(req: FastifyRequest): { limit: number; offset: number } {
+  const query = typeof req.query === "object" && req.query ? req.query as Record<string, unknown> : {};
+  const number = (value: unknown, fallback: number) => {
+    const parsed = typeof value === "string" ? Number.parseInt(value, 10) : NaN;
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
+  };
+  return { limit: Math.min(100, Math.max(1, number(query.limit, 50))), offset: number(query.offset, 0) };
+}
+
+/**
+ * The materials of a target, one row per material. A material that wrote more than one page about
+ * the same target left more than one contribution behind; it is still one material, and it is shown
+ * once.
+ */
+function oneRowPerMaterial<T extends { versionId: string }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  return rows.filter(row => {
+    if (seen.has(row.versionId)) return false;
+    seen.add(row.versionId);
+    return true;
+  });
+}
+
 /**
  * Whether an employee may look at what a withdrawn material left behind: the uploader of one of
  * the materials the page was built from, or an administrator. The shared library itself never
@@ -154,9 +178,10 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const base = await baseOf(req);
     if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
     const query = typeof req.query === "object" && req.query && "query" in req.query ? String((req.query as { query?: unknown }).query ?? "").trim() : "";
+    const window = pageWindow(req);
     const documents = await sql`
       SELECT d.id, d.title, d.status, d.base_id AS "baseId", d.uploader_id AS "uploaderId", u.real_name AS "uploaderName", d.created_at AS "createdAt", d.withdrawn_at AS "withdrawnAt",
-        v.id AS "versionId", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.sha256, v.source_author AS "sourceAuthor", v.source_org AS "sourceOrg", v.source_date AS "sourceDate",
+        v.id AS "versionId", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.source_title AS "sourceTitle", v.source_author AS "sourceAuthor", v.source_org AS "sourceOrg", v.source_date AS "sourceDate", v.source_kind AS "sourceKind", v.created_at AS "versionCreatedAt",
         v.extraction_status AS "extractionStatus", v.extraction_note AS "extractionNote", v.version_no AS "versionNo",
         t.state AS "taskState", t.stage AS "taskStage", t.error_code AS "errorCode", t.error_message AS "errorMessage"
       FROM member_wiki_documents d
@@ -164,8 +189,13 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       JOIN LATERAL (SELECT * FROM member_wiki_document_versions v WHERE v.document_id = d.id ORDER BY v.version_no DESC LIMIT 1) v ON true
       LEFT JOIN LATERAL (SELECT * FROM member_wiki_tasks t WHERE t.version_id = v.id ORDER BY t.created_at DESC LIMIT 1) t ON true
       WHERE d.status = 'active' AND d.base_id = ${base.id} AND (${query} = '' OR d.title ILIKE ${`%${query}%`} OR v.file_name ILIKE ${`%${query}%`} OR v.source_org ILIKE ${`%${query}%`})
-      ORDER BY d.created_at DESC LIMIT 100`;
-    return { documents };
+      ORDER BY d.created_at DESC, d.id LIMIT ${window.limit + 1} OFFSET ${window.offset}`;
+    const hasMore = documents.length > window.limit;
+    return {
+      documents: documents.slice(0, window.limit).map(document => ({ ...document, sourceDate: dateText(document.sourceDate), freshness: freshnessTier(dateText(document.sourceDate)) })),
+      hasMore,
+      nextOffset: hasMore ? window.offset + window.limit : null,
+    };
   });
 
   /** One material with its versions and its builds. */
@@ -182,7 +212,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       return reply.code(404).send({ error: "knowledge_document_not_found" });
     }
     const versions = await sql`
-      SELECT v.id, v.version_no AS "versionNo", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.sha256, v.source_title AS "sourceTitle", v.source_author AS "sourceAuthor",
+      SELECT v.id, v.version_no AS "versionNo", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.source_title AS "sourceTitle", v.source_author AS "sourceAuthor",
         v.source_org AS "sourceOrg", v.source_date AS "sourceDate", v.source_kind AS "sourceKind", v.extraction_status AS "extractionStatus", v.extraction_note AS "extractionNote",
         CASE WHEN v.format = 'markdown' AND v.extraction_status = 'available' THEN convert_from(v.body, 'UTF8') ELSE NULL END AS "bodyMd",
         v.created_at AS "createdAt", u.real_name AS "uploaderName",
@@ -342,6 +372,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
     const query = typeof req.query === "object" && req.query && "query" in req.query ? String((req.query as { query?: unknown }).query ?? "").trim() : "";
     const type = typeof req.query === "object" && req.query && "type" in req.query ? String((req.query as { type?: unknown }).type ?? "") : "";
+    const window = pageWindow(req);
     const pages = await sql`
       SELECT p.slug, p.page_type AS "pageType", p.target_type AS "targetType", p.target_name AS "targetName", p.track, p.status, p.updated_at AS "updatedAt",
         r.revision, r.coverage, r.published_at AS "publishedAt",
@@ -350,13 +381,16 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       FROM member_wiki_pages p
       JOIN member_wiki_page_revisions r ON r.page_id = p.id AND r.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = p.id)
       WHERE p.status='published' AND p.base_id = ${base.id} AND (${type} = '' OR p.page_type = ${type}) AND (${query} = '' OR p.slug ILIKE ${`%${query}%`} OR p.target_name ILIKE ${`%${query}%`} OR r.body_md ILIKE ${`%${query}%`})
-      ORDER BY r.published_at DESC LIMIT 100`;
+      ORDER BY r.published_at DESC, p.slug LIMIT ${window.limit + 1} OFFSET ${window.offset}`;
+    const hasMore = pages.length > window.limit;
     return {
-      pages: pages.map(page => ({
+      pages: pages.slice(0, window.limit).map(page => ({
         ...page,
         freshness: freshnessTier(page.coverage?.last_report ?? null),
         freshnessLabel: FRESHNESS_LABELS[freshnessTier(page.coverage?.last_report ?? null)],
       })),
+      hasMore,
+      nextOffset: hasMore ? window.offset + window.limit : null,
     };
   });
 
@@ -390,6 +424,24 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       SELECT slug, target_name AS "targetName" FROM member_wiki_pages
       WHERE base_id=${page.baseId} AND status='published'`;
     const knownRelated = new Set(related.flatMap(item => [item.slug, baseSlugOf(item.slug, page.baseId)]));
+    const materialRows = await sql<{
+      documentId: string; documentTitle: string; versionId: string; versionNo: number; fileName: string;
+      sourceTitle: string | null; sourceAuthor: string | null; sourceOrg: string | null; sourceDate: Date | string | null; sourceKind: string | null;
+      versionCreatedAt: Date | string;
+    }[]>`
+      SELECT d.id AS "documentId", d.title AS "documentTitle", v.id AS "versionId", v.version_no AS "versionNo", v.file_name AS "fileName",
+        v.source_title AS "sourceTitle", v.source_author AS "sourceAuthor", v.source_org AS "sourceOrg", v.source_date AS "sourceDate", v.source_kind AS "sourceKind",
+        v.created_at AS "versionCreatedAt"
+      FROM member_wiki_contributions c
+      JOIN member_wiki_documents d ON d.id=c.document_id
+      JOIN member_wiki_document_versions v ON v.id=c.version_id
+      WHERE c.target_key=${page.targetKey} AND c.status='active' AND d.status='active' AND d.base_id=${page.baseId}
+      ORDER BY v.source_date DESC NULLS LAST, v.created_at DESC, v.id`;
+    const materials = oneRowPerMaterial(materialRows);
+    const revisions = await sql`
+      SELECT revision, published_at AS "publishedAt", coverage
+      FROM member_wiki_page_revisions WHERE page_id=${page.id}
+      ORDER BY revision DESC LIMIT 100`;
     const storedIssues = await sql<{ level: string; category: string; target: string | null; message: string; evidence: string | null; detectedAt: string }[]>`
       SELECT level, category, target, message, evidence, detected_at AS "detectedAt"
       FROM member_wiki_quality_issues WHERE page_id=${page.id} AND status='open' ORDER BY level, detected_at DESC`;
@@ -399,8 +451,19 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       return !slug || !knownRelated.has(slug);
     });
     const tier = freshnessTier(page.coverage?.last_report ?? null);
-    return { page: { ...page, freshness: tier, freshnessLabel: FRESHNESS_LABELS[tier] }, citations, issues,
-      related: related.map(item => ({ ...item, localSlug: baseSlugOf(item.slug, page.baseId) })) };
+    return {
+      page: {
+        id: page.id, slug: page.slug, pageType: page.pageType, targetType: page.targetType, targetName: page.targetName,
+        track: page.track, status: page.status, baseId: page.baseId, revision: page.revision, bodyMd: page.bodyMd,
+        coverage: page.coverage, publishedAt: page.publishedAt, updatedAt: page.updatedAt,
+        freshness: tier, freshnessLabel: FRESHNESS_LABELS[tier],
+      },
+      citations,
+      materials: materials.map(material => ({ ...material, sourceDate: dateText(material.sourceDate), freshness: freshnessTier(dateText(material.sourceDate)) })),
+      revisions,
+      issues,
+      related: related.map(item => ({ ...item, localSlug: baseSlugOf(item.slug, page.baseId) })),
+    };
   });
 
   /** The original material, for an employee who may see it. */

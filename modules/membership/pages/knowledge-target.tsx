@@ -9,6 +9,7 @@ import { renderMarkdown } from "@aihot/web/lib/markdown";
 import { pageMeta, siteUrl } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { KnowledgeDetailSkeleton } from "./knowledge-detail-skeleton.tsx";
+import { FRESHNESS_LABELS, type FreshnessTier } from "../knowledge/catalog.ts";
 
 export const handle: Screen = { tab: "me", name: "知识页" };
 export const meta = () => pageMeta({ title: "知识页", path: "/knowledge", noindex: true });
@@ -18,11 +19,13 @@ const PAGE_TYPE_LABEL: Record<string, string> = { view: "观点页", query: "预
 const FRESHNESS_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "destructive"> = { fresh: "success", semi: "warning", stale: "destructive", undated: "secondary" };
 
 type Citation = { label: string; anchor: string | null; analyst: string | null; organization: string | null; publishedOn: string | null; sourceTitle: string | null; versionId: string; fileName: string; format: string; documentId: string; documentTitle: string };
+type Material = { documentId: string; documentTitle: string; versionId: string; versionNo: number; fileName: string; sourceTitle: string | null; sourceAuthor: string | null; sourceOrg: string | null; sourceDate: string | null; sourceKind: string | null; versionCreatedAt: string; freshness: FreshnessTier };
+type Revision = { revision: number; publishedAt: string; coverage: PageDetail["coverage"] };
 type Issue = { level: string; category: string; target: string | null; message: string; evidence: string | null; detectedAt: string };
 type RelatedPage = { slug: string; localSlug: string; targetName: string | null };
 type PageDetail = {
   id: string; slug: string; pageType: string; targetType: string | null; targetName: string | null; track: string | null; status: string;
-  baseId: string; revision: number; bodyMd: string; publishedAt: string; updatedAt: string; freshness: string; freshnessLabel: string;
+  baseId: string; revision: number; bodyMd: string; publishedAt: string; updatedAt: string; freshness: FreshnessTier; freshnessLabel: string;
   coverage: { analysts: number; firms: number; reports: number; first_report: string | null; last_report: string | null } | null;
 };
 
@@ -47,6 +50,8 @@ export default function KnowledgeTargetPage() {
   const { slug } = useParams();
   const [page, setPage] = useState<PageDetail | null>(null);
   const [citations, setCitations] = useState<Citation[]>([]);
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [revisions, setRevisions] = useState<Revision[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [related, setRelated] = useState<RelatedPage[]>([]);
   const [message, setMessage] = useState("");
@@ -55,9 +60,11 @@ export default function KnowledgeTargetPage() {
   const load = useCallback(async () => {
     const response = await fetch(`${ENDPOINT}pages/${encodeURIComponent(slug ?? "")}`);
     if (!response.ok) { setMessage("知识页不存在或已下架。"); return; }
-    const result = await response.json() as { page: PageDetail; citations: Citation[]; issues: Issue[]; related?: RelatedPage[] };
+    const result = await response.json() as { page: PageDetail; citations: Citation[]; materials: Material[]; revisions: Revision[]; issues: Issue[]; related?: RelatedPage[] };
     setPage(result.page);
     setCitations(result.citations);
+    setMaterials(result.materials);
+    setRevisions(result.revisions);
     setIssues(result.issues);
     setRelated(result.related ?? []);
   }, [slug]);
@@ -88,13 +95,41 @@ export default function KnowledgeTargetPage() {
 
     <Card className="mb-6">
       <CardContent className="pt-5">
+        <p className="mb-4 rounded-control border border-line bg-surface px-3 py-2 text-xs text-ink-3">观点按各份材料并列保留；质量问题仅提示归因或结构缺口，不代表观点对错，也不选出单一结论。</p>
         <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(resolvedBody(page.bodyMd, related), siteUrl()).html }} />
       </CardContent>
     </Card>
 
     <div className="grid gap-6">
       <Card>
-        <CardHeader><CardTitle>来源</CardTitle></CardHeader>
+        <CardHeader><CardTitle>材料时间线</CardTitle></CardHeader>
+        <CardContent>
+          {!materials.length ? <p className="text-sm text-ink-3">暂无有效材料。</p> : <ol className="grid gap-3">
+            {materials.map(material => <li key={material.versionId} className="rounded-card border border-line p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium text-ink">{material.sourceTitle ?? material.documentTitle} · v{material.versionNo}</span>
+                <Badge variant={FRESHNESS_VARIANT[material.freshness] ?? "secondary"}>{FRESHNESS_LABELS[material.freshness] ?? "时效未知"}</Badge>
+              </div>
+              <p className="mt-1 text-xs text-ink-3">{material.sourceOrg ?? "机构未知"} · {material.sourceAuthor ?? "分析师未知"} · {material.sourceDate ?? "材料日期未知"} · {material.sourceKind ?? "类型未知"}</p>
+              <p className="mt-1 text-xs text-ink-4">{material.fileName} · 入库 {new Date(material.versionCreatedAt).toLocaleString("zh-CN")}</p>
+              <Link to={`/knowledge/documents/${material.documentId}`} className="mt-2 inline-block text-sm text-accent underline-offset-4 hover:underline">查看材料版本</Link>
+            </li>)}
+          </ol>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>页面修订</CardTitle></CardHeader>
+        <CardContent>
+          {!revisions.length ? <p className="text-sm text-ink-3">暂无修订记录。</p> : <ol className="grid gap-2">{revisions.map(revision => <li key={revision.revision} className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-line p-3 text-sm">
+            <span className="font-medium text-ink">修订 {revision.revision}</span>
+            <span className="text-xs text-ink-3">发布于 {new Date(revision.publishedAt).toLocaleString("zh-CN")} · 材料 {revision.coverage?.reports ?? 0} · 最近材料 {revision.coverage?.last_report ?? "日期未知"}</span>
+          </li>)}</ol>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>观点来源</CardTitle></CardHeader>
         <CardContent>
           {!citations.length ? <p className="text-sm text-ink-3">本页没有可跳转的来源。</p> : <ul className="grid gap-2">{citations.map(citation => <li key={`${citation.versionId}-${citation.label}-${citation.analyst ?? ""}`} className="rounded-card border border-line p-3 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -104,7 +139,7 @@ export default function KnowledgeTargetPage() {
                 <Button asChild variant="outline" size="sm"><a href={`${ENDPOINT}versions/${citation.versionId}/original`}><Download size={14} aria-hidden="true" />原件</a></Button>
               </span>
             </div>
-            <p className="mt-1 text-xs text-ink-3">{citation.analyst ?? "分析师未知"}{citation.organization ? ` · ${citation.organization}` : ""}{citation.publishedOn ? ` · ${citation.publishedOn}` : ""}{citation.anchor ? ` · ${citation.anchor}` : ""} · {citation.fileName}</p>
+            <p className="mt-1 text-xs text-ink-3">{citation.analyst ?? "分析师未知"} · {citation.organization ?? "机构未知"} · {citation.publishedOn ?? "材料日期未知"}{citation.anchor ? ` · ${citation.anchor}` : ""} · {citation.fileName}</p>
           </li>)}</ul>}
         </CardContent>
       </Card>
