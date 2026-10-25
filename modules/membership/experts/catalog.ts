@@ -26,7 +26,7 @@ export const EXPERT_SLUG = "external-investment-landscape-xinhua-adapter";
 export const HIDDEN_EXPERT_STATUS = "hidden";
 
 /** The builtins the employee platform keeps but does not offer as a catalog entry. */
-export const HIDDEN_BUILTIN_SLUGS = new Set<string>([EXPERT_SLUG]);
+export const HIDDEN_BUILTIN_SLUGS = new Set<string>([EXPERT_SLUG, "company-sentiment-report"]);
 
 /**
  * The status of an expert the platform plans to offer. `blocked` would mean missing dependencies and
@@ -86,27 +86,38 @@ export const PANORAMA_EXPERT = {
   missingDependencies: [],
 };
 
-/**
- * The planned expert entry: a company public-opinion and brand-reputation report. The data sources and
- * the run are not connected yet, so the entry only says what the capability will be.
- */
+/** The retired entry remains as a hidden row so historical tasks retain their expert reference. */
 export const COMING_SOON_EXPERT_SLUG = "company-sentiment-report";
 
 export const COMING_SOON_EXPERT_SKILL = `# 企业舆情报告
 
-本专家计划产出企业公开舆情与品牌声誉方向的专题报告。当前处于开发中：平台尚未接入舆情数据源与报告生成流程，因此本条目不提供任务提交，也不产出报告。
-
-当前状态：开发中，敬请期待。目录里保留这条入口，是为了让员工看到这项能力的规划与口径。
-
-接入后，本技能文本会写明报告覆盖的时段与对象、证据口径与引用方式，以及每一项未提供的字段如何标注。当前版本不声明任何工具依赖。
+旧目录入口已隐藏，仅保留历史任务关联；不提供新任务，也不产出舆情报告。当前版本不声明任何工具依赖。
 `;
 
 export const COMING_SOON_EXPERT = {
   slug: COMING_SOON_EXPERT_SLUG,
   name: "企业舆情报告",
-  description: "面向企业公开舆情与品牌声誉的专题报告能力，开发中，敬请期待。",
+  description: "旧目录入口已隐藏，仅保留历史任务关联。",
   version: "0.1.0",
   skillMd: COMING_SOON_EXPERT_SKILL,
+  missingDependencies: [],
+};
+
+export const SECTOR_PEER_EXPERT_SLUG = "sector-peer-landscape";
+export const SECTOR_PEER_EXPERT_SKILL = `# 赛道同业竞争看板
+
+输入一个企业或赛道名称。P0 仅保存原始查询并生成空的网页看板；企业与赛道的消歧在 P1 完成。主视图以中国同业、人民币基金和境内交易为主；美国同业与融资只作参考带。
+
+看板回答三个问题：同业是谁、发展到哪（公开阶段信号）、资本市场认可（公开融资／并购／IPO 密度）。仅使用公开资料。后续接入数据时，每个数字、事件和判断都须附可访问的来源 URL 与时间口径；缺少可靠证据写“未披露／未检索到”，不得补造。内部 IC 笔记、未披露估值及真实 LP 管线不属于数据范围。
+
+P0 不声明任何工具依赖，不调用企业信息查询或模型研究，也不接入实时公开信源。
+`;
+export const SECTOR_PEER_EXPERT = {
+  slug: SECTOR_PEER_EXPERT_SLUG,
+  name: "赛道同业竞争看板",
+  description: "从同业是谁、公开阶段信号与公开融资／并购／IPO 密度看赛道竞争；中国为主，美国同业作参考。P0 数据源未接入。",
+  version: "0.1.0",
+  skillMd: SECTOR_PEER_EXPERT_SKILL,
   missingDependencies: [],
 };
 

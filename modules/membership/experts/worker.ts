@@ -3,7 +3,8 @@ import { z } from "zod";
 import { chatJson } from "@aihot/backend/providers/llm";
 import { redactMembershipTaskResponses } from "@aihot/backend/providers/receipts";
 import { sql, type Db } from "@aihot/backend/db";
-import { BUILTIN_EXPERT, EXPERT_SLUG, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, PANORAMA_TOOL_LABELS, XINHUA_BASE_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
+import { BUILTIN_EXPERT, COMING_SOON_EXPERT_SLUG, EXPERT_SLUG, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, PANORAMA_TOOL_LABELS, SECTOR_PEER_EXPERT_SLUG, XINHUA_BASE_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
+import { renderSectorPeerDashboard } from "./sector-peer-html.ts";
 import { ExpertProviderError, withXinhua, type XinhuaCall } from "./xinhua.ts";
 import { candidateSearchOutcome, mapCompanyCandidates, mapInvestmentEvidence, parseInvestmentPage, querySelectedCompanyProfile, relaxedCompanyKeywords, textField, type EntityCandidate } from "./data.ts";
 import { collectProviderPages, investmentRowIdentity } from "../provider-pages.ts";
@@ -309,12 +310,12 @@ export async function runExpertTask(taskId: string) {
   heartbeat.unref?.();
   try {
     let report: string;
+    const isSectorPeer = task.expert_slug === SECTOR_PEER_EXPERT_SLUG;
     let panoramaStatus: { incomplete: boolean; gapCount: number; limits: string[] } | null = null;
     const experts = await sql<{ manifest: { tools?: string[] }; status: string }[]>`SELECT manifest,status FROM member_experts WHERE slug=${task.expert_slug}`;
-    // A hidden expert still runs the tasks it was given before it was hidden; only new tasks are
-    // refused, and the refusal happens where the task is created. A `coming_soon` expert never runs:
-    // its data sources are not connected yet.
-    if (!experts[0] || (experts[0].status !== "available" && experts[0].status !== HIDDEN_EXPERT_STATUS)) throw new Error("expert_unavailable");
+    // The one-layer builtin still runs historical tasks after hiding. The retired sentiment slug
+    // never had a runner, so even a hand-queued old task must not fall through to the text model.
+    if (task.expert_slug === COMING_SOON_EXPERT_SLUG || !experts[0] || (experts[0].status !== "available" && experts[0].status !== HIDDEN_EXPERT_STATUS)) throw new Error("expert_unavailable");
     const toolMode = task.expert_slug === EXPERT_SLUG || task.expert_slug === PANORAMA_EXPERT_SLUG || executionMode(experts[0].manifest) === "xinhua_trial" || executionMode(experts[0].manifest) === "xinhua_panorama";
     if (toolMode && !task.selected_entity) {
       await sql`UPDATE member_expert_tasks SET stage='entity_search',updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
@@ -325,7 +326,8 @@ export async function runExpertTask(taskId: string) {
       await sql`UPDATE member_expert_tasks SET state='waiting_input',stage='choose_entity',result=${sql.json({ candidates, approximate })},updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
       return;
     }
-    if (task.expert_slug === EXPERT_SLUG) report = await runBuiltin(task, leaseToken);
+    if (isSectorPeer) report = renderSectorPeerDashboard(String(task.input.query ?? ""), new Date());
+    else if (task.expert_slug === EXPERT_SLUG) report = await runBuiltin(task, leaseToken);
     else if (task.expert_slug === PANORAMA_EXPERT_SLUG) {
       const panorama = await runPanoramaExpert(task, leaseToken);
       report = panorama.markdown;
@@ -343,8 +345,8 @@ export async function runExpertTask(taskId: string) {
     await sql.begin(async tx => {
       const active = await tx`SELECT id FROM member_expert_tasks WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} AND lease_expires_at > now() FOR UPDATE`;
       if (!active.length) return;
-      await tx`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256) VALUES (${taskId},${task.user_id},${`expert-${taskId}.md`},'text/markdown; charset=utf-8',${body},${digest}) ON CONFLICT(task_id) DO NOTHING`;
-      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json({ preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
+      await tx`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256) VALUES (${taskId},${task.user_id},${`expert-${taskId}.${isSectorPeer ? "html" : "md"}`},${isSectorPeer ? "text/html; charset=utf-8" : "text/markdown; charset=utf-8"},${body},${digest}) ON CONFLICT(task_id) DO NOTHING`;
+      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json(isSectorPeer ? { html: report, format: "html" } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
     });
   } catch (error) {
     const detail = errorText(error);

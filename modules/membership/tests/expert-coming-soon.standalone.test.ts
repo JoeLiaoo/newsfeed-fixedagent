@@ -1,34 +1,30 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { COMING_SOON_EXPERT, COMING_SOON_EXPERT_SLUG, COMING_SOON_EXPERT_STATUS, EXPERT_STATUS_BADGES, expertStatusBadge } from "../experts/catalog.ts";
+import { HIDDEN_BUILTIN_SLUGS, SECTOR_PEER_EXPERT, SECTOR_PEER_EXPERT_SLUG, expertStatusBadge } from "../experts/catalog.ts";
+import { renderSectorPeerDashboard } from "../experts/sector-peer-html.ts";
 
-test("the planned expert entry names the capability and says it is still in development", () => {
-  assert.equal(COMING_SOON_EXPERT_STATUS, "coming_soon");
-  assert.match(COMING_SOON_EXPERT_SLUG, /^[a-z0-9]+(-[a-z0-9]+)*$/, "slug 用稳定的 kebab 写法");
-  assert.equal(COMING_SOON_EXPERT.name, "企业舆情报告");
-  assert.ok(COMING_SOON_EXPERT.description.includes("开发中"), "描述说明仍在开发中");
-  assert.ok(COMING_SOON_EXPERT.skillMd.includes("开发中"), "技能文本说明仍在开发中");
-  assert.deepEqual(COMING_SOON_EXPERT.missingDependencies, [], "开发中的条目不写缺少依赖");
-  const visible = `${COMING_SOON_EXPERT.name}\n${COMING_SOON_EXPERT.description}\n${COMING_SOON_EXPERT.skillMd}`;
-  assert.ok(!/悟道|新华财经|DeepSeek|BettaFish|微舆|wudao/i.test(visible), "开发中条目不得出现供应商品牌名");
-});
-
-test("the badge of a planned expert reads 开发中, not 可运行 or 缺少依赖", () => {
+test("old sentiment entry is hidden and the public-data expert is runnable", () => {
+  assert.ok(HIDDEN_BUILTIN_SLUGS.has("company-sentiment-report"));
+  assert.equal(SECTOR_PEER_EXPERT_SLUG, "sector-peer-landscape");
+  assert.equal(SECTOR_PEER_EXPERT.name, "赛道同业竞争看板");
+  assert.deepEqual(SECTOR_PEER_EXPERT.missingDependencies, []);
   assert.equal(expertStatusBadge("available").label, "可运行");
-  assert.equal(expertStatusBadge("coming_soon").label, "开发中");
-  assert.equal(expertStatusBadge("blocked").label, "缺少依赖");
-  assert.equal(expertStatusBadge("coming_soon").variant, EXPERT_STATUS_BADGES.coming_soon.variant);
+  assert.match(SECTOR_PEER_EXPERT.skillMd, /来源 URL/);
+  assert.match(SECTOR_PEER_EXPERT.skillMd, /未披露／未检索到/);
 });
 
-test("the catalog and the detail page show the planned state and take no task", () => {
-  const list = readFileSync(new URL("../pages/experts.tsx", import.meta.url), "utf8");
+test("P0 HTML shell has the locked sections and escapes a raw query", () => {
+  const html = renderSectorPeerDashboard('<script>alert("x")</script> 商业航天', new Date("2026-10-25T00:00:00Z"));
+  for (const title of ["同业是谁", "发展到哪（公开阶段信号）", "资本市场认可（公开融资/并购/IPO 密度）", "美国参考", "数据缺口与待接入公开来源", "不构成投资建议", "数据源未接入", "P0 空看板"]) assert.ok(html.includes(title), title);
+  assert.ok(html.includes("&lt;script&gt;"));
+  assert.ok(!html.includes("<script>"));
+  assert.ok(!html.includes("http://") && !html.includes("https://"));
+});
+
+test("employee detail uses a single query field and sandboxed HTML preview", () => {
   const detail = readFileSync(new URL("../pages/expert-detail.tsx", import.meta.url), "utf8");
-  const routes = readFileSync(new URL("../experts/routes.ts", import.meta.url), "utf8");
-  assert.ok(list.includes('expert.status !== "available"') && list.includes("expertStatusBadge"), "目录对不可运行专家显示状态徽标");
-  assert.ok(detail.includes("数据源接入中，暂不能提交任务"), "详情页明确说明不可提交任务");
-  assert.ok(detail.includes('expert.status === "available" && <Card>'), "提交任务的表单只对可运行的专家显示");
-  assert.ok(routes.includes("status IN ('available', ${COMING_SOON_EXPERT_STATUS})"), "目录对所有角色返回开发中的条目");
-  assert.ok(routes.includes("expert_coming_soon"), "新建任务按开发中拒绝");
-  assert.ok(!/悟道|新华财经|DeepSeek|BettaFish|微舆|wudao/i.test(`${list}\n${detail}`), "页面不得出现供应商品牌名");
+  assert.ok(detail.includes('name="query"'));
+  assert.ok(detail.includes('srcDoc={task.result.html} sandbox=""'));
+  assert.ok(detail.includes("sector_query_required"));
 });
