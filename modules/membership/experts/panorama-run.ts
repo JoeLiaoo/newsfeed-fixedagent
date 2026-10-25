@@ -7,7 +7,7 @@
  * can be a minority holding on one chain and a control holding on another.
  */
 import { collectProviderPages } from "../provider-pages.ts";
-import { hasNotFoundMarker, parseInvestmentPage, XINHUA_ALL_TIME } from "./data.ts";
+import { hasNotFoundMarker, isBranchType, parseInvestmentPage, XINHUA_ALL_TIME } from "./data.ts";
 import { mapAnnualBase, mapAnnualInvestment, mapCanRev, mapHistoryNames, mapProfile, mapRelations, mapShareholders, type PanoramaDisclosure } from "./panorama-fields.ts";
 import type { XinhuaCall } from "./xinhua.ts";
 import {
@@ -142,6 +142,11 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
     node.gaps.push(detail);
     addGap(node.name, summary);
   };
+  /** A branch holds no outbound investments of its own: the draft says so instead of reading it as empty. */
+  const recordBranchGap = (node: PanoramaNode) => {
+    if (!isBranchType(node.profile?.typeName)) return;
+    recordNodeGap(node, "该主体在登记上是分支机构，其对外投资清单通常为空；本次结果不代表母公司的对外投资。", "该主体是分支机构，其对外投资清单通常为空；本次结果不代表母公司的对外投资。");
+  };
 
   const rootNode: PanoramaNode = {
     key: options.root.key, name: options.root.name, depth: 0,
@@ -167,6 +172,7 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
       const raw = await providerCall("get_company_profile", { query: relation.name, query_type: "company_name", time: XINHUA_ALL_TIME }, key, depth, "profile");
       node.profile = mapProfile(raw);
       node.status.profileStatus = node.profile.status;
+      recordBranchGap(node);
       if (node.profile.originalName) {
         node.historyNames = [...new Set([...node.historyNames, ...node.profile.originalName.split(/[;；]/).map(part => part.trim()).filter(Boolean)])];
       }
@@ -247,6 +253,7 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
         const raw = await providerCall("get_company_profile", { ...subjectQuery(subject, subject.creditCode ?? null), time: XINHUA_ALL_TIME }, node.key, node.depth, "profile");
         node.profile = mapProfile(raw);
         node.status.profileStatus = node.profile.status;
+        recordBranchGap(node);
         if (node.profile.originalName) {
           node.historyNames = [...new Set([...node.historyNames, ...node.profile.originalName.split(/[;；]/).map(part => part.trim()).filter(Boolean)])];
         }
