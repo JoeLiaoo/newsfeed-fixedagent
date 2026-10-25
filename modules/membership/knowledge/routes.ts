@@ -132,11 +132,18 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const description = text(body(req).description, 200) ?? "";
     if (!name || name.length < 2) return reply.code(400).send({ error: "knowledge_base_name_required", message: "请填写知识库名称（2–80 字）。" });
     await ensureDefaultBase();
-    const existing = await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM member_wiki_bases WHERE status = 'active'`;
-    if ((existing[0]?.count ?? 0) >= MAX_BASES) return reply.code(409).send({ error: "knowledge_base_limit_reached", message: `知识库数量已达上限（${MAX_BASES} 个）。` });
     const id = newBaseId();
-    await sql`INSERT INTO member_wiki_bases(id, name, description, status, created_by) VALUES (${id}, ${name}, ${description}, 'active', ${user.id})`;
-    await sql`INSERT INTO member_wiki_audit_events(id, actor_id, event_type, detail) VALUES (${randomUUID()}, ${user.id}, 'knowledge.base.created', ${sql.json({ baseId: id, name })})`;
+    const created = await sql.begin(async tx => {
+      // Base creation is globally capped. Lock the shared base as a stable serialization point so
+      // two employees cannot both observe the last slot as free.
+      await tx`SELECT id FROM member_wiki_bases WHERE id=${DEFAULT_BASE_ID} FOR UPDATE`;
+      const existing = await tx<{ count: number }[]>`SELECT count(*)::int AS count FROM member_wiki_bases WHERE status = 'active'`;
+      if ((existing[0]?.count ?? 0) >= MAX_BASES) return false;
+      await tx`INSERT INTO member_wiki_bases(id, name, description, status, created_by) VALUES (${id}, ${name}, ${description}, 'active', ${user.id})`;
+      await tx`INSERT INTO member_wiki_audit_events(id, actor_id, event_type, detail) VALUES (${randomUUID()}, ${user.id}, 'knowledge.base.created', ${tx.json({ baseId: id, name })})`;
+      return true;
+    });
+    if (!created) return reply.code(409).send({ error: "knowledge_base_limit_reached", message: `知识库数量已达上限（${MAX_BASES} 个）。` });
     return reply.code(201).send({ base: { id, name, description, status: "active" } });
   });
 

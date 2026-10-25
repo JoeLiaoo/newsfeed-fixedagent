@@ -14,6 +14,7 @@ export const PODCAST_QUERY_MAX = 100;
 
 const SEARCH_TIMEOUT_MS = 20_000;
 const EPISODE_TIMEOUT_MS = 20_000;
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 export class PodcastSourceError extends Error {
   readonly code: string;
@@ -113,6 +114,37 @@ export type PodcastClientOptions = {
   /** The HTTP client; the tests hand it a stub instead of reaching the network. */
   fetchImpl?: typeof fetch;
 };
+
+async function responseJson(response: Response): Promise<unknown> {
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new PodcastSourceError("podcast_response_invalid");
+  }
+  if (!response.body) throw new PodcastSourceError("podcast_response_invalid");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new PodcastSourceError("podcast_response_invalid");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown; }
+  catch { throw new PodcastSourceError("podcast_response_invalid"); }
+}
 
 /** The taxonomy the library publishes, named in Chinese so the employee reads a sector, not an id. */
 const SECTOR_LABELS: Record<string, string> = {
@@ -248,9 +280,7 @@ export function createPodcastClient(options: PodcastClientOptions = {}): Podcast
     }
     if (response.status === 404) throw new PodcastSourceError("podcast_episode_missing");
     if (!response.ok) throw new PodcastSourceError("podcast_source_unavailable");
-    let payload: unknown;
-    try { payload = await response.json(); }
-    catch { throw new PodcastSourceError("podcast_response_invalid"); }
+    const payload = await responseJson(response);
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PodcastSourceError("podcast_response_invalid");
     return payload as Record<string, unknown>;
   };
