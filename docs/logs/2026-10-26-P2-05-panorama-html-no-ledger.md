@@ -2,7 +2,7 @@
 
 - Agent：Codex
 - 对应任务：P2-05 的员工产物体验维护；真实生产样例与员工验收仍未完成，P2-05 保持 `[ ]`。
-- 完成状态：代码完成，PR 评审与 CI 待完成。
+- 完成状态：PR #97 已打开；评审与 CI 待完成。
 - 基线：`origin/main` `c7334e9`；独立 worktree 分支 `fix/panorama-html-no-ledger-download`。
 
 ## 本次改动
