@@ -70,3 +70,8 @@
 - 验证：`npx tsc -p modules` 通过；知识库 standalone 33/33 通过；知识库访问与多库数据库测试 2/2 通过（本机 PostgreSQL）；文档链接 482 条通过；`git diff --check` 通过。
 - 全仓 `npm run typecheck` 在 `@aihot/web` 处失败：当前 worktree 未安装 `@radix-ui/react-dropdown-menu` 与 `@radix-ui/react-toggle-group`，并引发 `Tabs.tsx` 中的隐式 any 错误；模块 TypeScript 检查通过，GitHub CI 新 head 检查仍须完成。
 - 复基 head：`657eab7`。本次未部署，未进行真实员工验收；P5-02～P5-04 继续未勾选。
+
+## 2026-10-26 合并状态
+
+- PR #55 复基后的新 head 检查全绿，已 squash 合并为 `9179785a74e7c0e9fdc60014e54046499c18cd22`。
+- 尚未部署；P5-02～P5-04 的真实员工与材料验收仍待执行。
