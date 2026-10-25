@@ -13,6 +13,7 @@ const investment = { id: "verified-fixture", gp_name: "核实 GP", investee_name
 const api = fakeApi(async (url, _res, req) => {
   const path = url.pathname;
   if (path === "/api/v1/membership/me") return { user: { username: "fixture-user", realName: "测试员工", role: "member" }, tags: ["光伏"], catalog: ["光伏"] };
+  if (path === "/api/v1/membership/knowledge/bases") return { bases: [] };
   if (path === "/api/v1/membership/digest/history") return { digests: [
     { date: "2026-10-22", preferenceVersion: 2, itemCount: 4 },
     { date: "2026-10-22", preferenceVersion: 1, itemCount: 3 },
@@ -47,7 +48,8 @@ test("employee smoke UI shows one history day, current identity, GP detail and p
     await visit(page, web.origin + "/");
     await expect(page.getByRole("navigation", { name: "日报历史" }).getByRole("link")).toHaveCount(1);
     await visit(page, web.origin + "/more");
-    await expect(page.getByText("测试员工 · @fixture-user")).toBeVisible();
+    await expect(page.getByRole("region", { name: "当前登录账号" })).toContainText("测试员工");
+    await expect(page.getByRole("region", { name: "当前登录账号" })).toContainText("@fixture-user");
     await visit(page, web.origin + "/projects/invested-gp");
     await page.getByRole("link", { name: "已核实企业" }).click();
     await expect(page).toHaveURL(/\/projects\/invested-gp\/verified-fixture$/);
@@ -60,16 +62,43 @@ test("employee smoke UI shows one history day, current identity, GP detail and p
   } finally { await page.close(); }
 });
 
+test("more renders the current identity from its server loader even when browser API fetches fail", async () => {
+  const page = await browser.newPage();
+  try {
+    let browserMeRequests = 0;
+    await page.route("**/api/v1/membership/me", route => { browserMeRequests++; return route.abort(); });
+    const response = await page.goto(web.origin + "/more");
+    assert.equal(response?.status(), 200);
+    await expect(page.getByRole("region", { name: "当前登录账号" })).toContainText("测试员工");
+    await expect(page.getByRole("region", { name: "当前登录账号" })).toContainText("@fixture-user");
+    assert.equal(browserMeRequests, 0);
+    assert.match(response?.headers()["cache-control"] ?? "", /private, no-store/);
+  } finally { await page.close(); }
+});
+
 test("knowledge document and page show a loading status until their reads finish", async () => {
   const page = await browser.newPage();
   try {
     await visit(page, web.origin + "/knowledge/documents/doc-fixture");
-    await expect(page.getByRole("status", { name: "" }).filter({ hasText: "正在加载材料…" })).toBeVisible();
+    await expect(page.getByRole("status", { name: "正在加载材料…" })).toBeVisible();
+    await expect(page.getByRole("status", { name: "正在加载材料…" }).locator('[class*="animate-pulse"]')).toBeVisible();
     releaseDocument();
     await expect(page.getByRole("heading", { name: "测试材料" })).toBeVisible();
     await visit(page, web.origin + "/knowledge/targets/page-fixture");
-    await expect(page.getByRole("status", { name: "" }).filter({ hasText: "正在加载知识页…" })).toBeVisible();
+    await expect(page.getByRole("status", { name: "正在加载知识页…" })).toBeVisible();
+    await expect(page.getByRole("status", { name: "正在加载知识页…" }).locator('[class*="animate-pulse"]')).toBeVisible();
     releaseTarget();
     await expect(page.getByRole("heading", { name: "测试知识页" })).toBeVisible();
   } finally { releaseDocument(); releaseTarget(); await page.close(); }
+});
+
+test("bare knowledge detail paths return to the existing knowledge list", async () => {
+  const page = await browser.newPage();
+  try {
+    for (const path of ["/knowledge/documents", "/knowledge/targets"]) {
+      await visit(page, web.origin + path);
+      await expect(page).toHaveURL(web.origin + "/knowledge");
+      await expect(page.getByRole("heading", { name: "知识库" })).toBeVisible();
+    }
+  } finally { await page.close(); }
 });

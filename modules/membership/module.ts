@@ -16,6 +16,8 @@ export const membershipModule: ModuleDeclaration = {
     { path: "projects/citic-alliance", file: "pages/projects/citic-alliance.tsx" },
     { path: "projects/market-leaders", file: "pages/projects/market-leaders.tsx" },
     { path: "knowledge", file: "pages/knowledge.tsx" },
+    { path: "knowledge/documents", file: "pages/knowledge-redirect.ts", id: "knowledge-documents-index" },
+    { path: "knowledge/targets", file: "pages/knowledge-redirect.ts", id: "knowledge-targets-index" },
     { path: "knowledge/bases/new", file: "pages/knowledge-base-new.tsx" },
     { path: "knowledge/bases/:id", file: "pages/knowledge-base.tsx" },
     { path: "knowledge/targets/:slug", file: "pages/knowledge-target.tsx" },
