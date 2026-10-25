@@ -2,6 +2,7 @@ import { readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ChangelogRelease, ChangelogResponse } from "../packages/contracts/src/site.ts";
+import { beijingDate, beijingTime } from "../packages/contracts/src/time.ts";
 
 const kinds = new Set<ChangelogRelease["kind"]>(["更新", "优化", "公告", "下线"]);
 const pendingKeys = new Set(["kind", "title", "body", "urgent"]);
@@ -42,9 +43,7 @@ export function parseChangelog(value: unknown): ChangelogResponse {
 
 export function beijingMinute(now: Date): { date: string; time: string } {
   if (Number.isNaN(now.getTime())) throw new Error("invalid apply time");
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
-  const part = (type: string) => parts.find(item => item.type === type)!.value;
-  return { date: `${part("year")}-${part("month")}-${part("day")}`, time: `${part("hour")}:${part("minute")}` };
+  return { date: beijingDate(now), time: beijingTime(now) };
 }
 
 function contentKey(entry: Pick<ChangelogRelease, "kind" | "title" | "body" | "urgent">): string {
