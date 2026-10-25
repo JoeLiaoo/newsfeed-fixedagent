@@ -29,5 +29,6 @@
 
 ## 未验证与下一步
 
+- PR #88 已 Open；创建时 Docs links 与 PostgreSQL integration checks 已通过，quality workflow 仍运行中。
 - 没有再次调用生产候选接口，也没有真实员工验收；部署后的生产复测仍待用户执行。
 - 全景专家 P2-05 的真实任务、数据覆盖和报告质量验收仍未完成，保持未勾选。
