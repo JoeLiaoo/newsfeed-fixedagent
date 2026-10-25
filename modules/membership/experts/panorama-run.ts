@@ -7,7 +7,7 @@
  * can be a minority holding on one chain and a control holding on another.
  */
 import { collectProviderPages } from "../provider-pages.ts";
-import { parseInvestmentPage, XINHUA_ALL_TIME } from "./data.ts";
+import { hasNotFoundMarker, parseInvestmentPage, XINHUA_ALL_TIME } from "./data.ts";
 import { mapAnnualBase, mapAnnualInvestment, mapCanRev, mapHistoryNames, mapProfile, mapRelations, mapShareholders, type PanoramaDisclosure } from "./panorama-fields.ts";
 import type { XinhuaCall } from "./xinhua.ts";
 import {
@@ -280,6 +280,7 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
     let relations: PanoramaRelation[] = [];
     let relationsPartial = false;
     let providerSaysEmpty = false;
+    let providerHasNoRecord = false;
     try {
       const creditCode = node.profile?.creditCode?.trim();
       const pages = await collectProviderPages<Record<string, unknown>>({
@@ -289,19 +290,24 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
             query: creditCode || node.name, query_type: creditCode ? "credit_code" : "company_name",
             limit, offset, time: XINHUA_ALL_TIME,
           }, node.key, node.depth, `relations:${offset}`));
+          if (page.notFound) providerHasNoRecord = true;
           if (!page.rows.length && page.hasMore === false) providerSaysEmpty = true;
           return page;
         },
       });
       relations = mapRelations(pages.rows);
-      // A provider that answers "no rows, no further page" has read the whole list; only an unfinished
-      // page makes the draft incomplete.
       relationsPartial = !pages.complete && !(providerSaysEmpty && !pages.rows.length);
     } catch (error) {
       if (error instanceof PanoramaLimitError) { recordNodeGap(node, "已达调用次数上限，该主体尚有信息未读取或交叉核验。"); break; }
       recordNodeGap(node, `对外直接投资未取到（${errorText(error)}）。`, "对外直接投资未取到，该主体的对外投资未覆盖。");
     }
-    if (relationsPartial) {
+    if (providerHasNoRecord) {
+      // The provider answered "no such record". That is an answer about the coverage, not an
+      // unfinished page: the draft says the list is not covered instead of reading it as a partial read.
+      relations = [];
+      relationsPartial = false;
+      recordNodeGap(node, "平台企业信息查询未返回该主体的对外投资记录（查询结果 not_found）；不能据此断定该主体没有对外投资。", "对外直接投资列表未取到（平台返回 not_found），该主体的对外投资未覆盖。");
+    } else if (relationsPartial) {
       recordNodeGap(node, "对外直接投资分页未读完，该主体的对外投资可能不完整。");
     }
 
@@ -318,16 +324,22 @@ export async function runPanorama(options: PanoramaRunOptions): Promise<Panorama
     if (!usable.length) {
       // A subject with no live investment is checked against its annual reports before it is called empty.
       try {
-        const annual = mapAnnualBase(await providerCall("get_company_annual_report_base_info", subjectQuery(subject, subject.creditCode ?? null), node.key, node.depth, "annual_base"));
+        const annualRaw = await providerCall("get_company_annual_report_base_info", subjectQuery(subject, subject.creditCode ?? null), node.key, node.depth, "annual_base");
+        const annual = mapAnnualBase(annualRaw);
         node.status.annualStatus = annual.annualStatus;
         node.status.annualPublishedAt = annual.annualPublishedAt;
         node.status.annualHasInvestment = annual.annualHasInvestment;
         node.status.annualYears = annual.annualYears;
-        if (annual.annualYears.length) {
-          const disclosure = mapAnnualInvestment(await providerCall("get_company_annual_report_investment_info", subjectQuery(subject, subject.creditCode ?? null), node.key, node.depth, "annual_investment"));
+        if (hasNotFoundMarker(annualRaw)) {
+          recordNodeGap(node, "平台企业信息查询未返回该主体的年报基础信息（查询结果 not_found）；该主体的年报披露未覆盖。");
+        } else if (annual.annualYears.length) {
+          const investmentRaw = await providerCall("get_company_annual_report_investment_info", subjectQuery(subject, subject.creditCode ?? null), node.key, node.depth, "annual_investment");
+          const disclosure = mapAnnualInvestment(investmentRaw);
           node.annualDisclosure = disclosure;
           if (disclosure.length) {
             recordNodeGap(node, "年报披露过对外投资但当前在投清单为空，退出性质未由平台工具确认。", "年报披露过对外投资但当前在投清单为空；退出性质与接手股东无对等工具，无法确认退出时间与方式。");
+          } else if (hasNotFoundMarker(investmentRaw)) {
+            recordNodeGap(node, "平台企业信息查询未返回该主体的年报对外投资明细（查询结果 not_found）；年报披露的对外投资未覆盖。");
           }
         }
       } catch (error) {

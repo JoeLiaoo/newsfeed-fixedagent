@@ -5,6 +5,10 @@ export type EntityCandidate = {
   creditCode: string | null;
   address: string | null;
   startDate: string | null;
+  /** The registry's type of the subject, when the provider gave it (e.g. 有限责任公司, 分公司). */
+  typeName?: string | null;
+  /** The candidate whose registered name this one is built on: this one is a branch of it. */
+  branchOf?: string | null;
 };
 
 /**
@@ -17,6 +21,32 @@ export const XINHUA_ALL_TIME = { start: "1900-01-01", end: null, missing_policy:
 
 /** The legal forms a registered name is often written with; the provider matches the name without them too. */
 const NAME_SUFFIXES = ["股份有限公司", "有限责任公司", "有限公司", "普通合伙企业", "合伙企业", "有限合伙"];
+
+/**
+ * The legal forms a registered name is written with. A branch is registered under its parent's name
+ * plus its own name, so the parent's registered name ends at the first legal form of the branch name.
+ */
+const LEGAL_FORM_WORDS = ["股份有限公司", "有限责任公司", "有限公司", "普通合伙企业", "有限合伙企业", "合伙企业", "集团公司"];
+
+/**
+ * The registered names a branch name is built on: the part up to and including its first legal form.
+ * These are only ever used as search words: the provider decides whether such a subject exists, and the
+ * employee confirms it. A name without a legal form, or one that is only the legal form, yields nothing.
+ */
+export function parentNameCandidates(names: string[]): string[] {
+  const parents: string[] = [];
+  for (const name of names) {
+    const trimmed = name.trim();
+    for (const form of LEGAL_FORM_WORDS) {
+      const index = trimmed.indexOf(form);
+      if (index <= 0) continue;
+      const parent = trimmed.slice(0, index + form.length).trim();
+      if (parent.length >= 4 && parent !== trimmed) parents.push(parent);
+      break;
+    }
+  }
+  return [...new Set(parents)];
+}
 
 /**
  * Shorter forms of a typed name to try when the provider matched nothing: the parenthetical and the
@@ -44,7 +74,7 @@ export type InvestmentEvidence = {
   source: string;
 };
 
-export type InvestmentPage = { rows: Record<string, unknown>[]; total: number | null; hasMore: boolean | null; nextOffset?: number | null };
+export type InvestmentPage = { rows: Record<string, unknown>[]; total: number | null; hasMore: boolean | null; nextOffset?: number | null; notFound: boolean };
 export type XinhuaCall = (tool: "get_company_profile", args: Record<string, unknown>) => Promise<unknown>;
 
 export function normalizeText(value: unknown): string | null {
@@ -145,7 +175,75 @@ export function mapCompanyCandidates(rows: Record<string, unknown>[], fallbackNa
     creditCode: textField(row, "credit_code", "unified_social_credit_code"),
     address: textField(row, "address", "registered_address"),
     startDate: textField(row, "start_date", "establish_date"),
+    typeName: textField(row, "company_type_name", "company_type"),
+    branchOf: null,
   }));
+}
+
+/**
+ * Whether the registry's type says the subject is a branch. A branch holds no outbound investment
+ * list of its own, so an employee who means the parent must not stop at one.
+ */
+export function isBranchType(typeName: string | null | undefined) {
+  if (!typeName) return false;
+  return /分公司|分支机构|分厂|营业部/.test(typeName);
+}
+
+/**
+ * The candidate whose registered name another candidate is built on: a branch is registered under
+ * the parent's name plus its own, so the shorter name is the one the branch hangs on.
+ */
+export function markBranchRelations(candidates: EntityCandidate[]): EntityCandidate[] {
+  return candidates.map(candidate => {
+    const name = candidate.name.trim();
+    const parent = candidates
+      .filter(other => other.id !== candidate.id && other.name.trim().length < name.length && name.startsWith(other.name.trim()))
+      .sort((left, right) => right.name.trim().length - left.name.trim().length)[0];
+    return { ...candidate, branchOf: parent?.name.trim() ?? null };
+  });
+}
+
+/** Whether a candidate's registered name carries the name the employee typed. */
+export function carriesQuery(candidateName: string, query: string) {
+  const name = candidateName.trim();
+  const typed = query.trim();
+  if (!typed || !name) return false;
+  return name === typed || name.startsWith(typed);
+}
+
+/**
+ * The candidates in the order an employee should read them: the subject that carries the typed name
+ * exactly first, then the subjects whose registered name starts with it (the parent comes before the
+ * branches built on it, because it is the shorter name), then the rest. The employee still confirms.
+ */
+export function rankCompanyCandidates(candidates: EntityCandidate[], query: string): EntityCandidate[] {
+  const typed = query.trim();
+  const scored = candidates.map(candidate => {
+    const name = candidate.name.trim();
+    const tier = name === typed ? 0 : name.startsWith(typed) ? 1 : typed.startsWith(name) ? 2 : 3;
+    return { candidate, tier, length: name.length };
+  });
+  return scored
+    .sort((left, right) => left.tier - right.tier || left.length - right.length || left.candidate.name.localeCompare(right.candidate.name, "zh"))
+    .map(entry => entry.candidate);
+}
+
+/**
+ * Whether the provider answered "I have no such record". It is an answer, not a missing page: the
+ * platform says so in the draft instead of reading it as an unfinished list.
+ */
+export function hasNotFoundMarker(value: unknown): boolean {
+  const parsed = parseObject(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  const row = parsed as Record<string, unknown>;
+  for (const key of ["not_found", "notFound"]) {
+    const flag = row[key];
+    if (flag === true || flag === 1 || flag === "true") return true;
+  }
+  for (const child of Object.values(row)) {
+    if (child && typeof child === "object" && !Array.isArray(child) && hasNotFoundMarker(child)) return true;
+  }
+  return false;
 }
 
 export function parseInvestmentPage(value: unknown, keys = ["direct_investment_info", "results", "items", "data"]): InvestmentPage {
@@ -184,7 +282,7 @@ export function parseInvestmentPage(value: unknown, keys = ["direct_investment_i
       ? nextOffsetRaw
       : nextOffsetRaw === null ? null : Number.NaN
     : undefined;
-  return { rows, total, hasMore, nextOffset };
+  return { rows, total, hasMore, nextOffset, notFound: hasNotFoundMarker(value) };
 }
 
 export function mapInvestmentEvidence(rows: Record<string, unknown>[], source: string, cap = 500): InvestmentEvidence[] {

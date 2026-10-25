@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router";
 import { ArrowLeft } from "lucide-react";
+import { beijingStamp } from "@aihot/contracts/time";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
@@ -12,7 +13,8 @@ import { Textarea } from "@aihot/web/components/member-ui/textarea";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, SECTOR_PEER_EXPERT_SLUG, modeNeedsEntity, expertStatusBadge } from "../experts/catalog.ts";
+import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_STAGE_LABELS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, SECTOR_PEER_EXPERT_SLUG, modeNeedsEntity, expertStatusBadge } from "../experts/catalog.ts";
+import { isBranchType } from "../experts/data.ts";
 
 export const handle: Screen = { tab: "me", name: "专家" };
 export const meta = () => pageMeta({ title: "专家详情", path: "/experts", noindex: true });
@@ -21,10 +23,11 @@ type Expert = {
   slug: string; name: string; description: string; version: string; status: string;
   execution_mode: "xinhua_trial" | "xinhua_panorama" | "text_only"; missing_dependencies: string[];
 };
-type Candidate = { id: string; name: string; status: string | null; creditCode: string | null; address: string | null; startDate: string | null };
+type Candidate = { id: string; name: string; status: string | null; creditCode: string | null; address: string | null; startDate: string | null; typeName?: string | null; branchOf?: string | null };
 type Task = {
   id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string; query?: string; notes?: string };
-  result: { candidates?: Candidate[]; preview?: string; html?: string; format?: string; approximate?: boolean; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null; errorCode: string | null; errorMessage: string | null;
+  selectedEntity: { id?: string; name?: string; creditCode?: string | null } | null;
+  result: { candidates?: Candidate[]; preview?: string; html?: string; format?: string; approximate?: boolean; query?: string; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null; errorCode: string | null; errorMessage: string | null;
   createdAt: string; hasArtifact: boolean; hasCheckpoint: boolean; executionAttempts: number;
   materials: Array<{ id: string; filename: string; byteSize: number; sha256: string; extractionStatus: string; extractionNote: string | null }>;
 };
@@ -34,6 +37,31 @@ const STATE_VARIANT: Record<string, "default" | "secondary" | "success" | "warni
 const ERROR_TEXT: Record<string, string> = {
   xinhua_not_configured: "企业信息查询服务尚未配置，请联系管理员。", xinhua_unavailable: "企业信息查询服务暂时不可用。", xinhua_tool_unavailable: "当前账号缺少所需工具，任务未完成。", xinhua_tool_failed: "企业信息查询未返回可用结果。", xinhua_no_candidates: "未匹配到该名称的企业主体，请核对登记名称或改用更短的关键词。", xinhua_entity_id_missing: "查询返回的主体缺少可核验的唯一标识，报告已停止。", xinhua_response_invalid: "查询返回内容无法解析，报告已停止。", xinhua_identity_unverified: "未能按唯一 ID 或完整信用代码核验主体，报告已停止。", xinhua_entity_mismatch: "查询返回的主体与所选企业不一致，报告已停止。", expert_execution_failed: "任务未完成，请检查配置后重试。",
 };
+
+/** What the employee typed, so a task in the list says which subject it is about. */
+function taskSubject(task: Task) {
+  return (task.result?.query ?? task.input.companyName ?? task.input.query ?? "").trim();
+}
+
+/** The reason a candidate is not the subject the employee had in mind, when the platform can tell. */
+function branchNote(candidate: Candidate) {
+  if (isBranchType(candidate.typeName)) return "该候选是分支机构，通常没有自己的对外投资记录";
+  if (candidate.branchOf) return `该候选的登记名称建立在「${candidate.branchOf}」之上，可能是分支机构`;
+  return null;
+}
+
+/** The error of a failed request: the API's own code when it gave one, its status when it did not. */
+function submitErrorText(data: { error?: string; message?: string }, status: number) {
+  if (data.error === "sector_query_required") return "请输入至少 2 个汉字或英文字母的企业或赛道名称。";
+  if (data.error === "expert_dependencies_missing") return "该专家依赖尚未接入。";
+  if (data.error === "expert_coming_soon") return "该专家仍在开发中，暂不接收任务。";
+  if (data.error === "expert_task_rate_limited") return "任务并发或每小时提交上限已达到，请稍后重试。";
+  if (data.error?.startsWith("expert_material_")) return "任务材料不符合要求，请使用有文字层的 PDF、DOCX、PPTX 或 UTF-8 Markdown，并检查大小。";
+  if (data.error === "company_name_required") return "请填写至少 2 个字的目标企业名称。";
+  if (data.error === "api_unavailable") return "服务暂时不可用，请稍后重试；重试不会重复创建任务。";
+  if (data.message) return data.message;
+  return `任务提交失败（HTTP ${status}），请稍后重试；重试不会重复创建任务。`;
+}
 
 /** One expert: what it is, the task it takes, and the tasks it has run for this employee. */
 export default function ExpertDetailPage() {
@@ -51,6 +79,9 @@ export default function ExpertDetailPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // One submission carries one idempotency key: a retry after a gateway error returns the task the
+  // first attempt may have created instead of starting a second one.
+  const submitKey = useRef<{ signature: string; key: string } | null>(null);
 
   async function load() {
     const [expertResponse, taskResponse] = await Promise.all([fetch("/api/v1/membership/experts"), fetch("/api/v1/membership/expert-tasks")]);
@@ -92,11 +123,16 @@ export default function ExpertDetailPage() {
         for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
         return { fileName: file.name, base64: btoa(binary) };
       }));
-      const response = await fetch("/api/v1/membership/expert-tasks", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ slug, companyName, query, notes, materials }) });
-      const data = await response.json() as { error?: string };
-      if (!response.ok) { setMessage(data.error === "sector_query_required" ? "请输入至少 2 个汉字或英文字母的企业或赛道名称。" : data.error === "expert_dependencies_missing" ? "该专家依赖尚未接入。" : data.error === "expert_coming_soon" ? "该专家仍在开发中，暂不接收任务。" : data.error === "expert_task_rate_limited" ? "任务并发或每小时提交上限已达到，请稍后重试。" : data.error?.startsWith("expert_material_") ? "任务材料不符合要求，请使用有文字层的 PDF、DOCX、PPTX 或 UTF-8 Markdown，并检查大小。" : "任务提交失败，请检查输入并重试。"); return; }
+      const signature = JSON.stringify({ slug, companyName, query, notes, materials: materials.map(material => material.fileName) });
+      if (submitKey.current?.signature !== signature) submitKey.current = { signature, key: crypto.randomUUID() };
+      const response = await fetch("/api/v1/membership/expert-tasks", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": submitKey.current.key }, body: JSON.stringify({ slug, companyName, query, notes, materials }) });
+      const raw = await response.text();
+      let data: { error?: string; message?: string } = {};
+      try { data = JSON.parse(raw) as { error?: string; message?: string }; } catch { data = {}; }
+      if (!response.ok) { setMessage(submitErrorText(data, response.status)); return; }
+      submitKey.current = null;
       setCompanyName(""); setQuery(""); setNotes(""); setFiles([]); setMessage("任务已进入队列。离开此页不会中断任务。"); await load();
-    } catch { setMessage("任务提交请求失败，请检查网络后重试。"); }
+    } catch { setMessage("任务提交请求失败，请检查网络后重试；重试不会重复创建任务。"); }
     finally { setBusy(false); }
   }
 
@@ -179,10 +215,12 @@ export default function ExpertDetailPage() {
         <CardContent>
           {!tasks.length ? <p className="text-sm text-ink-3">暂无任务。</p> : <div className="grid gap-4">{tasks.map(task => <article key={task.id} className="rounded-card border border-line p-4">
             <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{task.expertName}</h3><Badge variant={STATE_VARIANT[task.state] ?? "secondary"}>{STATE_TEXT[task.state] ?? task.state}</Badge></div>
-            <p className="mt-2 text-xs text-ink-3">{task.stage} · {new Date(task.createdAt).toLocaleString("zh-CN")} · 执行尝试 {task.executionAttempts}/3 · 到期后自动清理</p>
-            {task.errorMessage && <Alert className="mt-3" variant="destructive">{ERROR_TEXT[task.errorCode ?? ""] ?? task.errorMessage}</Alert>}
+            {taskSubject(task) && <p className="mt-1 break-words text-sm text-ink-2">查询：{taskSubject(task)}</p>}
+            {task.selectedEntity?.name && <p className="mt-1 break-words text-xs text-ink-3">已确认主体：{task.selectedEntity.name}{task.selectedEntity.creditCode ? `（${task.selectedEntity.creditCode}）` : ""}</p>}
+            <p className="mt-2 text-xs text-ink-3">{EXPERT_STAGE_LABELS[task.stage] ?? task.stage} · {beijingStamp(task.createdAt)} · 执行尝试 {task.executionAttempts}/3 · 到期后自动清理</p>
+            {task.errorMessage && <Alert className="mt-3" variant="destructive">{task.errorMessage ?? ERROR_TEXT[task.errorCode ?? ""] ?? task.errorCode}</Alert>}
             {task.expertSlug === PANORAMA_EXPERT_SLUG && task.state === "succeeded" && task.result?.panorama?.incomplete && <Alert className="mt-3">结果不完整：{task.result.panorama.gapCount} 项核实缺口{task.result.panorama.limits.length ? `；达到上限：${task.result.panorama.limits.join("、")}` : ""}。请先查看报告中的缺口与未覆盖关系。</Alert>}
-            {task.state === "waiting_input" && <div className="mt-4 grid gap-2"><p className="text-sm">请选择正确的工商主体，确认后系统才会继续：</p>{task.result?.approximate && <p className="text-xs text-ink-3">未匹配到完全一致的名称，以下为近似候选，请确认主体后再继续。</p>}{task.result?.candidates?.map(candidate => <Button key={candidate.id} type="button" variant="outline" disabled={busy} className="h-auto justify-start whitespace-normal px-3 py-3 text-left" onClick={() => void selectEntity(task.id, candidate.id)}><span><span className="block font-medium">{candidate.name}</span><span className="mt-1 block text-xs font-normal text-ink-3">{candidate.status ?? "状态未知"} · {candidate.address ?? "地址未提供"} · {candidate.creditCode ?? "统一代码未提供"}</span></span></Button>)}</div>}
+            {task.state === "waiting_input" && <div className="mt-4 grid gap-2"><p className="text-sm">请选择正确的工商主体，确认后系统才会继续：</p>{task.result?.approximate && <p className="text-xs text-ink-3">未找到名称包含「{taskSubject(task)}」的登记主体，以下为近似候选。</p>}{task.result?.candidates?.map(candidate => <Button key={candidate.id} type="button" variant="outline" disabled={busy} className="h-auto justify-start whitespace-normal px-3 py-3 text-left" onClick={() => void selectEntity(task.id, candidate.id)}><span><span className="block font-medium">{candidate.name}</span><span className="mt-1 block text-xs font-normal text-ink-3">{candidate.status ?? "状态未知"} · {candidate.address ?? "地址未提供"} · {candidate.creditCode ?? "统一代码未提供"}</span>{branchNote(candidate) && <span className="mt-1 block text-xs font-normal text-ink-3">{branchNote(candidate)}</span>}</span></Button>)}</div>}
             {task.result?.preview && <pre className="mt-4 max-h-72 overflow-auto whitespace-pre-wrap rounded-control bg-bg-sunk p-3 text-xs text-ink-2">{task.result.preview}</pre>}
             {task.expertSlug === SECTOR_PEER_EXPERT_SLUG && task.result?.format === "html" && task.result.html && <div className="mt-4"><p className="mb-2 break-words text-sm font-medium">网页看板 · {task.input.query}</p><iframe title={`赛道同业竞争看板：${task.input.query ?? "查询"}`} srcDoc={task.result.html} sandbox="" className="h-[680px] w-full rounded-card border border-line bg-white" /></div>}
             {task.materials?.length > 0 && <div className="mt-3 text-sm">{task.materials.map(material => <div key={material.id} className="flex flex-wrap items-center gap-2">{task.state === "cancelled" ? <span>{material.filename}</span> : <a className="text-accent underline-offset-4 hover:underline" href={`/api/v1/membership/expert-tasks/${task.id}/materials/${material.id}`}>{material.filename}</a>}<span className="text-xs text-ink-3">{Math.ceil(material.byteSize / 1024)} KB · {material.extractionStatus === "available" ? "已用于任务" : material.extractionStatus === "unavailable" ? "无法提取文字" : "等待处理"}</span>{["succeeded", "failed", "cancelled"].includes(task.state) && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void deleteMaterial(task.id, material.id)}>删除</Button>}</div>)}</div>}
