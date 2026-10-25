@@ -202,7 +202,7 @@ export default function ExpertDetailPage() {
           <form onSubmit={submit} className="grid gap-4">
             {slug === SECTOR_PEER_EXPERT_SLUG && <>
               <div className="grid gap-2"><Label htmlFor="sector-query">企业或赛道</Label><Input ref={queryInput} id="sector-query" name="query" required maxLength={200} value={query} aria-invalid={!!queryError} aria-describedby={queryError ? "sector-query-error" : "sector-query-hint"} onInvalid={() => setQueryError("请输入至少 2 个汉字或英文字母的企业或赛道名称。")} onChange={event => { setQuery(event.target.value); if (queryError) setQueryError(""); }} placeholder="例如：商业航天…" />{queryError && <p id="sector-query-error" className="text-sm text-hot" role="alert">{queryError}</p>}</div>
-              <p id="sector-query-hint" className="text-xs leading-relaxed text-ink-3">输入企业或赛道即可。P0 只生成公开数据空看板；数据源未接入，企业与赛道消歧将在 P1 完成。</p>
+              <p id="sector-query-hint" className="text-xs leading-relaxed text-ink-3">输入企业或赛道即可。看板整理可公开检索并附来源的信息；没有可靠证据时会说明未披露或未检索到。</p>
               <div className="grid gap-2"><Label htmlFor="sector-notes">备注（可选）</Label><Textarea id="sector-notes" name="notes" maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={3} /></div>
             </>}
             {slug === FRONTIER_PODCAST_EXPERT_SLUG && <>
