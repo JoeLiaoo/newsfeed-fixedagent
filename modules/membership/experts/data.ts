@@ -214,11 +214,42 @@ function normalizeCompanyName(value: string) {
   return value.trim().replace(/[\s·•,，:：()（）]/g, "");
 }
 
-/** The short employee-facing relation label for a candidate among the choices in one search. */
-export function companyRelationLabel(candidate: EntityCandidate, candidates: EntityCandidate[]) {
+/** The short employee-facing relation hint among candidates for the name the employee typed. */
+export function companyRelationLabel(candidate: EntityCandidate, candidates: EntityCandidate[], query: string, approximate = false) {
+  const typed = normalizeCompanyName(query);
+  if (approximate || !typed || !carriesQuery(candidate.name, query)) return null;
+  const matching = candidates.filter(other => carriesQuery(other.name, query));
   if (candidate.branchOf || isBranchType(candidate.typeName)) return "分支机构";
-  if (candidates.some(other => other.id !== candidate.id && other.branchOf === candidate.name.trim())) return "母公司候选";
-  return null;
+
+  // A registry name can occur more than once (for example, a mainland and an incomplete HK row).
+  // Only a candidate with a parent signal can anchor brand-prefix hints; the employee still confirms it.
+  const directlyReferenced = new Set(matching.map(other => normalizeCompanyName(other.branchOf ?? "")).filter(Boolean));
+  const hasMainlandCreditCode = (other: EntityCandidate) => /^[0-9A-Z]{18}$/.test(other.creditCode?.trim() ?? "");
+  const parents = matching.filter(other => !other.branchOf && !isBranchType(other.typeName) && (
+    directlyReferenced.has(normalizeCompanyName(other.name)) ||
+    /股份有限公司$/.test(normalizeCompanyName(other.name)) ||
+    (hasMainlandCreditCode(other) && ["有限公司", "有限责任公司"].some(form => normalizeCompanyName(other.name) === typed + form))
+  ));
+  const score = (other: EntityCandidate) =>
+    (/股份有限公司$/.test(normalizeCompanyName(other.name)) ? 4 : 0) +
+    (hasMainlandCreditCode(other) ? 2 : 0) +
+    (directlyReferenced.has(normalizeCompanyName(other.name)) ? 1 : 0);
+  const parent = parents.sort((left, right) => score(right) - score(left) ||
+    normalizeCompanyName(left.name).length - normalizeCompanyName(right.name).length ||
+    left.id.localeCompare(right.id))[0];
+  if (!parent) return null;
+
+  const parentName = normalizeCompanyName(parent.name);
+  const isBrandSibling = (other: EntityCandidate) => {
+    const name = normalizeCompanyName(other.name);
+    return other.id !== parent.id && name !== parentName && name.length > typed.length &&
+      name.startsWith(typed) && /(?:有限责任公司|有限公司)$/.test(name) && !/股份有限公司$/.test(name);
+  };
+  if (candidate.id === parent.id) {
+    return matching.some(other => (other.branchOf && normalizeCompanyName(other.branchOf) === parentName) || isBranchType(other.typeName) || isBrandSibling(other))
+      ? "母公司候选" : null;
+  }
+  return isBrandSibling(candidate) ? "分支机构" : null;
 }
 
 /** Whether a candidate's registered name carries the name the employee typed. */
