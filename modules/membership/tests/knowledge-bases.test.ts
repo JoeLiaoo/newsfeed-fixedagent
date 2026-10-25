@@ -218,7 +218,7 @@ test("the knowledge bases hold their own materials, pages and answers", async t 
 
   // Two simultaneous requests contend for the last slot. Exactly one succeeds, and the audit row
   // is committed with the created base.
-  for (let index = 0; index < 18; index++) {
+  for (let index = 0; index < 17; index++) {
     await sql`INSERT INTO member_wiki_bases(id,name,status,created_by) VALUES (${`limit-${suffix}-${index}`},${`并发测试库${index}`},'active',${owner!.id})`;
   }
   const contenders = await Promise.all(["最后一库甲", "最后一库乙"].map(name => app.inject({
