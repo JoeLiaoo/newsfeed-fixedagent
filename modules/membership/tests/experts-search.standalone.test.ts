@@ -140,9 +140,50 @@ test("宁德时代 parent candidate ranks ahead of a branch-heavy result and get
   const found = await searchCompanyCandidates(call as never, "宁德时代");
   assert.equal(found.candidates[0]?.creditCode, "91350900587527783P", "母公司必须排在分支候选之前");
   assert.equal(found.candidates.length, 12, "候选数仍按页面上限截取");
-  assert.equal(companyRelationLabel(found.candidates[0]!, found.candidates), "母公司候选");
-  assert.equal(companyRelationLabel(found.candidates[1]!, found.candidates), "分支机构");
+  assert.equal(companyRelationLabel(found.candidates[0]!, found.candidates, "宁德时代"), "母公司候选");
+  assert.equal(companyRelationLabel(found.candidates[1]!, found.candidates, "宁德时代"), "分支机构");
   assert.match(expertDetailSource, /companyRelationLabel\(candidate, task\.result\?\.candidates/, "候选选择器渲染关系标签");
+});
+
+test("real-shaped brand siblings get relation hints with one mainland parent", () => {
+  const rows = [
+    { company_id: "hk", company_name: "宁德时代新能源科技股份有限公司", company_type_name: "股份有限公司" },
+    { company_id: "mainland", company_name: "宁德时代新能源科技股份有限公司", credit_code: "91350900587527783P", company_type_name: "股份有限公司" },
+    { company_id: "incomplete", company_name: "宁德时代新能源科技股份有限公司" },
+    { company_id: "power", company_name: "宁德时代锂动力有限公司", company_type_name: "有限责任公司" },
+    { company_id: "sales", company_name: "宁德时代(宁德)销售有限公司" },
+    { company_id: "storage", company_name: "宁德时代储能有限责任公司" },
+    { company_id: "film", company_name: "宁德时代传奇影业有限公司" },
+    { company_id: "other", company_name: "时代新能源科技有限公司" },
+  ];
+  const candidates = rankCompanyCandidates(markBranchRelations(mapCompanyCandidates(rows, "宁德时代")), "宁德时代");
+  const labels = new Map(candidates.map(candidate => [candidate.id, companyRelationLabel(candidate, candidates, "宁德时代")]));
+  assert.equal(labels.get("mainland"), "母公司候选");
+  assert.equal([...labels.values()].filter(label => label === "母公司候选").length, 1);
+  assert.equal(labels.get("hk"), null);
+  assert.equal(labels.get("incomplete"), null);
+  assert.equal(labels.get("power"), "分支机构");
+  assert.equal(labels.get("sales"), "分支机构");
+  assert.equal(labels.get("storage"), "分支机构");
+  assert.equal(labels.get("other"), null);
+  assert.equal(candidates.find(candidate => candidate.id === "power")?.branchOf, null, "brand hint does not assert a registered branch relationship");
+});
+
+test("near matches without the typed brand have no relation badges", () => {
+  const candidates = markBranchRelations(mapCompanyCandidates([
+    { company_id: "parent", company_name: "时代新能源科技股份有限公司", credit_code: "91350900587527783P" },
+    { company_id: "branch", company_name: "时代新能源科技股份有限公司福州分公司", company_type_name: "分公司" },
+  ], "宁德时代"));
+  assert.deepEqual(candidates.map(candidate => companyRelationLabel(candidate, candidates, "宁德时代", true)), [null, null]);
+  assert.deepEqual(candidates.map(candidate => companyRelationLabel(candidate, candidates, "宁德时代")), [null, null]);
+});
+
+test("brand matches alone do not invent a parent without a parent signal", () => {
+  const candidates = mapCompanyCandidates([
+    { company_id: "power", company_name: "宁德时代锂动力有限公司", credit_code: "91350900587527783P" },
+    { company_id: "sales", company_name: "宁德时代销售有限公司" },
+  ], "宁德时代");
+  assert.deepEqual(candidates.map(candidate => companyRelationLabel(candidate, candidates, "宁德时代")), [null, null]);
 });
 
 test("ranking promotes an identified parent above branches when registry names include punctuation", () => {
