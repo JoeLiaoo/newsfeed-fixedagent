@@ -214,10 +214,90 @@ function normalizeCompanyName(value: string) {
   return value.trim().replace(/[\s·•,，:：()（）]/g, "");
 }
 
-/** The short employee-facing relation label for a candidate among the choices in one search. */
-export function companyRelationLabel(candidate: EntityCandidate, candidates: EntityCandidate[]) {
+/**
+ * The legal forms a registered name ends with when it reads as a legal person of its own rather
+ * than a row under one: a same-brand joint-stock or limited-liability company is its own subject.
+ */
+const LEGAL_PERSON_ENDINGS = /(股份有限公司|有限责任公司|集团有限公司)$/;
+
+/** A mainland registration carries an eighteen-character unified social credit code. */
+function hasMainlandCreditCode(candidate: EntityCandidate) {
+  const code = candidate.creditCode?.trim().toUpperCase() ?? "";
+  return code.length === 18 && /^[0-9A-Z]{18}$/.test(code) && !/[IOZSV]/.test(code);
+}
+
+/**
+ * How much a candidate reads as the legal person behind a brand: a mainland credit code first,
+ * then any credit code, then a registered name that reads as a legal person.
+ */
+function legalPersonScore(candidate: EntityCandidate) {
+  let score = 0;
+  if (hasMainlandCreditCode(candidate)) score += 4;
+  else if (candidate.creditCode?.trim()) score += 3;
+  if (LEGAL_PERSON_ENDINGS.test(candidate.name.trim())) score += 2;
+  return score;
+}
+
+/**
+ * The row that reads as the registration itself among the rows listed under the same name: the
+ * same registered name is listed twice when one of the rows is not a mainland registration.
+ */
+function preferredRegistration(candidates: EntityCandidate[], name: string) {
+  const same = candidates.filter(candidate => normalizeCompanyName(candidate.name) === normalizeCompanyName(name));
+  return same.sort((left, right) => legalPersonScore(right) - legalPersonScore(left))[0] ?? null;
+}
+
+/** The legal person behind the typed brand, and the rows that hang off it. */
+type BrandRelations = { parentId: string; siblingIds: Set<string> };
+
+/**
+ * The legal person behind the brand the employee typed, and the rows that hang off it. A listed
+ * company has many rows under the same brand whose registered names do not carry its full name (a
+ * subsidiary writes the brand and its own name), so the typed name is the stem those rows share.
+ * Nothing is read this way when no candidate carries the typed name: those rows are near matches.
+ */
+function brandRelations(candidates: EntityCandidate[], query: string | null | undefined): BrandRelations | null {
+  const stem = normalizeCompanyName(query ?? "");
+  if (!stem) return null;
+  const carrying = candidates.filter(candidate => carriesQuery(candidate.name, stem));
+  if (!carrying.length) return null;
+  const parent = carrying
+    .filter(candidate => !isBranchType(candidate.typeName) && legalPersonScore(candidate) > 0)
+    .sort((left, right) => legalPersonScore(right) - legalPersonScore(left)
+      || normalizeCompanyName(right.name).length - normalizeCompanyName(left.name).length)[0];
+  if (!parent) return null;
+  const parentName = normalizeCompanyName(parent.name);
+  const siblingIds = new Set<string>();
+  for (const candidate of carrying) {
+    if (candidate.id === parent.id) continue;
+    const name = normalizeCompanyName(candidate.name);
+    if (name === parentName) continue;                             // the same name, listed twice
+    if (name.length <= stem.length) continue;                      // the typed name itself
+    if (LEGAL_PERSON_ENDINGS.test(candidate.name.trim())) continue; // another legal person of the brand
+    siblingIds.add(candidate.id);
+  }
+  if (!siblingIds.size) return null;
+  return { parentId: parent.id, siblingIds };
+}
+
+/**
+ * The short employee-facing relation label for a candidate among the choices in one search. A branch
+ * is registered under the name it hangs on; a row of the same brand writes the brand and its own
+ * name, so the name the employee typed is the stem those rows share. The label is a prompt for the
+ * employee, who still confirms the subject.
+ */
+export function companyRelationLabel(candidate: EntityCandidate, candidates: EntityCandidate[], query?: string | null) {
   if (candidate.branchOf || isBranchType(candidate.typeName)) return "分支机构";
-  if (candidates.some(other => other.id !== candidate.id && other.branchOf === candidate.name.trim())) return "母公司候选";
+  const brand = brandRelations(candidates, query);
+  if (brand) {
+    if (brand.parentId === candidate.id) return "母公司候选";
+    if (brand.siblingIds.has(candidate.id)) return "分支机构";
+  }
+  const name = candidate.name.trim();
+  if (candidates.some(other => other.id !== candidate.id && other.branchOf === name)) {
+    const preferred = preferredRegistration(candidates, name);
+    if (preferred?.id === candidate.id) return "母公司候选";
+  }
   return null;
 }
 

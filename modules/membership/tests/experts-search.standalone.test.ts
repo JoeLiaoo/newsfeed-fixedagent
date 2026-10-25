@@ -7,6 +7,7 @@ import { candidateSearchOutcome, carriesQuery, companyRelationLabel, hasNotFound
 import { searchCompanyCandidates } from "../experts/worker.ts";
 
 const expertDetailSource = readFileSync(new URL("../pages/expert-detail.tsx", import.meta.url), "utf8");
+const taskDetailSource = readFileSync(new URL("../pages/task-detail.tsx", import.meta.url), "utf8");
 
 test("the candidate search reads the provider's list and knows an answer without one", () => {
   const live = candidateSearchOutcome({ result: { total: 2, results: [{ company_id: "a", company_name: "甲" }], pagination: { limit: 10, offset: 0, count: 2, has_more: false, next_offset: null } } });
@@ -161,4 +162,55 @@ test("the provider's 'no such record' answer is read as an answer, not as a miss
   assert.equal(hasNotFoundMarker({ direct_investment_info: [] }), false);
   assert.equal(parseInvestmentPage({ not_found: true }).notFound, true);
   assert.equal(parseInvestmentPage({ direct_investment_info: [] }).notFound, false);
+});
+
+test("the rows of the same brand read as the parent and its branches, not only the ones named after it", async () => {
+  // The rows a real provider answer holds: the mainland registration, the same registered name
+  // listed again, and subsidiaries whose registered names carry the brand but not the full name.
+  const rows = [
+    { company_id: "cn-parent", company_name: "宁德时代新能源科技股份有限公司", credit_code: "91350900587527783P", company_type_name: "股份有限公司" },
+    { company_id: "hk-parent", company_name: "宁德时代新能源科技股份有限公司", company_type_name: "股份有限公司" },
+    { company_id: "hk-partial", company_name: "宁德时代新能源科技股份有限公司" },
+    { company_id: "lidian", company_name: "宁德时代锂动力有限公司" },
+    { company_id: "xiaoshou", company_name: "宁德时代(宁德)销售有限公司" },
+    { company_id: "yingye", company_name: "宁德时代传奇影业有限公司" },
+  ];
+  const call = async () => ({ results: rows });
+  const found = await searchCompanyCandidates(call as never, "宁德时代");
+  assert.equal(found.approximate, false, "候选里有登记名包含查询词的主体");
+  const label = (id: string) => companyRelationLabel(found.candidates.find(candidate => candidate.id === id)!, found.candidates, "宁德时代");
+  assert.equal(label("cn-parent"), "母公司候选", "内地母公司读作母公司候选");
+  assert.equal(label("lidian"), "分支机构", "同一品牌下的子公司读作分支机构");
+  assert.equal(label("xiaoshou"), "分支机构");
+  assert.equal(label("yingye"), "分支机构");
+  assert.equal(label("hk-parent"), null, "同一个登记名只有一行是母公司候选");
+  assert.equal(label("hk-partial"), null, "同一个登记名只有一行是母公司候选");
+});
+
+test("a parent with the brand in its rows is told from a parent that only has branches named after it", () => {
+  const candidates = rankCompanyCandidates(markBranchRelations(mapCompanyCandidates([
+    { company_id: "cn-parent", company_name: "宁德时代新能源科技股份有限公司", credit_code: "91350900587527783P", company_type_name: "股份有限公司" },
+    { company_id: "branch", company_name: "宁德时代新能源科技股份有限公司福建分公司", company_type_name: "分公司" },
+    { company_id: "lidian", company_name: "宁德时代锂动力有限公司" },
+  ], "宁德时代")), "宁德时代");
+  const label = (id: string) => companyRelationLabel(candidates.find(candidate => candidate.id === id)!, candidates, "宁德时代");
+  assert.equal(label("cn-parent"), "母公司候选");
+  assert.equal(label("branch"), "分支机构");
+  assert.equal(label("lidian"), "分支机构");
+  assert.equal(candidates.find(candidate => candidate.id === "branch")?.branchOf, "宁德时代新能源科技股份有限公司", "登记名建立的分支关系仍然保留");
+});
+
+test("near matches that carry no typed name are left without a relation label", () => {
+  const candidates = rankCompanyCandidates(markBranchRelations(mapCompanyCandidates([
+    { company_id: "n1", company_name: "完全无关公司" },
+    { company_id: "n2", company_name: "另一家无关公司" },
+  ], "无关")), "宁德时代");
+  assert.equal(companyRelationLabel(candidates[0]!, candidates, "宁德时代"), null);
+  assert.equal(companyRelationLabel(candidates[1]!, candidates, "宁德时代"), null);
+});
+
+test("both waiting-input pages read the relation label from the same helper", () => {
+  assert.match(expertDetailSource, /companyRelationLabel\(candidate, task\.result\?\.candidates \?\? \[\], task\.result\?\.query\)/, "专家详情页按查询词读关系标签");
+  assert.match(taskDetailSource, /companyRelationLabel\(candidate, candidates, task\.result\?\.query\)/, "任务详情页按查询词读关系标签");
+  assert.doesNotMatch(taskDetailSource, /function candidateRelation/, "任务详情页不再自带一份关系判断");
 });

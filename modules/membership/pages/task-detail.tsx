@@ -9,6 +9,7 @@ import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS, PANORAMA_EXPERT_SLUG } from "../experts/catalog.ts";
+import { companyRelationLabel } from "../experts/data.ts";
 
 export const handle: Screen = { tab: "me", name: "任务" };
 export const meta = () => pageMeta({ title: "任务详情", path: "/tasks", noindex: true });
@@ -16,7 +17,7 @@ export const meta = () => pageMeta({ title: "任务详情", path: "/tasks", noin
 type Candidate = { id: string; name: string; status: string | null; creditCode: string | null; address: string | null; startDate: string | null; typeName?: string | null; branchOf?: string | null };
 type Task = {
   id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string; notes?: string };
-  result: { candidates?: Candidate[]; preview?: string; approximate?: boolean; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null;
+  result: { candidates?: Candidate[]; preview?: string; approximate?: boolean; query?: string; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null;
   errorCode: string | null; errorMessage: string | null; executionAttempts: number;
   createdAt: string; updatedAt: string; expiresAt: string; hasArtifact: boolean; hasCheckpoint: boolean;
   materials: Array<{ id: string; filename: string; byteSize: number; sha256: string; extractionStatus: string; extractionNote: string | null }>;
@@ -30,12 +31,6 @@ const TERMINAL_STATES = ["succeeded", "failed", "cancelled"];
 function when(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "时间未知" : date.toLocaleString("zh-CN");
-}
-
-function candidateRelation(candidate: Candidate, candidates: Candidate[]) {
-  if (candidate.branchOf || /分公司|分支机构|分厂|营业部/.test(candidate.typeName ?? "")) return "分支机构";
-  if (candidates.some(other => other.id !== candidate.id && other.branchOf === candidate.name.trim())) return "母公司候选";
-  return null;
 }
 
 /** One task on its own page: where it is, what it produced, and what the employee can do next. */
@@ -171,7 +166,10 @@ export default function TaskDetailPage() {
             <p className="text-sm">请选择正确的企业主体，确认后系统才会继续：</p>
             {task.result?.approximate && <p className="text-xs text-ink-3">未匹配到完全一致的名称，以下为近似候选，请确认主体后再继续。</p>}
             {candidates.length === 0 && <p className="text-sm text-ink-3">没有可选主体，请回到专家页重新提交。</p>}
-            {candidates.map(candidate => <Button key={candidate.id} type="button" variant="outline" disabled={busy} className="h-auto justify-start whitespace-normal px-3 py-3 text-left" onClick={() => void selectEntity(candidate.id)}><span><span className="flex flex-wrap items-center gap-2 font-medium">{candidate.name}{candidateRelation(candidate, candidates) && <Badge variant="secondary">{candidateRelation(candidate, candidates)}</Badge>}</span><span className="mt-1 block text-xs font-normal text-ink-3">{candidate.status ?? "状态未知"} · {candidate.address ?? "地址未提供"} · {candidate.creditCode ?? "统一代码未提供"}</span></span></Button>)}
+            {candidates.map(candidate => {
+              const relation = companyRelationLabel(candidate, candidates, task.result?.query);
+              return <Button key={candidate.id} type="button" variant="outline" disabled={busy} className="h-auto justify-start whitespace-normal px-3 py-3 text-left" onClick={() => void selectEntity(candidate.id)}><span><span className="flex flex-wrap items-center gap-2 font-medium">{candidate.name}{relation && <Badge variant="secondary">{relation}</Badge>}</span><span className="mt-1 block text-xs font-normal text-ink-3">{candidate.status ?? "状态未知"} · {candidate.address ?? "地址未提供"} · {candidate.creditCode ?? "统一代码未提供"}</span></span></Button>;
+            })}
           </div>}
           {task.result?.preview && <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-control bg-bg-sunk p-3 text-xs leading-relaxed text-ink-2">{task.result.preview}</pre>}
           {!task.result?.preview && task.state !== "waiting_input" && <p className="text-sm text-ink-3">{active ? `任务进行中，当前步骤：${EXPERT_TASK_STAGE_LABELS[task.stage] ?? task.stage}。` : task.state === "succeeded" ? "任务已完成，产物可下载。" : "任务没有产出结果。"}</p>}
