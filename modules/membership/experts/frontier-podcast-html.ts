@@ -5,7 +5,7 @@
 // sandboxed frame of the task card.
 import { beijingStamp } from "@aihot/contracts/time";
 import type { PodcastEpisode } from "./bidclub.ts";
-import { clipped, countLine, coverageLine, dateLabel, durationLabel, languageLabel, PREVIEW_DIGEST_LIMIT, PREVIEW_TLDR_LIMIT, sourceLink, summaryDownloadUrl, type FrontierPodcastView } from "./frontier-podcast-view.ts";
+import { clipped, countLine, coverageLine, dateLabel, durationLabel, editorialSourceLabel, languageLabel, PREVIEW_DIGEST_LIMIT, PREVIEW_TLDR_LIMIT, sourceLink, summaryDownloadUrl, type FrontierPodcastView } from "./frontier-podcast-view.ts";
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -83,6 +83,8 @@ function metaLine(episode: PodcastEpisode): string {
     ["日期", dateLabel(episode.date, episode.publishedAt)],
     ["时长", durationLabel(episode.durationMin)],
     ["摘要语言", languageLabel(episode.tldrLang ?? episode.digestLang)],
+    ["原节目语言", languageLabel(episode.lang)],
+    ["正文来源", editorialSourceLabel(episode)],
   ];
   return `<div class="ra-meta">${rows.map(([key, value]) => `<span class="ra-meta-item"><strong>${escapeHtml(key!)}</strong>${escapeHtml(value!)}</span>`).join("")}</div>`;
 }
@@ -98,7 +100,7 @@ function episodeSection(view: FrontierPodcastView, index: number): string {
   const title = escapeHtml(episode.title ?? "未提供");
   const number = String(index + 1).padStart(2, "0");
 
-  const quote = episode.dek
+  const quote = episode.dek && (episode.lang?.toUpperCase() !== "EN" || /[\u3400-\u9fff]/u.test(episode.dek))
     ? `<blockquote class="ra-quote"><p class="ra-quote__text">${escapeHtml(episode.dek)}</p><span class="ra-quote__by">公开播客文字库 · 本集导语</span></blockquote>`
     : "";
   const people = episode.people.length ? `<p>参与者：${escapeHtml(episode.people.join("、"))}</p>` : "";
@@ -268,7 +270,7 @@ export function renderFrontierPodcastHtml(view: FrontierPodcastView): string {
   const partial = view.partial ? "结果不完整" : "完整匹配";
 
   const hero = `<header class="ra-hero">
-<span class="ra-hero__eyebrow">公开播客文字库 · 中文摘要优先</span>
+<span class="ra-hero__eyebrow">公开播客文字库 · 中英双语检索 · 中文正文</span>
 <h1 class="ra-hero__title">前沿播客</h1>
 <p class="ra-hero__subtitle">话题：${query}</p>
 <div class="ra-hero__meta">
@@ -277,10 +279,10 @@ export function renderFrontierPodcastHtml(view: FrontierPodcastView): string {
 <span class="ra-hero__meta-item"><strong>生成</strong>${time}（北京时间）</span>
 </div></header>`;
 
-  const lead = `<p class="ra-lead">下面是你检索「${query}」在公开播客文字库里得到的结果：收录 ${count}。每一集给出该库整理的要点与摘要，以及原节目页面；要点与摘要是整理稿，平台未逐条核验，引用前请回到来源页面核对原文。</p>`;
+  const lead = `<p class="ra-lead">下面是你检索「${query}」在公开播客文字库里得到的结果：收录 ${count}。检索会使用中英文关键词；英文节目只收录该库提供中文正文的版本。每一集给出该库整理的要点与摘要，以及原节目页面；要点与摘要是整理稿，平台未逐条核验，引用前请回到来源页面核对原文。</p>`;
 
   const scopeAside = view.partial
-    ? `<aside class="ra-aside ra-aside--warning"><span class="ra-aside__label">结果不完整</span><div class="ra-aside__body"><p>${coverage}</p><p>下面的目录就是这次检索命中的全部内容。</p><p>收录集数受检索接口的匹配结果限制，不代表该话题的全部节目。平台不补写节目未提及的事实、数字与结论。</p></div></aside>`
+    ? `<aside class="ra-aside ra-aside--warning"><span class="ra-aside__label">结果不完整</span><div class="ra-aside__body"><p>${coverage}</p><p>下面的目录列出本次收录的节目。</p><p>收录集数受检索接口的匹配结果限制，不代表该话题的全部节目。平台不补写节目未提及的事实、数字与结论。</p></div></aside>`
     : `<aside class="ra-aside ra-aside--note"><span class="ra-aside__label">结果覆盖</span><div class="ra-aside__body"><p>${coverage}</p><p>收录集数受检索接口的匹配结果限制，不代表该话题的全部节目。平台不补写节目未提及的事实、数字与结论。</p></div></aside>`;
 
   const sections = view.episodes.length

@@ -137,6 +137,70 @@ test("an episode without a Chinese text keeps the language it does have", async 
   assert.equal(alternate.tldr, "- 中文要点。");
 });
 
+test("a Chinese topic also finds English-source episodes through the English search", async () => {
+  const queries: string[] = [];
+  const client = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: (async input => {
+    const url = new URL(String(input));
+    if (url.pathname === "/api/v1/search") {
+      const query = url.searchParams.get("q")!;
+      queries.push(query);
+      const results = query === "具身智能"
+        ? [{ slug: "zh", title: "具身智能访谈", lang: "ZH" }, { slug: "shared", title: "共同命中", lang: "ZH" }]
+        : [{ slug: "shared", title: "共同命中", lang: "ZH" }, { slug: "en", title: "Embodied AI", lang: "EN" }];
+      return Response.json({ count: results.length, results, partial: true, searched_recent: 300 });
+    }
+    const slug = url.pathname.split("/").at(-1)!;
+    return Response.json({ ...EPISODE_PAYLOAD, slug, lang: slug === "en" ? "EN" : "ZH", lang_alt: slug === "en" ? "ZH" : "EN",
+      tldr_md: slug === "en" ? "- English points." : "- 中文要点。", tldr_md_alt: slug === "en" ? "- 中文要点。" : "- English points.",
+      digest_md: slug === "en" ? "English digest." : "中文摘要。", digest_md_alt: slug === "en" ? "中文摘要。" : "English digest.",
+      dek: slug === "en" ? "English introduction" : "中文导语。" });
+  }) as typeof fetch });
+  const collected = await collectPodcastEpisodes("具身智能", { client });
+  assert.deepEqual(queries, ["具身智能", "embodied intelligence"]);
+  assert.deepEqual(collected.episodes.map(item => item.slug), ["zh", "en", "shared"]);
+  assert.equal(collected.count, 3, "a shared slug is deduplicated");
+  const english = collected.episodes[1]!;
+  assert.equal(english.tldr, "- 中文要点。");
+  assert.equal(english.digest, "中文摘要。");
+  const report = view({ episodes: [english], queries: collected.queries });
+  for (const rendered of [renderFrontierPodcastHtml(report), renderFrontierPodcastMarkdown(report)]) {
+    assert.ok(rendered.includes("公开播客文字库中文版"));
+    assert.ok(rendered.includes("中文要点"));
+    assert.ok(rendered.includes("中文摘要"));
+    assert.ok(!rendered.includes("English points."));
+    assert.ok(!rendered.includes("English digest."));
+    assert.ok(!rendered.includes("English introduction"));
+  }
+});
+
+test("English-source episodes without a Chinese edition are skipped for Chinese-backed results", async () => {
+  const client = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: stubFetch({
+    "en-only": { ...EPISODE_PAYLOAD, slug: "en-only", lang: "EN", lang_alt: null, tldr_md_alt: null, digest_md_alt: null },
+    "zh-next": { ...EPISODE_PAYLOAD, slug: "zh-next", lang: "ZH" },
+  }, { ...SEARCH_PAYLOAD, results: [{ slug: "en-only", lang: "EN" }, { slug: "zh-next", lang: "ZH" }] }) as typeof fetch });
+  const collected = await collectPodcastEpisodes("具身智能", { client });
+  assert.deepEqual(collected.episodes.map(item => item.slug), ["zh-next"]);
+  assert.equal(collected.skippedWithoutChinese, 1);
+  assert.match(renderFrontierPodcastMarkdown(view({ episodes: collected.episodes, skippedWithoutChinese: collected.skippedWithoutChinese })), /缺少中文正文，未收录/);
+});
+
+test("an English query searches Chinese too, and a failed expansion stays visibly partial", async () => {
+  const calls: string[] = [];
+  const client = {
+    search: async (term: string) => {
+      calls.push(term);
+      if (term === "具身智能") throw new PodcastSourceError("podcast_source_unavailable");
+      return { matches: [{ slug: "en", title: "Embodied AI", showName: null, date: null, publishedAt: null, durationMin: null, lang: "EN", dek: null, sourceUrl: null, sourceLabel: null }], count: 1, partial: true, searchedRecent: 300 };
+    },
+    episode: async () => episode({ slug: "en", lang: "EN", tldrLang: "ZH", digestLang: "ZH" }),
+  };
+  const collected = await collectPodcastEpisodes("embodied intelligence", { client });
+  assert.deepEqual(calls, ["embodied intelligence", "具身智能"]);
+  assert.equal(collected.searchFailed, true);
+  assert.equal(collected.episodes.length, 1);
+  assert.match(renderFrontierPodcastMarkdown(view({ episodes: collected.episodes, queries: collected.queries, searchFailed: true })), /部分扩展检索失败/);
+});
+
 test("a query the library refuses is an error, not an empty report", async () => {
   const client = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: stubFetch({}) as typeof fetch });
   await assert.rejects(() => client.search("短"), (error: unknown) => error instanceof PodcastSourceError && error.code === "podcast_query_invalid");
