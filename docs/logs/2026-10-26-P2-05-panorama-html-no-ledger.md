@@ -2,8 +2,8 @@
 
 - Agent：Codex
 - 对应任务：P2-05 的员工产物体验维护；真实生产样例与员工验收仍未完成，P2-05 保持 `[ ]`。
-- 完成状态：PR #97 已打开；CI 通过，评审待完成。
-- 基线：从 `origin/main` `c7334e9` 创建独立 worktree；PR 因 main 前进后 rebase 到 `origin/main` `036cb10`。分支 `fix/panorama-html-no-ledger-download`。
+- 完成状态：PR #97 已合并；CI 通过，生产与真实业务验收待完成。
+- 基线：从 `origin/main` `c7334e9` 创建独立 worktree；PR 因 main 前进后 rebase 到 `origin/main` `036cb10`，最终 PR head 为 `30912b7`。PR #97 于 2026-10-26 合并，merge commit `aa1323a`。分支 `fix/panorama-html-no-ledger-download`。
 
 ## 本次改动
 
@@ -13,10 +13,10 @@
 
 ## 最小验证
 
-- 执行的检查及结果（更新至 PR head `3500781`，docs 同步 head `6fd849e`）：`npm ci` 成功（未改 manifest 或锁文件）；`node --import ./tests/standalone.ts --test modules/membership/tests/panorama.standalone.test.ts modules/membership/tests/task-detail-page.standalone.test.ts modules/membership/tests/frontier-podcast.standalone.test.ts` 46/46 通过；临时 PostgreSQL 17 上运行 `panorama-db.test.ts` 与 `expert-task-detail.test.ts`，2/2 通过；`npx tsc -p modules --noEmit` 通过；`node scripts/check-doc-links.ts` 检查 472 个链接全部通过；`git diff --check` 通过。
-- 未执行或需用户试用的检查：未运行全量测试或网页浏览器视觉检查；真实账号、生产 MCP 全景与员工产物试用待后续验收。PR #97 当前 head 的 quality、PostgreSQL integration 与 docs links 均通过。
+- 执行的检查及结果（PR head `30912b7805988031dec4e35c3830d8e7c3ea3cfc`）：`npm ci` 成功（未改 manifest 或锁文件）；`node --import ./tests/standalone.ts --test modules/membership/tests/panorama.standalone.test.ts modules/membership/tests/task-detail-page.standalone.test.ts modules/membership/tests/frontier-podcast.standalone.test.ts` 46/46 通过；临时 PostgreSQL 17 上运行 `panorama-db.test.ts` 与 `expert-task-detail.test.ts`，2/2 通过；`npx tsc -p modules --noEmit` 通过；`node scripts/check-doc-links.ts` 检查 472 个链接全部通过；`git diff --check` 通过。PR 的 quality、PostgreSQL integration 与 docs links checks 均通过。
+- 未执行或需用户试用的检查：未运行全量测试或网页浏览器视觉检查；真实账号、生产 MCP 全景与员工产物试用待后续验收。尚无生产发布记录。
 
 ## 风险与交接
 
 - 已知限制／缺失依赖：HTML 使用轻量 Markdown 呈现器，仅覆盖报告使用的标题、表格、引用、列表与常见行内格式。`npm ci` 输出提示当前依赖树审计有 5 项告警；本次未更改依赖且未运行修复。
-- 下一步：等待 PR 评审；不要据此勾选 P2-05。生产部署和真实员工验收仍分开记录。
+- 下一步：后续记录生产部署，并由用户完成真实主体与员工产物验收；不要据此勾选 P2-05。
