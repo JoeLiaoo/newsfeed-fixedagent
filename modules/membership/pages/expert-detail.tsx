@@ -178,6 +178,7 @@ export default function ExpertDetailPage() {
   return <main className="mx-auto w-full max-w-4xl px-5 py-8">
     <header className="mb-6">
       <Button asChild variant="outline" size="sm" className="mb-4"><IntentLink to="/experts"><ArrowLeft size={14} aria-hidden="true" />专家平台</IntentLink></Button>
+      <p className="mb-3"><IntentLink to="/tasks" className="text-sm text-accent underline-offset-4 hover:underline">查看全部任务记录</IntentLink></p>
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-1 text-2xl font-semibold tracking-tight text-ink">{expert?.name ?? "专家"}</h1>
         {(expert.status !== "available" || expert.slug === SECTOR_PEER_EXPERT_SLUG) && <Badge variant={badge.variant}>{badge.label}</Badge>}
@@ -225,6 +226,7 @@ export default function ExpertDetailPage() {
             {task.expertSlug === SECTOR_PEER_EXPERT_SLUG && task.result?.format === "html" && task.result.html && <div className="mt-4"><p className="mb-2 break-words text-sm font-medium">网页看板 · {task.input.query}</p><iframe title={`赛道同业竞争看板：${task.input.query ?? "查询"}`} srcDoc={task.result.html} sandbox="" className="h-[680px] w-full rounded-card border border-line bg-white" /></div>}
             {task.materials?.length > 0 && <div className="mt-3 text-sm">{task.materials.map(material => <div key={material.id} className="flex flex-wrap items-center gap-2">{task.state === "cancelled" ? <span>{material.filename}</span> : <a className="text-accent underline-offset-4 hover:underline" href={`/api/v1/membership/expert-tasks/${task.id}/materials/${material.id}`}>{material.filename}</a>}<span className="text-xs text-ink-3">{Math.ceil(material.byteSize / 1024)} KB · {material.extractionStatus === "available" ? "已用于任务" : material.extractionStatus === "unavailable" ? "无法提取文字" : "等待处理"}</span>{["succeeded", "failed", "cancelled"].includes(task.state) && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void deleteMaterial(task.id, material.id)}>删除</Button>}</div>)}</div>}
             <div className="mt-4 flex flex-wrap gap-2">
+              <Button asChild variant="link" className="h-9 px-0"><IntentLink to={`/tasks/${task.id}`}>查看详情</IntentLink></Button>
               {task.hasArtifact && <Button asChild variant="link" className="h-9 px-0"><a href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}>下载{task.expertSlug === SECTOR_PEER_EXPERT_SLUG ? " HTML 看板" : " Markdown 产物"}</a></Button>}
               {task.expertSlug === PANORAMA_EXPERT_SLUG && task.hasCheckpoint && <Button asChild variant="link" className="h-9 px-0"><a href={`/api/v1/membership/expert-tasks/${task.id}/checkpoint`}>下载采集台账 JSONL</a></Button>}
               {task.state === "failed" && task.executionAttempts < 3 && <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void taskAction(task.id, "retry")}>重试</Button>}

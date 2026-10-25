@@ -87,10 +87,15 @@ test("a single expert task is read by its owner alone, with the row the list ret
   assert.ok(typeof task.createdAt === "string" && typeof task.updatedAt === "string");
 
   // The single task carries the same row as the list, so both pages read one shape.
-  const list = (await (await app.inject({ method: "GET", url: "/api/v1/membership/expert-tasks", headers: { cookie: cookies[0]!, ...common } })).json() as { tasks: Array<Record<string, unknown>> }).tasks;
+  const listResponse = await app.inject({ method: "GET", url: "/api/v1/membership/expert-tasks?limit=1&offset=0", headers: { cookie: cookies[0]!, ...common } });
+  assert.equal(listResponse.statusCode, 200);
+  const listData = await listResponse.json() as { tasks: Array<Record<string, unknown>>; pagination: { limit: number; offset: number; hasMore: boolean; nextOffset: number | null } };
+  const list = listData.tasks;
   const listed = list.find(entry => entry.id === taskId);
   assert.ok(listed, "任务在列表中");
+  assert.deepEqual(listData.pagination, { limit: 1, offset: 0, hasMore: false, nextOffset: null });
   assert.deepEqual(Object.keys(task).sort(), Object.keys(listed!).sort(), "单个任务与列表同一形状");
+  assert.equal((await app.inject({ method: "GET", url: "/api/v1/membership/expert-tasks?limit=bad", headers: { cookie: cookies[0]!, ...common } })).statusCode, 400);
 
   // A failed task shows its error, and the reason is the employee's own.
   await sql`UPDATE member_expert_tasks SET state='failed', stage='failed', error_code='xinhua_no_candidates', error_message='未匹配到该名称的企业主体。' WHERE id=${taskId}`;
