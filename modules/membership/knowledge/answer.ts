@@ -132,7 +132,7 @@ function resolveClaim(claim: { label: string; pageSlug: string; citationId: stri
   }
   // The model named the source of a page instead of its id: the page and the source label still place it.
   const page = offered.find(entry => entry.page.slug === claim.pageSlug || samePage(claim.pageSlug, entry.page.slug))?.page;
-  const citation = page?.citations.find(item => item.label === claim.label);
+  const citation = page?.citations.find(item => normalizeLabel(item.label) === normalizeLabel(claim.label));
   if (!page || !citation) return null;
   return offered.find(entry => entry.page.slug === page.slug && entry.citation.id === citation.id) ?? null;
 }
@@ -145,8 +145,9 @@ function resolveClaim(claim: { label: string; pageSlug: string; citationId: stri
 function claimMarker(claim: { label: string }, entry: OfferedCitation, offered: OfferedCitation[], markers: Map<string, string>) {
   const written = normalizeLabel(claim.label);
   if (!written) return null;
-  // The model quoted the label of another source: it mixed its own labels up, and the claim backs nothing.
-  if (offered.some(item => item.citation.id !== entry.citation.id && normalizeLabel(item.citation.label) === written)) return null;
+  // The model quoted the label of another source: it mixed its own labels up, and the claim backs
+  // nothing. A number is the footnote of this turn, not the label of a source.
+  if (!/^\d+$/.test(written) && offered.some(item => item.citation.id !== entry.citation.id && normalizeLabel(item.citation.label) === written)) return null;
   for (const candidate of [written, String(entry.footnote), entry.citation.label]) {
     const raw = markers.get(normalizeLabel(candidate));
     if (raw) return raw;
