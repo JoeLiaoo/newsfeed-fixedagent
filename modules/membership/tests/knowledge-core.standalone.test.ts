@@ -251,6 +251,13 @@ test("the machine finds what it can decide", () => {
   assert.ok(duplicated.some(finding => finding.category === "duplicate-page"));
 });
 
+test("related pages in the same draft are recognized by lint", () => {
+  const first = { ...page, slug: "first", related: ["second"] };
+  const second = { ...page, slug: "second", related: [] };
+  assert.equal(lintDraft({ ...draft, pages: [first, second] }, new Set()).filter(finding => finding.category === "related-target-missing").length, 0);
+  assert.equal(lintDraft({ ...draft, pages: [first] }, new Set()).filter(finding => finding.category === "related-target-missing").length, 1);
+});
+
 test("a question finds the pages that hold its subject, and only those", () => {
   const pages = [{
     slug: "view-company-example",

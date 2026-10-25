@@ -5,6 +5,8 @@ import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@aihot/web/components/member-ui/card";
+import { renderMarkdown } from "@aihot/web/lib/markdown";
+import { siteUrl } from "@aihot/web/lib/seo";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { TASK_ERRORS, TASK_STAGE_LABELS, TASK_STATE_LABELS } from "../knowledge/catalog.ts";
@@ -17,7 +19,7 @@ const ENDPOINT = "/api/v1/membership/knowledge/";
 const STATE_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "destructive"> = { queued: "warning", running: "default", succeeded: "success", failed: "destructive", cancelled: "secondary" };
 
 type Version = {
-  id: string; versionNo: number; fileName: string; format: string; byteSize: number; sha256: string;
+  id: string; versionNo: number; fileName: string; format: string; byteSize: number; sha256: string; bodyMd: string | null;
   sourceTitle: string | null; sourceAuthor: string | null; sourceOrg: string | null; sourceDate: string | null; sourceKind: string | null;
   extractionStatus: string; extractionNote: string | null; createdAt: string; uploaderName: string;
   taskId: string | null; taskState: string | null; taskStage: string | null; errorCode: string | null; errorMessage: string | null; attemptCount: number | null;
@@ -59,6 +61,15 @@ export default function KnowledgeDocumentPage() {
     </header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
 
+    {versions.some(version => version.bodyMd) && <Card className="mb-6">
+      <CardHeader><CardTitle>材料正文</CardTitle></CardHeader>
+      <CardContent className="grid gap-6">
+        {versions.filter(version => version.bodyMd).map(version => <section key={version.id} aria-label={`版本 ${version.versionNo} 正文`}>
+          {versions.length > 1 && <h2 className="mb-3 font-medium text-ink">v{version.versionNo} · {version.fileName}</h2>}
+          <div className="break-words text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(version.bodyMd!, siteUrl()).html }} />
+        </section>)}
+      </CardContent>
+    </Card>}
     <Card>
       <CardHeader><CardTitle>版本</CardTitle></CardHeader>
       <CardContent>

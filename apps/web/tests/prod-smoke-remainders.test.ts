@@ -14,6 +14,9 @@ const api = fakeApi(async (url, _res, req) => {
   const path = url.pathname;
   if (path === "/api/v1/membership/me") return { user: { username: "fixture-user", realName: "测试员工", role: "member" }, tags: ["光伏"], catalog: ["光伏"] };
   if (path === "/api/v1/membership/knowledge/bases") return { bases: [] };
+  if (path === "/api/v1/membership/knowledge/bases/kb-not-real" || (url.searchParams.get("baseId") === "kb-not-real" && path.startsWith("/api/v1/membership/knowledge/"))) { _res.statusCode = 404; return { error: "knowledge_base_not_found" }; }
+  if (path === "/api/v1/membership/knowledge/documents/doc-body") return { document: { id: "doc-body", title: "正文材料", status: "active", baseId: "base-fixture", createdAt: "2026-10-22T00:00:00Z" }, versions: [{ id: "version-body", versionNo: 1, fileName: "note.md", format: "markdown", byteSize: 48, sha256: "abc", bodyMd: "# 材料标题\n\n这段原文应在材料详情中可读。", extractionStatus: "available", createdAt: "2026-10-22T00:00:00Z", uploaderName: "测试员工", taskState: "succeeded" }] };
+  if (path === "/api/v1/membership/knowledge/pages/related-fixture") return { page: { id: "related-fixture", slug: "related-fixture", pageType: "view", targetName: "关联测试", status: "published", baseId: "kb-abc", revision: 1, bodyMd: "## Related Pages\n\n- [kb-abc-chai-discovery](/knowledge/targets/kb-abc-chai-discovery)", updatedAt: "2026-10-22T00:00:00Z", freshness: "fresh", freshnessLabel: "新近", coverage: { analysts: 0, firms: 0, reports: 0, first_report: null, last_report: null } }, citations: [{ label: "S1", versionId: "v1", fileName: "note.md", format: "markdown", documentId: "doc-body", documentTitle: "正文材料" }], issues: [], related: [{ slug: "kb-abc-chai-discovery", localSlug: "chai-discovery", targetName: "AI 药物发现" }] };
   if (path === "/api/v1/membership/digest/history") return { digests: [
     { date: "2026-10-22", preferenceVersion: 2, itemCount: 4 },
     { date: "2026-10-22", preferenceVersion: 1, itemCount: 3 },
@@ -100,5 +103,36 @@ test("bare knowledge detail paths return to the existing knowledge list", async 
       await expect(page).toHaveURL(web.origin + "/knowledge");
       await expect(page.getByRole("heading", { name: "知识库" })).toBeVisible();
     }
+  } finally { await page.close(); }
+});
+
+test("published markdown material renders its body after loading", async () => {
+  const page = await browser.newPage();
+  try {
+    await visit(page, web.origin + "/knowledge/documents/doc-body");
+    await expect(page.getByRole("heading", { name: "正文材料" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "材料标题" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "版本 1 正文" })).toContainText("这段原文应在材料详情中可读。");
+    await expect(page.getByRole("link", { name: "下载原件" })).toBeVisible();
+  } finally { await page.close(); }
+});
+
+test("unknown base remains in knowledge and offers a return link", async () => {
+  const page = await browser.newPage();
+  try {
+    await visit(page, web.origin + "/knowledge/bases/kb-not-real");
+    await expect(page).toHaveURL(web.origin + "/knowledge/bases/kb-not-real");
+    await expect(page.getByRole("status")).toContainText("知识库不存在。");
+    await expect(page.getByRole("link", { name: "返回知识库" })).toHaveAttribute("href", "/knowledge");
+  } finally { await page.close(); }
+});
+
+test("target page resolves related title and counts its rendered source", async () => {
+  const page = await browser.newPage();
+  try {
+    await visit(page, web.origin + "/knowledge/targets/related-fixture");
+    await expect(page.getByRole("link", { name: "AI 药物发现" })).toHaveAttribute("href", "/knowledge/targets/kb-abc-chai-discovery");
+    await expect(page.locator("main header")).toContainText("来源 1");
+    await expect(page.getByText("[S1] 正文材料")).toBeVisible();
   } finally { await page.close(); }
 });
