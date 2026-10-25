@@ -46,6 +46,20 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     }),pagination:{limit,offset,nextOffset:hasMore?offset+limit:null},...(matched?{interest_tags:interestTags}: {})};
   });
 
+  app.get("/api/v1/membership/gp-projects/:id",async(req,reply)=>{
+    reply.header("Cache-Control","private, no-store").header("Vary","Cookie");
+    const user=await authenticate(req);
+    if(!user) return reply.code(401).send({error:"login_required"});
+    const id=(req.params as {id:string}).id;
+    const [row]=await sql<Array<{id:string;gp_name:string;investee_name:string;sector_tags:string[];event_date:string|null;status:string;source_url:string|null}>>`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.sector_tags,
+      i.approved_event_date::text AS event_date,'verified'::text AS status,i.approved_source_url AS source_url
+      FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
+      WHERE i.id=${id} AND i.status='verified' AND g.status='active' AND g.entity_role='gp'`;
+    if(!row) return reply.code(404).send({error:"not_found"});
+    const source=employeeSource(row.source_url);
+    return {investment:{...row,source_url:source.url,source_placeholder:source.placeholder}};
+  });
+
   async function admin(req:FastifyRequest,reply:FastifyReply) {
     reply.header("Cache-Control","private, no-store").header("Vary","Cookie");
     const user=await authenticate(req);

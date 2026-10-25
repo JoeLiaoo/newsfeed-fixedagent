@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router";
 import { ArrowLeft } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
@@ -41,6 +41,8 @@ export default function ExpertDetailPage() {
   const [expert, setExpert] = useState<Expert | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [companyName, setCompanyName] = useState("");
+  const [companyError, setCompanyError] = useState("");
+  const companyInput = useRef<HTMLInputElement>(null);
   const [notes, setNotes] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [message, setMessage] = useState("");
@@ -67,8 +69,11 @@ export default function ExpertDetailPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (modeNeedsEntity(expert?.execution_mode ?? "") && companyName.trim().length < 2) {
-      setMessage("请填写至少 2 个字的目标企业名称。"); return;
+      setCompanyError("请填写至少 2 个字的目标企业名称。");
+      companyInput.current?.focus();
+      return;
     }
+    setCompanyError("");
     setBusy(true); setMessage("任务已提交…");
     try {
       if (files.length > 3 || files.some(file => file.size > 5 * 1024 * 1024) || files.reduce((sum, file) => sum + file.size, 0) > 10 * 1024 * 1024) { setMessage("最多上传 3 个文件，单个不超过 5 MB，总计不超过 10 MB。"); return; }
@@ -144,7 +149,7 @@ export default function ExpertDetailPage() {
         <CardContent>
           <form onSubmit={submit} className="grid gap-4">
             {modeNeedsEntity(expert.execution_mode) ? <>
-              <div className="grid gap-2"><Label htmlFor="company-name">目标企业名称</Label><Input id="company-name" required minLength={2} maxLength={200} value={companyName} onInvalid={() => setMessage("请填写至少 2 个字的目标企业名称。")} onChange={event => setCompanyName(event.target.value)} placeholder="输入待核查主体" /></div>
+              <div className="grid gap-2"><Label htmlFor="company-name">目标企业名称</Label><Input ref={companyInput} id="company-name" required minLength={2} maxLength={200} value={companyName} aria-invalid={!!companyError} aria-describedby={companyError ? "company-name-error" : undefined} onInvalid={() => setCompanyError("请填写至少 2 个字的目标企业名称。")} onChange={event => { setCompanyName(event.target.value); if (companyError) setCompanyError(""); }} placeholder="输入待核查主体" />{companyError && <p id="company-name-error" className="text-sm text-hot" role="alert">{companyError}</p>}</div>
               <p className="text-xs leading-relaxed text-ink-3">示例：{SAMPLE_COMPANIES.join("；")}。系统先检索同名候选，须由你确认主体后才查询。{expert.execution_mode === "xinhua_panorama" ? "确认后逐层核查。默认预算为最多 4 层、25 个主体、90 次查询，每个主体最多处理 20 条关系；达到上限或遇到无法核实的数据时，报告会标明不完整并列出缺口。" : "当前仅生成一层直接投资底稿，不代表完整穿透。"}</p>
             </> : null}
             {expert.execution_mode === "text_only" && <div className="grid gap-2"><Label htmlFor="task-notes">任务要求</Label><Textarea id="task-notes" required minLength={2} maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={5} /></div>}

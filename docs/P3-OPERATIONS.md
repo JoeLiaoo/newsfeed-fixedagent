@@ -12,6 +12,8 @@ P3 基础管线经 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/
 
 这三个开关在新环境默认关闭：`P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED`；当前生产实例按用户指示开启。开启状态不代表 GP 内容已核验或定向送达已验收。模型 `MODEL_CALLS_ENABLED=true` 时可建议四大产业细分赛道，结果仅供管理员复核；不允许战略配售标签参与 GP 匹配。
 
+员工清单 `GET /api/v1/membership/gp-projects` 和单项详情 `GET /api/v1/membership/gp-projects/:id` 使用同一会话鉴权与可见范围：仅有效 GP 的 `verified` 投资；无会话返回 401，未知、未核实或 GP 已暂停的项目详情返回 404。详情仅返回项目名称、GP 名称、审核赛道、日期、状态与可展示来源；内部原始证据和审核人字段不下发。演示域名来源仍标作占位。发布后可用已审核项目及隐藏状态项目各核对一次，不能凭列表存在推断真实投资事实已验收。
+
 ## 员工扫码绑定与聊天
 
 **2026-10-22 方案决策：** 不使用企业微信或公司审批流程，允许员工在 iLink 会话窗口失效后主动向自己的 bot 发消息恢复推送。选择 [每用户独立 iLink 扫码登录设计](P3-ILINK-QR-DESIGN.md) 为 PR #15 的后续目标：登录网站 → 短期二维码 → 微信扫码确认 → 网站自动绑定。员工不需要网页绑定码或点击二次确认。每个人是否使用独立 bot 是实现细节，当前 PoC 先验证每人一组可用的 iLink bot 身份。

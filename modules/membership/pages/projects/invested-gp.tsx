@@ -53,9 +53,9 @@ export default function InvestedGpProjectsPage() {
         ? <>
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {items.map(item => <li key={item.id}>
-              <Card className="flex h-full flex-col gap-3 p-5">
+              <Card className="relative flex h-full flex-col gap-3 p-5 hover:border-accent/50 focus-within:border-accent">
                 <div className="min-w-0">
-                  <p className="break-words text-base font-semibold text-ink">{item.investee_name}</p>
+                  <p className="break-words text-base font-semibold text-ink"><Link className="rounded-control text-accent underline-offset-4 after:absolute after:inset-0 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" to={`/projects/invested-gp/${encodeURIComponent(item.id)}`}>{item.investee_name}</Link></p>
                   <p className="mt-1 break-words text-sm text-ink-3">{item.gp_name}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -67,7 +67,7 @@ export default function InvestedGpProjectsPage() {
                   <span className="inline-flex items-center gap-1.5" aria-label={`投资日期：${displayDate(item.event_date)}`}>
                     <CalendarDays size={15} aria-hidden="true" />{displayDate(item.event_date)}
                   </span>
-                  {item.source_url && <a className="inline-flex min-h-11 items-center gap-1.5 rounded-control text-accent underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" href={item.source_url} target="_blank" rel="noreferrer">
+                  {item.source_url && <a className="relative z-10 inline-flex min-h-11 items-center gap-1.5 rounded-control text-accent underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" href={item.source_url} target="_blank" rel="noreferrer">
                     核对来源<ExternalLink size={14} aria-hidden="true" />
                   </a>}
                   {item.source_placeholder && <span className="text-xs text-ink-3">演示/导入占位 · 无可核对来源</span>}
