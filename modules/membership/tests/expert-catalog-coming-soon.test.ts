@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { installModules } from "@aihot/backend/modules";
+import { config } from "@aihot/backend/config";
 import { closeDb, sql } from "@aihot/backend/db";
 import { stopBossNow } from "@aihot/backend/jobs/queue";
 import { buildApp } from "../../../apps/api/src/app.ts";
@@ -9,8 +10,9 @@ import { SERVER_MODULES } from "../../../site/modules/server.ts";
 import { tag } from "../../../tests/setup.ts";
 import { COMING_SOON_EXPERT_SLUG, SECTOR_PEER_EXPERT_SLUG } from "../experts/catalog.ts";
 import { runExpertTask } from "../experts/worker.ts";
+import { searchSectorPeerSources } from "@aihot/backend/providers/deepseek-search";
 
-test("old sentiment is hidden and a query creates a public-data HTML shell", async t => {
+test("old sentiment is hidden and public search configuration errors fail the task", async t => {
   installModules(SERVER_MODULES);
   const app = await buildApp();
   t.after(async () => { await app.close(); await stopBossNow(); await closeDb(); });
@@ -51,15 +53,64 @@ test("old sentiment is hidden and a query creates a public-data HTML shell", asy
   const created = await app.inject({ method: "POST", url: "/api/v1/membership/expert-tasks", headers: { ...headers, "idempotency-key": randomUUID() }, payload: { slug: SECTOR_PEER_EXPERT_SLUG, query: "  商业航天  ", notes: "公开资料" } });
   assert.equal(created.statusCode, 202);
   const taskId = (created.json() as { id: string }).id;
-  process.env.MODEL_CALLS_ENABLED = "false";
-  await runExpertTask(taskId);
+  const previousKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "mock-search-key";
+  const requests: Array<{ path: string; body: Record<string, unknown>; authorization: string | undefined }> = [];
+  try {
+    const research = await searchSectorPeerSources({ query: "商业航天", taskId, userId: user.id }, async (url, options) => {
+      const path = new URL(url).pathname;
+      const body = JSON.parse(options?.body ?? "{}") as Record<string, unknown>;
+      requests.push({ path, body, authorization: options?.headers?.authorization });
+      const payload = path.endsWith("/search") ? { results: [{ title: "公开页面", url: `https://example.org/${requests.length}`, snippet: "公开检索摘要", summary: "公开页面摘要", content: "", date: "2026-10-20T00:00:00Z", site_name: "Example" }] } : { title: "抓取页面", content: "公开页面正文" };
+      const bodyText = JSON.stringify(payload);
+      return { status: 200, url, headers: new Headers({ "content-type": "application/json" }), body: Buffer.from(bodyText), truncated: false, text: () => bodyText };
+    });
+    assert.equal(research.sources.length, 4);
+    assert.deepEqual(research.gaps, []);
+    assert.equal(requests.filter(request => request.path.endsWith("/search")).length, 4);
+    assert.equal(requests.filter(request => request.path.endsWith("/fetch")).length, 3);
+    const searches = requests.filter(request => request.path.endsWith("/search"));
+    assert.ok(searches.every(request => request.body.count === 5 && request.body.need_content === true));
+    assert.ok(searches.every(request => String(request.body.query).length <= 128));
+    assert.ok(searches.some(request => String(request.body.query).includes("lang:zh")));
+    assert.ok(requests.every(request => request.authorization === "Bearer mock-search-key"));
+    assert.equal(research.sources.filter(source => source.content === "公开页面正文").length, 3, "fetch cap applies even when all four search bodies are thin");
+    assert.ok(research.sources.every(source => source.date === "2026-10-20T00:00:00Z"));
+    const receipts = await sql<{ purpose: string; service: string; cost: string; currency: string; request: Record<string, unknown> }[]>`SELECT purpose,service,cost,currency,request FROM receipts WHERE member_task_id=${taskId} AND purpose IN ('expert_search','expert_fetch') ORDER BY purpose,id`;
+    assert.equal(receipts.length, 7);
+    assert.equal(receipts.filter(receipt => receipt.purpose === "expert_search").length, 4);
+    assert.equal(receipts.filter(receipt => receipt.purpose === "expert_fetch").length, 3);
+    assert.ok(receipts.every(receipt => receipt.service === "deepseek" && receipt.currency === "CNY" && Number(receipt.cost) === 0.005));
+    assert.ok(receipts.every(receipt => !JSON.stringify(receipt.request).includes("商业航天")), "receipt summaries keep hashes rather than the raw query");
+
+    const emptyCreated = await app.inject({ method: "POST", url: "/api/v1/membership/expert-tasks", headers: { ...headers, "idempotency-key": randomUUID() }, payload: { slug: SECTOR_PEER_EXPERT_SLUG, query: "新兴赛道" } });
+    const emptyTaskId = (emptyCreated.json() as { id: string }).id;
+    let emptySearchCalls = 0;
+    const emptyResearch = await searchSectorPeerSources({ query: "新兴赛道", taskId: emptyTaskId, userId: user.id }, async (url, options) => {
+      emptySearchCalls += 1;
+      const bodyText = JSON.stringify({ results: [] });
+      return { status: 200, url, headers: new Headers({ "content-type": "application/json" }), body: Buffer.from(bodyText), truncated: false, text: () => bodyText };
+    });
+    assert.equal(emptyResearch.sources.length, 0);
+    assert.equal(emptyResearch.gaps.length, 4);
+    assert.equal(emptySearchCalls, 4);
+    const emptyReceipts = await sql<{ cost: string }[]>`SELECT cost FROM receipts WHERE member_task_id=${emptyTaskId} AND purpose='expert_search'`;
+    assert.equal(emptyReceipts.length, 4);
+    assert.ok(emptyReceipts.every(receipt => Number(receipt.cost) === 0), "empty successful searches are recorded as free");
+  } finally {
+    if (previousKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = previousKey;
+  }
+  const previousModelSwitch = config.modelCallsEnabled;
+  config.modelCallsEnabled = false;
+  try { await runExpertTask(taskId); }
+  finally { config.modelCallsEnabled = previousModelSwitch; }
   const task = (await sql<{ state: string; input: { query: string }; result: { format: string; html: string } }[]>`SELECT state,input,result FROM member_expert_tasks WHERE id=${taskId}`)[0]!;
-  assert.equal(task.state, "succeeded");
+  assert.equal(task.state, "failed");
   assert.equal(task.input.query, "  商业航天  ");
-  assert.equal(task.result.format, "html");
-  for (const title of ["同业是谁", "发展到哪（公开阶段信号）", "资本市场认可（公开融资/并购/IPO 密度）"]) assert.ok(task.result.html.includes(title));
+  const failed = (await sql<{ error_message: string; error_code: string }[]>`SELECT error_message,error_code FROM member_expert_tasks WHERE id=${taskId}`)[0]!;
+  assert.equal(failed.error_code, "expert_search_unavailable");
+  assert.match(failed.error_message, /公开资料检索未配置或已停用/);
   const artifact = await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${taskId}/artifact`, headers });
-  assert.equal(artifact.statusCode, 200);
-  assert.match(String(artifact.headers["content-type"]), /^text\/html/);
-  assert.ok(artifact.body.includes("P0 空看板"));
+  assert.notEqual(artifact.statusCode, 200);
 });
