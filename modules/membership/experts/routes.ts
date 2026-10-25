@@ -111,9 +111,10 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     }
     // A written brief is what a custom expert runs on. The shipped experts read an entity or a topic
     // instead, so they start without one.
-    if (!BUILTIN_SLUGS.has(slug) && !QUERY_EXPERT_SLUGS.has(slug) && notes.length < 2) return reply.code(400).send({ error: "task_text_required" });
+    const slugText = typeof slug === "string" ? slug : "";
+    if (!BUILTIN_SLUGS.has(slugText) && !QUERY_EXPERT_SLUGS.has(slugText) && notes.length < 2) return reply.code(400).send({ error: "task_text_required" });
     const id = taskId();
-    const input = { ...(QUERY_EXPERT_SLUGS.has(slug) ? { query } : mode === "text_only" ? {} : { companyName }), notes };
+    const input = { ...(QUERY_EXPERT_SLUGS.has(slugText) ? { query } : mode === "text_only" ? {} : { companyName }), notes };
     const rawKey = req.headers["idempotency-key"];
     const idempotencyKey = typeof rawKey === "string" && /^[a-zA-Z0-9._:-]{8,128}$/.test(rawKey) ? rawKey : null;
     const accepted = await sql.begin(async tx => {

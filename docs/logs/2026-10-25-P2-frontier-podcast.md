@@ -45,3 +45,10 @@
 ## 下一步
 
 - 评审 PR 后再由独立发布流程部署，并在生产核对目录播种、一次真实任务、网页摘要与 Markdown 下载；随后补记员工端更新日志条目与发布日志。
+
+## CI 修复（PR #87，2026-10-25）
+
+- 现象：PR #87 的 quality 检查在 `npm run typecheck` 阶段失败，报 `modules/membership/experts/routes.ts(114,28)` 等三处 `Argument of type 'unknown' is not assignable to parameter of type 'string'`。请求体里的 `slug` 是 `unknown`，上一轮把「备注要求」的判定从 `slug !== EXPERT_SLUG && …` 改成集合判定时，直接把它传给了 `Set.has`，本地那次 typecheck 跑在这处改动之前。
+- 修改文件：`modules/membership/experts/routes.ts` 先把 `slug` 收成 `slugText`（非字符串时为空串），集合判定与输入构造都用它；行为不变，仍是内置专家与话题类专家不要求写备注。
+- 最小验证与结果：`npm run typecheck` 通过；`modules/membership/tests/*.test.ts`（一次性本地 PostgreSQL）152/152 通过，`modules/membership/tests/*.standalone.test.ts` 132/132 通过；其余检查结果见上。
+- 未验证事项：未在本地完整复现 CI 的全部任务，以 GitHub Actions 重跑结果为准；本分支不合并、不部署。
