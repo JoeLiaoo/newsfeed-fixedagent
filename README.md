@@ -49,7 +49,7 @@ npm run typecheck
 
 「前沿播客」已随 [PR #93](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/93) 合并：员工提交中文或英文话题，平台用双语检索词读取公开播客文字库，给出中文正文的网页摘要（单文件静态 HTML，按 beautiful-article / reacticle 的 press 主题排版）与 Markdown 产物；英文源节目使用该库中文版，缺少中文版的集数跳过。要点与摘要标明是该库的整理稿且平台未逐条核验。当前 PR 调整员工摘要的检索提示，并读取所有可用匹配节目；尚未部署或做真实员工验收，见[本轮实施记录](docs/logs/2026-10-26-P2-frontier-podcast-ux.md)与[双语改进记录](docs/logs/2026-10-25-P2-frontier-podcast-bilingual.md)。
 
-全景图 HTML 预览、Markdown 下载及移除员工采集台账下载的改动在 [PR #97](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/97) 等待评审；真实 MCP 全景样例和员工产物体验仍待验收。
+全景图 HTML 预览、Markdown 下载及移除员工采集台账下载的改动已随 [PR #97](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/97) 合并（`aa1323a`）；未记录生产发布，真实 MCP 全景样例和员工产物体验仍待验收。
 扫码后由服务端确认绑定的修复已随 PR #18 合并（`4a8299f`），并随 [PR #19 发布](docs/logs/2026-10-23-P4-pr19-deployment.md)。二维码新标签页与互动状态框已随 [PR #22 部署](docs/logs/2026-10-23-P4-pr22-deployment.md)。
 
 按用户 2026-10-25 详细复测信息，生产现运行 `46a5b38`（含此前身份与知识库加载残余修复）；该次发布暂无仓库内独立运维日志。合并、发布与真实业务验收分别记录；发布上线不代表真实业务验收完成。材料正文、无效库页面与关联来源显示的后续维护见[工作日志](docs/logs/2026-10-25-P5-kb-detail-functional-fixes.md)，尚未合并或部署。
