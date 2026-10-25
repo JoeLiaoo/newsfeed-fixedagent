@@ -34,6 +34,7 @@
 - **页面的 `target_key` 与 `slug` 按库分开**：共享库沿用上线前已有的 `target_key` 与 `slug`（如 `view-company-example`），因此已发布的页面仍是共享库的页面；其他库在前面加自己的库号（如 `kb-1a2b3c4d5e6f|view|公司|某公司`、`kb-1a2b3c4d5e6f-view-company-example`）。同一标的因此可以在两个库中各有一页，互不合并、互不引用。
 - Builder 原始 slug 上限为 80 字符；问答使用发布后的完整标识（含库前缀与消歧后缀），上限为 128 字符，不截断已有页面地址。
 - **问答只在本库内路由**：提问时带上库号，候选页面只取该库已发布的页面；库里没有覆盖时返回 `knowledge_no_coverage`。
+- **问答记录按库派生**：`member_wiki_answers` 没有 `base_id` 列，回答与库的对应关系由它记录的 `pages`（回答用过的知识页 slug）推导——用过的页面里有一个属于该库，这条回答就算该库的回答。`GET /answers` 只返回 `asked_by` 为当前员工的回答：问答记录是员工自己的记录，文档未定为库内共享。
 - 规则与换算写在 `modules/membership/knowledge/bases.ts`（`scopedTargetKey`／`scopedSlug`／`baseSlugOf`），改库的空间规则只改这一处。
 
 ## 3. 接口
@@ -52,10 +53,11 @@
 | `GET /pages`、`GET /pages/:slug` | 已发布知识页列表（可检索，`?baseId=`、`?query=`）与单页正文、引用、质量问题（下架的页面对其他员工是 404） |
 | `GET /versions/:id/original` | 下载原件（经会话鉴权，带 `nosniff`；已撤回材料的原件只对上传者与管理员开放，其余为 404） |
 | `POST /answers` | 提问：按问题在**所在库**内路由到已发布页面，生成带脚注引用的回答（请求体带 `baseId`）；每条引用带 `pageSlug`、`documentId`、`versionId`、材料标题与文件名，可跳回依据页与下载原件；有引用时返回 200，无覆盖时返回 422 `knowledge_no_coverage` 与中文 `message`，库不存在时返回 404 `knowledge_base_not_found` |
+| `GET /answers` | 本人的问答记录：按 `created_at` 倒序分页（`?baseId=`、`?limit=`、`?offset=`，返回 `pagination.nextOffset`），每条含问题、回答正文、引用、覆盖度与时效；引用在读取时联表补出材料信息，可跳回依据页、材料与原件 |
 
 材料详情 `GET /documents/:id` 对可读取的 Markdown 版本额外返回 `bodyMd`（UTF-8 原件正文），供已批准员工在详情页直接阅读；其他格式仍只保留元数据与原件下载。知识页详情 `GET /pages/:slug` 返回同库已发布页面的 `related` 标题与 slug，页面据此把历史正文里的短 slug／完整 slug 链接解析为标题与有效地址；来源计数按详情实际返回的引用条数显示。已发布目标存在时，历史遗留的 `related-target-missing` 误报不会在详情继续展示；库中确实不存在的目标仍报告。
 
-问答接口的 `GET /answers` 返回 405 和 `Allow: POST`。排查 404 时先看响应体的 `error`：`knowledge_base_not_found` 是库号问题，`not_found` 是路由／部署版本问题；无覆盖不再与路由缺失共用 404。员工页把问答错误显示在提问表单下方。生产发布后应分别用已发布页面覆盖的问题和无覆盖的问题验收；只检查健康接口不能证明问答可用。
+排查问答接口 404 时先看响应体的 `error`：`knowledge_base_not_found` 是库号问题，`not_found` 是路由／部署版本问题；无覆盖与路由缺失分别返回不同状态。员工页把问答错误显示在提问表单下方。生产发布后应分别用已发布页面覆盖的问题和无覆盖的问题验收；只检查健康接口不能证明问答可用。
 
 ## 4. 构建流程
 
@@ -141,6 +143,7 @@
 - 问答的脚注编号由本轮给出：平台为本轮每条可用引用编一个 `footnote` 数字，模型在正文写 `[^1]` 这样的角标，并在 `citations` 里写回这个编号、该引用的 `citationId` 与页面标识。模型改用页面自己的来源编号（`sourceLabel`，如 `S1`）作角标也能核对；把另一个来源的编号写进来则整条回答拒给。
 - 页面标识写短了（截断）仍按同页处理，引用 ID 说了算；完全不相干的页面名照旧拒给。
 - 回答核不上时接口返回 **422** `knowledge_answer_unverified`（请求已被理解，是回答没通过核对），不是网关错误；模型调不动才回 502 `knowledge_answer_failed`。核不上的回答会释放模型回执，下次提问重新调用模型，不会把同一份核不上的回答再端一次。库里没有覆盖仍是 422 `knowledge_no_coverage`。
+- 问答记录（`GET /answers`）读取时把引用补回材料：先按回答记下的 `versionId`，再按引用行 `citationId`，最后按该页当前唯一的一条来源（页面有多条来源时不猜，材料留空）。缺失的分析师／机构／日期保持空，页面显示「未知」。
 - 页面检索是关键词与字元重合度路由（中文按二字组合），不是向量检索；标的别名与同义词可能影响命中。
 - 页面的 `coverage.reports` 统计的是该页引用的**来源数**（材料内的来源为单位），不是上传份数；问答的 `coverage.reports` 统计的是本次实际用到的**材料份数**。
 - 同一标的的页面由 `target_key`（页面类型＋标的类型＋标的名称）归并；编译器把同一标的写成不同 slug 时仍归到同一页，页面的 slug 取首次发布时的那个。归并在**库内**进行（见 §2.1）。
