@@ -37,6 +37,7 @@ test("the task page reads the one task it shows, and keeps the states of the emp
   assert.match(page, /\/entity`/, "等待选择主体时可确认主体");
   assert.match(page, /\/artifact`/, "可下载产物");
   assert.match(page, /\/checkpoint`/, "可下载采集台账");
+  assert.match(page, /candidateRelation\(candidate, candidates\)/, "任务详情的主体选择也显示母公司／分支标签");
   assert.match(page, /\/materials\/\$\{material\.id\}/, "可下载材料");
   assert.match(page, /method: "DELETE"/, "任务结束后可删除材料");
   assert.match(page, /IntentLink to=\{`\/experts\//, "任务所属专家可回到专家页");
