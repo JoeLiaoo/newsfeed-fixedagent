@@ -47,7 +47,7 @@ npm run typecheck
 
 「赛道同业竞争看板」公开资料检索实现位于当前待评审分支：每个任务固定执行 4 次公开网页检索，至多抓取 3 个来源页，再整理为带来源链接与可得日期的 HTML 看板；没有可靠证据时保留“未披露／未检索到”提示。代码尚未合并、部署或由员工验收，见[实施记录](docs/logs/2026-10-26-P2-06-sector-peer-search.md)。
 
-「前沿播客」已随 [PR #93](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/93) 合并：员工提交中文或英文话题，平台用双语检索词读取公开播客文字库，优先展示标题直接提及话题的节目；宁德时代/CATL、机器人/具身智能等常见中英别名会扩展检索。英文源节目使用该库中文版，缺少中文版的集数跳过。网页摘要为单文件静态 HTML（按 beautiful-article / reacticle 的 press 主题排版），并提供 Markdown 产物；要点与摘要标明是该库的整理稿且平台未逐条核验。当前 PR 调整员工摘要的检索提示并读取所有可用匹配节目，尚未部署或做真实员工验收，见[本轮实施记录](docs/logs/2026-10-26-P2-frontier-podcast-ux.md)、[双语改进记录](docs/logs/2026-10-25-P2-frontier-podcast-bilingual.md)与[检索排序改进记录](docs/logs/2026-10-26-P2-frontier-podcast-search-quality.md)。
+「前沿播客」已随 [PR #93](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/93) 合并：员工提交中文或英文话题，平台用双语检索词读取公开播客文字库，优先展示标题直接提及话题的节目；宁德时代/CATL、机器人/具身智能等常见中英别名会扩展检索。英文源节目使用该库中文版，缺少中文版的集数跳过。网页摘要为单文件静态 HTML（按 beautiful-article / reacticle 的 press 主题排版），并提供 Markdown 产物；要点与摘要标明是该库的整理稿且平台未逐条核验。检索排序增强已随 [PR #104](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/104) 合并（`281ac12`），尚未部署或做真实员工验收。员工摘要调整与全部可用匹配节目的展示另见[本轮实施记录](docs/logs/2026-10-26-P2-frontier-podcast-ux.md)；检索探测、验证与限制见[检索排序改进记录](docs/logs/2026-10-26-P2-frontier-podcast-search-quality.md)和[双语改进记录](docs/logs/2026-10-25-P2-frontier-podcast-bilingual.md)。
 
 全景图 HTML 预览、Markdown 下载及移除员工采集台账下载的改动已随 [PR #97](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/97) 合并（`aa1323a`）；未记录生产发布，真实 MCP 全景样例和员工产物体验仍待验收。
 扫码后由服务端确认绑定的修复已随 PR #18 合并（`4a8299f`），并随 [PR #19 发布](docs/logs/2026-10-23-P4-pr19-deployment.md)。二维码新标签页与互动状态框已随 [PR #22 部署](docs/logs/2026-10-23-P4-pr22-deployment.md)。
