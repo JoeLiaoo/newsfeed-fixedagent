@@ -1,7 +1,7 @@
 # 2026-10-26 · 后端/API/worker/data layer review
 
 - 对应任务：维护审查（不对应 P0–P5 验收项）；基线 `origin/main` / `3744aaa`。
-- 状态：修复已完成，PR 与 CI 状态待同步。
+- 状态：PR #109 已 squash-merge（`68be31e`）；`links`、`quality`、`postgres-integration` 均通过。
 
 ## 审查范围与发现
 
@@ -31,6 +31,6 @@
 
 ## 剩余风险与下一步
 
-- 等待 PR 上 `links`、`quality`、`postgres-integration` 对当前 head 运行；必要时修复 CI 发现。
-- PR 合并前核对最终 SHA 和 CI；合并后补录 squash SHA。生产部署和员工验收未执行。
+- CI 首轮发现并发测试 fixture 多插入一个知识库；修正后 PR head `5d2dcb2` 的 `links`、`quality`、`postgres-integration` 全部通过。
+- PR #109 已于 2026-10-25 squash-merge，合并提交 `68be31ededd57620780db554ea5f9796905ebfd8`。生产部署和员工验收未执行。
 - 全景图供应商实际服务持续可用、真实 GP 主体与事件、真实员工知识库引用仍按既有实施计划待验收；代码审查不替代这些业务核验。
