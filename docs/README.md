@@ -15,6 +15,7 @@
 - [赛道同业竞争看板 P0](logs/2026-10-25-P5-sector-peer-landscape-p0.md)：以可运行的公开数据 HTML 空看板替换舆情开发中入口；记录本地验证与 P1 数据接入待办；已随 PR #79 以 release `b8eb08b` 发布，目录收敛修复随 PR #81 以 release `e3465e5` 发布，登录后显示仍待人工复验。
 - [赛道同业公开资料检索](logs/2026-10-26-P2-06-sector-peer-search.md)：以有限次公开网页检索与页面抓取生成逐项引用来源的 HTML 看板；PR #100 已合并并部署，真实员工任务暴露的模型拒绝见下一条。
 - [赛道同业模型拒绝与输入显示修复](logs/2026-10-26-P2-06-sector-peer-model-reject.md)：生产收据定位 JSON 模式 HTTP 400、补齐提示词、区分模型错误并显示查询词；待修复 PR 评审与员工复测。
+- [剩余 membership JSON 模式提示词维护](logs/2026-10-26-P2-P3-chatjson-prompts.md)：一层、全景、自定义技能与 GP 分类提示词明确 JSON 对象字段并递增版本；待 PR 评审、发布与真实业务复验。
 - [前沿播客专家](logs/2026-10-25-P2-frontier-podcast.md)：输入话题读取公开播客文字库，产出 beautiful-article 风格的网页摘要与 Markdown 产物；记录覆盖口径、失败原因与未验证事项，尚未部署。
 - [前沿播客双语检索与中文正文](logs/2026-10-25-P2-frontier-podcast-bilingual.md)：原词与另一语言关键词合并检索；英文源优先库的中文版本，记录跳过与覆盖边界，待评审部署。
 - [前沿播客检索排序改进](logs/2026-10-26-P2-frontier-podcast-search-quality.md)：记录八个 BidClub 实时探测、增强决策、别名扩展与标题相关性排序；PR #104 已合并（`281ac12`），未部署或员工验收。

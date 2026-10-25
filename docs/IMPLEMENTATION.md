@@ -96,6 +96,8 @@ P2 已交付专家导入、依赖状态、私有任务材料、持久化队列�
 
 2026-10-26 按新增产品决定，P2-06 将该看板更新为限额公开网页检索、有限页面抓取与带来源 HTML；P0 空壳措辞已从员工入口移除。PR #100 已合并并部署，但首次员工任务的四次搜索成功后，模型整理请求因 JSON 模式提示词不符合接口要求返回 HTTP 400，任务失败；任务详情又漏显已提交查询。修复分支已补齐模型提示词和查询显示，并区分永久请求错误与暂时服务故障；尚未合并、部署或完成员工复测。P2-05 与 P5 验收不受影响，见[实现记录](logs/2026-10-26-P2-06-sector-peer-search.md)与[故障记录](logs/2026-10-26-P2-06-sector-peer-model-reject.md)。
 
+2026-10-26 [剩余 membership JSON 模式提示词维护](logs/2026-10-26-P2-P3-chatjson-prompts.md)：一层核查、全景摘要、自定义技能导入和 GP 赛道分类的模型提示词补齐明确的 JSON 对象与字段要求，并递增提示词版本。此项只修正模型请求格式；尚未合并、部署或进行真实业务复验，P2-05 与 P3-03 的验收状态不变。
+
 2026-10-25 新增可运行内置专家「前沿播客」（slug `frontier-podcast`，执行模式 `podcast_search`）：员工输入一个话题（2–100 字），服务端读取公开播客文字库，取回中英文检索返回的节目中文要点、摘要与来源，产出网页摘要（单文件静态 HTML，beautiful-article / reacticle `press` 主题）与 Markdown 产物；不调用新华财经或其他数据源，不补写节目未提及的事实。要点与摘要是该库对原节目的整理稿，平台未逐条核验。双语搜索、slug 去重与英文源节目中文正文已随 [PR #93](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/93) 合并。2026-10-26 本 PR 移除员工摘要中的 partial 检索警告及 HTML hero 范围标签，并移除 6 集产品上限，按每批 3 集读取全部匹配候选；此 PR 尚未合并、部署或员工试用。P2-05 与 P5 的验收勾选不变，见[本轮日志](logs/2026-10-26-P2-frontier-podcast-ux.md)与[双语改进日志](logs/2026-10-25-P2-frontier-podcast-bilingual.md)。
 
 2026-10-26 对 BidClub 公开搜索的八个中英文话题探测显示：具身智能仅 2 条且未命中标题含「具身季报」的第 184 集，英文 embodied intelligence 返回 17 条但前排泛 AI 噪声明显；宁德时代为 0 条，CATL 为 1 条弱相关结果。机器人/robotics 分别为 6/20 条，large language models 返回 20 条且前排偏题。检索质量 PR 增加具身智能、机器人、宁德时代/CATL 等固定别名，并按标题与导语中的话题命中对合并候选排序；不删除低分匹配，保持原双语与英文节目中文正文逻辑。已随 [PR #104](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/104) squash-merge（`281ac12`）；未部署或员工试用，见[检索质量日志](logs/2026-10-26-P2-frontier-podcast-search-quality.md)。
