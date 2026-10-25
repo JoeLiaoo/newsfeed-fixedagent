@@ -13,7 +13,8 @@
 - [赛道同业公开资料检索](logs/2026-10-26-P2-06-sector-peer-search.md)：以有限次公开网页检索与页面抓取生成逐项引用来源的 HTML 看板，记录任务预算、来源边界及定向检查；待 PR 评审与真实员工验收。
 - [前沿播客专家](logs/2026-10-25-P2-frontier-podcast.md)：输入话题读取公开播客文字库，产出 beautiful-article 风格的网页摘要与 Markdown 产物；记录覆盖口径、失败原因与未验证事项，尚未部署。
 - [前沿播客双语检索与中文正文](logs/2026-10-25-P2-frontier-podcast-bilingual.md)：原词与另一语言关键词合并检索；英文源优先库的中文版本，记录跳过与覆盖边界，待评审部署。
-- [产品需求基线](PLAN.md)：v0.87；需求讨论与确认范围，不代表功能已验收。
+- [Issue #65 PPT 上传收口](logs/2026-10-24-i65-disable-pptx.md)：知识库与专家任务只接受 PDF、DOCX、Markdown，已有 PPTX 版本不再解压。
+- [产品需求基线](PLAN.md)：v0.88；需求讨论与确认范围，不代表功能已验收。
 - [本轮进度核查与发布准备](logs/2026-10-24-progress-check-release-readiness.md)：本地专家、GP、通知、知识库与临时库恢复检查结果，列明生产发布和业务验收缺口。
 - [计划与实施状态核对](logs/2026-10-24-plan-implementation-actual-state.md)：按 `main` 已合并代码及最新生产发布核对专家、GP 网页能力和待验收边界。
 - [实施状态](IMPLEMENTATION.md)：P0–P5 唯一任务勾选来源，按对应验收条件完成后才标记 `[x]`。

@@ -141,6 +141,9 @@ test("task materials reject unsafe uploads and extract bounded text as data", as
   assert.throws(() => parseTaskMaterials([upload("empty.md", Buffer.alloc(0))]), /expert_material_too_large/);
   assert.throws(() => parseTaskMaterials([upload("large.md", Buffer.alloc(MAX_MATERIAL_BYTES + 1, 97))]), /expert_material_too_large/);
   assert.throws(() => parseTaskMaterials([upload("image.pdf", Buffer.from([0, 1, 2, 3]))]), /expert_material_format_unsupported/);
+  const presentation = Buffer.from(zipSync({ "ppt/slides/slide1.xml": strToU8("<p:sld/>") }));
+  assert.throws(() => parseTaskMaterials([upload("slides.pptx", presentation)]), /expert_material_format_unsupported/);
+  assert.throws(() => parseTaskMaterials([upload("slides.docx", presentation)]), /expert_material_format_unsupported/);
   assert.throws(() => parseTaskMaterials(Array(4).fill(upload("evidence.md", markdown))), /expert_material_count_invalid/);
 });
 

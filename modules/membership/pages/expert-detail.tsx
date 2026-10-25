@@ -215,7 +215,7 @@ export default function ExpertDetailPage() {
             </> : null}
             {expert.execution_mode === "text_only" && slug !== SECTOR_PEER_EXPERT_SLUG && slug !== FRONTIER_PODCAST_EXPERT_SLUG && <div className="grid gap-2"><Label htmlFor="task-notes">任务要求</Label><Textarea id="task-notes" required minLength={2} maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={5} /></div>}
             {modeNeedsEntity(expert.execution_mode) && <div className="grid gap-2"><Label htmlFor="task-notes">核查备注（内置专家可选）</Label><Textarea id="task-notes" required={!BUILTIN_SLUGS.has(slug ?? "")} minLength={BUILTIN_SLUGS.has(slug ?? "") ? undefined : 2} maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={4} /></div>}
-            {slug !== SECTOR_PEER_EXPERT_SLUG && slug !== FRONTIER_PODCAST_EXPERT_SLUG && <div className="grid gap-2"><Label htmlFor="task-materials">任务材料（可选）</Label><FileInput id="task-materials" multiple accept=".pdf,.docx,.pptx,.md,.markdown,.txt" onChange={event => setFiles(Array.from(event.target.files ?? []))} /><p className="text-xs text-ink-3">PDF、DOCX、PPTX、Markdown；最多 3 个，单个 5 MB、总计 10 MB。材料与报告仅本人可访问，七天后清理。</p></div>}
+            {slug !== SECTOR_PEER_EXPERT_SLUG && slug !== FRONTIER_PODCAST_EXPERT_SLUG && <div className="grid gap-2"><Label htmlFor="task-materials">任务材料（可选）</Label><FileInput id="task-materials" multiple accept=".pdf,.docx,.md,.markdown,.txt" onChange={event => setFiles(Array.from(event.target.files ?? []))} /><p className="text-xs text-ink-3">PDF、DOCX、Markdown；PPT 请先转换为 PDF。最多 3 个，单个 5 MB、总计 10 MB。材料与报告仅本人可访问，七天后清理。</p></div>}
             <Button type="submit" disabled={busy}>{busy ? "请稍候…" : "提交任务"}</Button>
           </form>
         </CardContent>

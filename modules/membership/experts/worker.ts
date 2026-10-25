@@ -48,7 +48,7 @@ function errorText(error: unknown) {
     xinhua_identity_unverified: "平台企业信息查询无法按已确认主体的唯一 ID 或完整信用代码核验身份，未生成报告。",
     xinhua_entity_mismatch: "平台企业信息查询返回的企业与已确认主体不一致，未生成报告。",
     xinhua_unavailable: "平台企业信息查询服务暂时不可用，任务可重新提交。",
-    expert_material_unreadable: "任务材料无法提取文字，请换用有文字层的 PDF、DOCX、PPTX 或 UTF-8 Markdown。",
+    expert_material_unreadable: "任务材料无法提取文字，请换用有文字层的 PDF、DOCX 或 UTF-8 Markdown；PPT 请先转换为 PDF。",
     podcast_query_invalid: "话题太短或太长，请换一个 2 到 100 个字的话题。",
     podcast_source_unavailable: "公开播客文字库暂时不可用，任务可重新提交。",
     podcast_source_timeout: "公开播客文字库响应超时，任务可重新提交。",

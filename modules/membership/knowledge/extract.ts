@@ -2,7 +2,7 @@
 // file reads bytes and text, and never runs anything the material contains.
 import { unzipSync } from "fflate";
 import { extractText as extractPdfText, getDocumentProxy } from "unpdf";
-import { FORMAT_EXTENSIONS, MAX_EXTRACTED_CHARS, type WikiFormat } from "./catalog.ts";
+import { FORMAT_EXTENSIONS, MAX_EXTRACTED_CHARS, type SupportedWikiFormat, type WikiFormat } from "./catalog.ts";
 
 export type ExtractionSection = { label: string; text: string };
 
@@ -18,18 +18,18 @@ const MAX_XML_BYTES = 20 * 1024 * 1024;
 
 /**
  * What the material really is. The name says one thing and the bytes another, so the bytes decide:
- * a PDF starts with its own marker, an office file is a zip whose entries say whether it is a Word or
- * a PowerPoint document, and plain text has to decode as UTF-8.
+ * a PDF starts with its own marker, a Word document is a zip with its document XML, and plain text
+ * has to decode as UTF-8. PPT/PPTX is refused even when its extension is disguised.
  */
 export function detectFormat(fileName: string, bytes: Uint8Array): WikiFormat | null {
   const name = fileName.toLowerCase();
-  const byExtension = (Object.keys(FORMAT_EXTENSIONS) as WikiFormat[]).find(format =>
+  if (/\.pptx?$/.test(name)) return null;
+  const byExtension = (Object.keys(FORMAT_EXTENSIONS) as SupportedWikiFormat[]).find(format =>
     FORMAT_EXTENSIONS[format].some(extension => name.endsWith(`.${extension}`)));
   if (bytes.length >= 5 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d) return "pdf";
   if (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) {
     const entries = zipEntryNames(bytes);
     if (entries.includes("word/document.xml")) return "docx";
-    if (entries.some(entry => /^ppt\/slides\/slide\d+\.xml$/.test(entry))) return "pptx";
     return null;
   }
   // Plain text has no marker of its own: its name says so, and the bytes have to decode as text.
@@ -90,28 +90,20 @@ async function fromPdf(bytes: Uint8Array): Promise<ExtractionResult> {
   return { status: "available", text: body, sections, note: `共 ${totalPages} 页` };
 }
 
-function fromOffice(bytes: Uint8Array, format: "docx" | "pptx"): ExtractionResult {
-  const wanted = format === "docx"
-    ? (name: string) => name === "word/document.xml"
-    : (name: string) => /^ppt\/slides\/slide\d+\.xml$/.test(name);
-  const files = unzipSync(bytes, { filter: file => wanted(file.name) && file.originalSize <= MAX_XML_BYTES });
-  const names = Object.keys(files).sort((left, right) => (format === "pptx" ? slideNumber(left) - slideNumber(right) : left.localeCompare(right)));
+function fromOffice(bytes: Uint8Array): ExtractionResult {
+  const files = unzipSync(bytes, { filter: file => file.name === "word/document.xml" && file.originalSize <= MAX_XML_BYTES });
+  const names = Object.keys(files);
   if (!names.length) return { status: "unavailable", text: "", sections: [], note: "文档结构无法读取，未生成知识页。" };
   const sections: ExtractionSection[] = [];
   for (const name of names) {
     const xml = new TextDecoder("utf-8", { fatal: false }).decode(files[name]!);
-    const paragraphs = xmlParagraphs(xml, format === "docx" ? "w:t" : "a:t");
+    const paragraphs = xmlParagraphs(xml, "w:t");
     const text = paragraphs.join("\n");
     if (!text.trim()) continue;
-    sections.push({ label: format === "docx" ? "正文" : `第 ${slideNumber(name)} 页幻灯片`, text });
+    sections.push({ label: "正文", text });
   }
   if (!sections.length) return { status: "unavailable", text: "", sections: [], note: "文档没有可提取的文字，未生成知识页。" };
   return { status: "available", text: sections.map(section => `<!-- ${section.label} -->\n${section.text}`).join("\n\n"), sections, note: null };
-}
-
-function slideNumber(name: string): number {
-  const match = /slide(\d+)\.xml$/.exec(name);
-  return match ? Number(match[1]) : 0;
 }
 
 function fromMarkdown(bytes: Uint8Array): ExtractionResult {
@@ -125,9 +117,10 @@ function fromMarkdown(bytes: Uint8Array): ExtractionResult {
 
 /** Reads the material out. A failure is reported, never guessed around. */
 export async function extractMaterial(format: WikiFormat, bytes: Uint8Array): Promise<ExtractionResult> {
+  if (format === "pptx") return { status: "unavailable", text: "", sections: [], note: "PPTX 已停止处理，请先转换为 PDF。" };
   try {
     if (format === "pdf") return await fromPdf(bytes);
-    if (format === "docx" || format === "pptx") return fromOffice(bytes, format);
+    if (format === "docx") return fromOffice(bytes);
     return fromMarkdown(bytes);
   } catch (error) {
     return { status: "unavailable", text: "", sections: [], note: `文件无法读取：${(error as Error).message.slice(0, 200)}` };

@@ -91,13 +91,14 @@ const draft: CompiledDraft = {
 test("the format of a material is decided by its bytes", () => {
   assert.equal(detectFormat("note.pdf", samplePdf()), "pdf");
   assert.equal(detectFormat("note.docx", DOCX), "docx");
-  assert.equal(detectFormat("slides.pptx", PPTX), "pptx");
+  assert.equal(detectFormat("slides.pptx", PPTX), null);
+  assert.equal(detectFormat("slides.docx", PPTX), null);
   assert.equal(detectFormat("note.md", Buffer.from("# 标题\n正文", "utf8")), "markdown");
   assert.equal(detectFormat("note.pdf", Buffer.from("not a pdf", "utf8")), null, "a name that says pdf does not make it one");
   assert.equal(detectFormat("other.zip", zipSync({ "a/b.txt": strToU8("x") })), null);
 });
 
-test("text is read out of every accepted format", async () => {
+test("accepted formats are extracted and historical PPTX skips decompression", async () => {
   const markdown = await extractMaterial("markdown", Buffer.from("# 标题\n正文", "utf8"));
   assert.equal(markdown.status, "available");
   assert.match(markdown.text, /正文/);
@@ -108,9 +109,8 @@ test("text is read out of every accepted format", async () => {
   assert.doesNotMatch(docx.text, /PAGE/, "field codes are not the document's text");
 
   const pptx = await extractMaterial("pptx", PPTX);
-  assert.equal(pptx.status, "available");
-  assert.equal(pptx.sections.length, 2);
-  assert.match(pptx.text, /第二页：风险/);
+  assert.equal(pptx.status, "unavailable");
+  assert.deepEqual(pptx.sections, []);
 
   const pdf = await extractMaterial("pdf", samplePdf());
   assert.equal(pdf.status, "available");
