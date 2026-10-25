@@ -128,6 +128,14 @@
 - web、API、worker 运行 `citic-newsfeed:8e20afbdb6d3dc5a8f1553ba4db021c1ef65d79e`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200；`/projects/invested-gp`、`/experts` 按会话鉴权 302 跳转登录页，`/api/v1/membership/gp-projects` 未登录返回 401 `login_required`。
 - **未验收**：生产库 `member_gp_investments` 与 `member_gp_watchlist` 均为 0 行，员工登录后的已投 GP 清单预计为空，GP 数据落地与员工验收待完成。详见[主线发布日志](logs/2026-10-24-P4-main-gp-projects-deployment.md)。
 
+### PR #70 生产冒烟跟进发布（2026-10-25）
+
+- [PR #70](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/70) 已合并，提交 `d0713cce1fb41af53d2c642dedbb1b980e8ab067`（含 PR #64 界面键盘修复）已发布到 `/opt/citic-newsfeed/releases/d0713cce1fb41af53d2c642dedbb1b980e8ab067`。发布前确认线上仍是上一次主线发布 `8e20afbdb6d3dc5a8f1553ba4db021c1ef65d79e`；本次只发布已在 `main` 上的代码，未合并任何开放 PR。
+- 发布前保存 `.env.before-release-d0713cc-20261025` 与 `backups/db-before-d0713cc-20261025.dump`，权限均为 `0600`，转储经 `pg_restore --list` 检查可读（未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变。
+- **本轮无新增迁移**：setup 输出 `database is up to date` 与 `sources: 0 added, 26 already there`，`schema_migrations` 仍为 164 条、最大 `0190`，setup 退出码 0 之后才重建 web、API、worker。数据库容器、命名卷、Hermes 网关、Nginx 与四项 P3 开关均未改动。
+- web、API、worker 运行 `citic-newsfeed:d0713cce1fb41af53d2c642dedbb1b980e8ab067`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200；未登录时 `POST /api/v1/membership/knowledge/answers` 与 `GET` 同一路径均返回 401（员工鉴权边界先于路由处理，405 只在有会话时可达），`/projects/invested-gp`、`/knowledge` 按会话鉴权 302 跳转登录页。
+- **未验收**：登录后问答 200／422 行为、员工信源与 About 缓存一致性、GP 真实来源与可核对数据仍需员工账号复测。详见[PR #70 发布日志](logs/2026-10-25-P4-pr70-prod-smoke-followups-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
