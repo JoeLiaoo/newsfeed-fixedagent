@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@aihot/web/components/
 import { renderMarkdown } from "@aihot/web/lib/markdown";
 import { pageMeta, siteUrl } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
+import { KnowledgeDetailSkeleton } from "./knowledge-detail-skeleton.tsx";
 
 export const handle: Screen = { tab: "me", name: "知识页" };
 export const meta = () => pageMeta({ title: "知识页", path: "/knowledge", noindex: true });
@@ -52,7 +53,7 @@ export default function KnowledgeTargetPage() {
 
   if (!page) return <main className="mx-auto w-full max-w-4xl px-5 py-8">
     <h1 className="text-2xl font-semibold tracking-tight text-ink">知识页</h1>
-    {loading && <p className="mt-4 text-sm text-ink-3" role="status">正在加载知识页…</p>}
+    {loading && <KnowledgeDetailSkeleton kind="target" />}
     {message && <Alert className="mt-4" role="status">{message}</Alert>}
     <p className="mt-4"><Link to="/knowledge" className="text-sm text-accent underline-offset-4 hover:underline">返回知识库</Link></p>
   </main>;

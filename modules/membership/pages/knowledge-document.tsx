@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@aihot/web/components/
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { TASK_ERRORS, TASK_STAGE_LABELS, TASK_STATE_LABELS } from "../knowledge/catalog.ts";
+import { KnowledgeDetailSkeleton } from "./knowledge-detail-skeleton.tsx";
 
 export const handle: Screen = { tab: "me", name: "材料" };
 export const meta = () => pageMeta({ title: "材料", path: "/knowledge", noindex: true });
@@ -42,7 +43,7 @@ export default function KnowledgeDocumentPage() {
 
   if (!document) return <main className="mx-auto w-full max-w-4xl px-5 py-8">
     <h1 className="text-2xl font-semibold tracking-tight text-ink">材料</h1>
-    {loading && <p className="mt-4 text-sm text-ink-3" role="status">正在加载材料…</p>}
+    {loading && <KnowledgeDetailSkeleton kind="document" />}
     {message && <Alert className="mt-4" role="status">{message}</Alert>}
     <p className="mt-4"><Link to="/knowledge" className="text-sm text-accent underline-offset-4 hover:underline">返回知识库</Link></p>
   </main>;

@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Link, useRouteLoaderData } from "react-router";
+import { type ReactNode } from "react";
+import { Link, redirect, useLoaderData, useRouteLoaderData } from "react-router";
+import type { Route } from "./+types/more";
 import { Settings2 } from "lucide-react";
 import { POLICY, SITE } from "@aihot/site";
 import type { loader as rootLoader } from "../root";
@@ -8,7 +9,7 @@ import { PhoneBar } from "../components/shell/PhoneBar";
 import { sidebar } from "../components/shell/nav";
 import { NavList } from "../components/shell/NavGroups";
 import type { Screen } from "../components/shell/screens";
-import { edgeTtl } from "../lib/api.server";
+import { API_BASE_URL } from "../lib/api.server";
 import { webModules } from "../site-modules";
 import { pageMeta } from "../lib/seo";
 import { setFontPreference, useFontPreference } from "../lib/local-state";
@@ -19,9 +20,22 @@ import { IconChevronRight, IconHeart, IconMessage, IconMoon, IconPlug, IconSpark
 
 export const handle: Screen = { tab: "me", name: "我的" };
 
-export function headers() {
-  return edgeTtl(300);
+type Member = { realName: string; username: string };
+
+export async function loader({ request }: Route.LoaderArgs) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/membership/me`, {
+    headers: { cookie: request.headers.get("cookie") ?? "", accept: "application/json" },
+    cache: "no-store",
+    signal: request.signal,
+  });
+  if (response.status === 401) throw redirect("/login");
+  if (!response.ok) throw new Response("账号信息暂时不可用", { status: 503 });
+  const result = await response.json() as { user?: Member };
+  if (!result.user?.realName || !result.user.username) throw new Response("账号信息暂时不可用", { status: 503 });
+  return result.user;
 }
+
+export function headers() { return { "Cache-Control": "private, no-store", Vary: "Cookie" }; }
 
 export function meta() {
   return pageMeta({ title: "我的", path: "/more", noindex: true });
@@ -69,25 +83,17 @@ function RowLink({ row, dot = false }: { row: Row; dot?: boolean }) {
 
 export default function MorePage() {
   const root = useRouteLoaderData<typeof rootLoader>("root");
-  const [member, setMember] = useState<{ realName: string; username: string } | null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetch("/api/v1/membership/me", { signal: controller.signal })
-      .then(async response => {
-        if (response.status === 401) { location.href = "/login"; return; }
-        if (!response.ok) return;
-        const result = await response.json() as { user: { realName: string; username: string } };
-        setMember(result.user);
-      }).catch(() => undefined);
-    return () => controller.abort();
-  }, []);
+  const member = useLoaderData<typeof loader>();
   const changelogDot = useChangelogDot(root?.changelogVersion ?? null);
   const font = useFontPreference();
   return (
     <div className="mx-auto max-w-[var(--page-max-reading)] pb-8">
       <PhoneBar title="我的" large />
       <h1 className="hidden pb-4 pt-1 text-[22px] font-bold text-ink lg:block">我的</h1>
-      {member && <p className="px-4 text-sm text-ink-3"><span className="font-medium text-ink">{member.realName}</span> · @{member.username}</p>}
+      <section className="mb-2 rounded-card border border-line bg-surface px-4 py-3" aria-label="当前登录账号">
+        <p className="break-words font-medium text-ink">{member.realName}</p>
+        <p className="break-all text-sm text-ink-3">@{member.username}</p>
+      </section>
       <div className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-4 2xl:grid-cols-3">
         <section>
           <h2 className="px-4 pb-2 pt-6 text-[13px] font-semibold text-ink-3">导航</h2>
