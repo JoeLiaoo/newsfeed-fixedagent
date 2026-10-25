@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { collectPodcastEpisodes, createPodcastClient, PodcastSourceError, podcastSummaryUrl } from "../experts/bidclub.ts";
-import { FRONTIER_PODCAST_EXPERT, FRONTIER_PODCAST_EXPERT_SLUG, HTML_PREVIEW_EXPERT_SLUGS, QUERY_EXPERT_SLUGS } from "../experts/catalog.ts";
+import { FRONTIER_PODCAST_EXPERT, FRONTIER_PODCAST_EXPERT_SLUG, HTML_PREVIEW_EXPERT_SLUGS, PANORAMA_EXPERT_SLUG, QUERY_EXPERT_SLUGS } from "../experts/catalog.ts";
 import { renderFrontierPodcastHtml } from "../experts/frontier-podcast-html.ts";
 import { renderFrontierPodcastMarkdown } from "../experts/frontier-podcast-markdown.ts";
 import type { FrontierPodcastView } from "../experts/frontier-podcast-view.ts";
@@ -256,6 +256,7 @@ test("the expert is a runnable builtin that takes a topic, not an entity", () =>
   assert.deepEqual(FRONTIER_PODCAST_EXPERT.missingDependencies, []);
   assert.ok(QUERY_EXPERT_SLUGS.has(FRONTIER_PODCAST_EXPERT_SLUG));
   assert.ok(HTML_PREVIEW_EXPERT_SLUGS.has(FRONTIER_PODCAST_EXPERT_SLUG));
+  assert.ok(HTML_PREVIEW_EXPERT_SLUGS.has(PANORAMA_EXPERT_SLUG));
   assert.match(FRONTIER_PODCAST_EXPERT.skillMd, /未提供/);
   assert.doesNotMatch(FRONTIER_PODCAST_EXPERT.skillMd, /结果不完整|检索回退到最近/);
 });
@@ -330,6 +331,7 @@ test("the task card shows the podcast article in the same sandboxed frame as the
   const detail = readFileSync(new URL("../pages/expert-detail.tsx", import.meta.url), "utf8");
   assert.ok(detail.includes('srcDoc={task.result.html} sandbox=""'));
   assert.ok(detail.includes("HTML_PREVIEW_EXPERT_SLUGS.has(task.expertSlug)"));
+  assert.ok(detail.includes('task.expertSlug === PANORAMA_EXPERT_SLUG ? "全景图报告"'));
   assert.ok(detail.includes("podcast_query_required"));
   assert.ok(!detail.includes("检索回退到最近若干集"), "the task card does not show a partial-search alert");
 });

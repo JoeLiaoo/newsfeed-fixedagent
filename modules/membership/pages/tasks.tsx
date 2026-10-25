@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@aihot/web/components/
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS } from "../experts/catalog.ts";
+import { EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS, PANORAMA_EXPERT_SLUG } from "../experts/catalog.ts";
 
 const EXPERT_TASK_PAGE_SIZE = 20;
 
@@ -18,7 +18,7 @@ type Task = {
   id: string; expertSlug: string; expertName: string; state: string; stage: string;
   input: { companyName?: string; query?: string }; result: { query?: string } | null;
   errorCode: string | null; errorMessage: string | null; createdAt: string; executionAttempts: number;
-  hasArtifact: boolean; hasCheckpoint: boolean;
+  hasArtifact: boolean;
 };
 
 function subject(task: Task) { return (task.result?.query ?? task.input.companyName ?? task.input.query ?? "").trim(); }
@@ -81,8 +81,7 @@ export default function TasksPage() {
               {task.state === "failed" && <p className="mt-2 text-sm text-danger">{EXPERT_TASK_ERROR_LABELS[task.errorCode ?? ""] ?? task.errorMessage ?? "任务未完成。"}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button asChild variant="link" className="h-8 px-0"><IntentLink to={`/tasks/${task.id}`}>查看任务</IntentLink></Button>
-                {task.hasArtifact && <Button asChild variant="link" className="h-8 px-0"><a href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}>下载产物</a></Button>}
-                {task.hasCheckpoint && <Button asChild variant="link" className="h-8 px-0"><a href={`/api/v1/membership/expert-tasks/${task.id}/checkpoint`}>下载采集台账</a></Button>}
+                {task.hasArtifact && <Button asChild variant="link" className="h-8 px-0"><a href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}>{task.expertSlug === PANORAMA_EXPERT_SLUG ? "下载 Markdown 产物" : "下载产物"}</a></Button>}
               </div>
             </article>)}</div>}
         {(nextOffset !== null || offset > 0) && <div className="mt-4 flex flex-wrap items-center gap-2">

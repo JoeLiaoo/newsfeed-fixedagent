@@ -5,6 +5,7 @@ import { classifyChild, DEFAULT_PANORAMA_BUDGET, isFundLike, isInvestmentLike, r
 import { runPanorama, type PanoramaRunResult } from "../experts/panorama-run.ts";
 import { mapProfile, mapRelations, mapShareholders } from "../experts/panorama-fields.ts";
 import { renderPanorama } from "../experts/panorama-markdown.ts";
+import { renderPanoramaHtml } from "../experts/panorama-html.ts";
 import { executionMode } from "../experts/import.ts";
 import { BUILTIN_EXPERT, PANORAMA_EXPERT, PANORAMA_EXPERT_SLUG, XINHUA_ALLOWED_TOOLS, modeNeedsEntity } from "../experts/catalog.ts";
 import type { XinhuaCall } from "../experts/xinhua.ts";
@@ -285,6 +286,33 @@ test("a summary that cites an evidence number the draft does not have is marked 
     narrative: { summary: "引用 [S99]。", openQuestions: [] },
   });
   assert.ok(markdown.includes("[未提供的引用编号 S99]"));
+});
+
+test("the HTML preview preserves report sections and is safe in a scriptless sandbox", () => {
+  const html = renderPanoramaHtml(`# 对外投资全景图
+
+> 范围：所有结论需人工复核。
+
+## 一、逐层投资明细
+
+| 主体 | 层级 |
+|---|---|
+| <script>alert(1)</script> | L1 |
+
+## 七、缺口与待核清单
+
+- 基金备案状态未核。
+
+## 九、摘要整理
+
+引用 [S1]。`);
+  assert.match(html, /<!doctype html>/i);
+  assert.match(html, /<h2>一、逐层投资明细<\/h2>/);
+  assert.match(html, /<h2>七、缺口与待核清单<\/h2>/);
+  assert.match(html, /<h2>九、摘要整理<\/h2>/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script\b/i);
+  assert.doesNotMatch(html, /https?:\/\/[^\s"']+\.(?:css|js)/i);
 });
 
 test("the run stops at its limits and says the result is incomplete", async () => {

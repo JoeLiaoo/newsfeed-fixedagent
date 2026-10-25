@@ -54,7 +54,7 @@ test("a single expert task is read by its owner alone, with the row the list ret
   const preview = "## 核查底稿\n\n样例预览内容";
   const materialBody = Buffer.from("# 材料\n\n样例材料");
   await sql`UPDATE member_expert_tasks SET state='succeeded', stage='complete', execution_attempts=1,
-      result=${sql.json({ preview, panorama: { incomplete: true, gapCount: 2, limits: ["主体数预算"] } })},
+      result=${sql.json({ html: "<!doctype html><html><body>报告预览</body></html>", format: "html", panorama: { incomplete: true, gapCount: 2, limits: ["主体数预算"] } })},
       updated_at=now(), finished_at=now() WHERE id=${taskId}`;
   await sql`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256)
     VALUES (${taskId},${userIds[0]},'expert.md','text/markdown',${Buffer.from(preview)},${createHash("sha256").update(Buffer.from(preview)).digest("hex")})`;
@@ -75,8 +75,9 @@ test("a single expert task is read by its owner alone, with the row the list ret
   assert.equal(task.errorCode, null);
   assert.equal(task.errorMessage, null);
   assert.equal(task.hasArtifact, true);
-  assert.equal(task.hasCheckpoint, true);
-  assert.equal((task.result as { preview: string }).preview, preview);
+  assert.ok(!("hasCheckpoint" in task), "checkpoint state is internal and omitted from employee task data");
+  assert.equal((task.result as { html: string }).html, "<!doctype html><html><body>报告预览</body></html>");
+  assert.equal((task.result as { format: string }).format, "html");
   assert.equal((task.input as { companyName: string }).companyName, "任务详情测试企业");
   const materials = task.materials as Array<{ filename: string; byteSize: number; sha256: string; extractionStatus: string }>;
   assert.equal(materials.length, 1);

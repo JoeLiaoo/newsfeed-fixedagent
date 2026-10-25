@@ -9,7 +9,6 @@ import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_SLUG, FRONTIER_PODCAST
 import { seedBuiltinExperts } from "./seed.ts";
 import { parseTaskMaterials, MAX_TOTAL_MATERIAL_BYTES } from "./materials.ts";
 import { getTaskArtifact } from "./worker.ts";
-import { panoramaCheckpointJsonl } from "./panorama-checkpoint.ts";
 import { expertTaskPagination, parseExpertTaskPage } from "./task-page.ts";
 
 type Authenticate = (request: FastifyRequest, allowPending?: boolean) => Promise<MemberSession | null>;
@@ -76,7 +75,6 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
         t.selected_entity AS "selectedEntity", t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
         t.expires_at AS "expiresAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
-        EXISTS(SELECT 1 FROM member_expert_panorama_checkpoints p WHERE p.task_id=t.id AND p.user_id=${user.id}) AS "hasCheckpoint",
         COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
       WHERE t.user_id=${user.id} AND t.expires_at > now() ${slugFilter}
@@ -93,7 +91,6 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const tasks = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
         t.selected_entity AS "selectedEntity", t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt", t.expires_at AS "expiresAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
-        EXISTS(SELECT 1 FROM member_expert_panorama_checkpoints p WHERE p.task_id=t.id AND p.user_id=${user.id}) AS "hasCheckpoint",
         COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
       WHERE t.id=${id} AND t.user_id=${user.id} AND t.expires_at > now()`;
@@ -223,19 +220,6 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const artifact = await getTaskArtifact(id, user.id);
     if (!artifact) return reply.code(404).send({ error: "artifact_not_found_or_expired" });
     return reply.header("Content-Type", artifact.content_type).header("Content-Disposition", `attachment; filename="${artifact.filename}"`).header("X-Content-Type-Options", "nosniff").header("ETag", `"${artifact.sha256}"`).send(artifact.body);
-  });
-
-  app.get("/api/v1/membership/expert-tasks/:id/checkpoint", async (req, reply) => {
-    noStore(reply);
-    const user = await authenticate(req);
-    if (!user) return reply.code(401).send({ error: "login_required" });
-    const id = (req.params as { id: string }).id;
-    const tasks = await sql<{ id: string; has_checkpoint: boolean }[]>`
-      SELECT t.id, EXISTS(SELECT 1 FROM member_expert_panorama_checkpoints p WHERE p.task_id=t.id AND p.user_id=${user.id}) AS has_checkpoint
-      FROM member_expert_tasks t WHERE t.id=${id} AND t.user_id=${user.id} AND t.expert_slug=${PANORAMA_EXPERT_SLUG} AND t.expires_at > now()`;
-    if (!tasks[0] || !tasks[0].has_checkpoint) return reply.code(404).send({ error: "checkpoint_not_found" });
-    const body = Buffer.from(await panoramaCheckpointJsonl(id, user.id), "utf8");
-    return reply.header("Content-Type", "application/x-ndjson; charset=utf-8").header("Content-Disposition", `attachment; filename="expert-${id}-checkpoint.jsonl"`).header("X-Content-Type-Options", "nosniff").send(body);
   });
 
   app.get("/api/v1/membership/expert-tasks/:id/materials/:materialId", async (req, reply) => {

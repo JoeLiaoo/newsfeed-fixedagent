@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { installModules } from "@aihot/backend/modules";
 import { closeDb, sql } from "@aihot/backend/db";
@@ -7,10 +7,10 @@ import { stopBossNow } from "@aihot/backend/jobs/queue";
 import { buildApp } from "../../../apps/api/src/app.ts";
 import { SERVER_MODULES } from "../../../site/modules/server.ts";
 import { tag } from "../../../tests/setup.ts";
-import { createPanoramaCheckpoint, panoramaCheckpointJsonl } from "../experts/panorama-checkpoint.ts";
+import { createPanoramaCheckpoint } from "../experts/panorama-checkpoint.ts";
 import { PANORAMA_EXPERT_SLUG, EXPERT_SLUG } from "../experts/catalog.ts";
 
-test("the panorama expert is published, needs a confirmed entity and keeps its collection ledger", async t => {
+test("the panorama expert is published, needs a confirmed entity, keeps internal checkpoints and exposes Markdown artifacts", async t => {
   installModules(SERVER_MODULES);
   const app = await buildApp();
   t.after(async () => { await app.close(); await stopBossNow(); await closeDb(); });
@@ -59,8 +59,8 @@ test("the panorama expert is published, needs a confirmed entity and keeps its c
   assert.equal(card?.input.companyName, "本方主体", "任务卡带着员工查询的企业名称");
   assert.equal(card?.selectedEntity?.name, "本方主体", "任务卡带着已确认的工商主体");
 
-  const emptyDownload = await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${taskId}/checkpoint`, headers: { cookie, ...common } });
-  assert.equal(emptyDownload.statusCode, 404, "台账尚不存在时不应提供空 JSONL 下载");
+  const removedRoute = await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${taskId}/checkpoint`, headers: { cookie, ...common } });
+  assert.equal(removedRoute.statusCode, 404, "员工端不再提供采集台账下载接口");
 
   // The collection ledger of the run: what it read, kept with the task.
   const checkpoint = createPanoramaCheckpoint(taskId, (await sql<{ user_id: string }[]>`SELECT user_id FROM member_expert_tasks WHERE id=${taskId}`)[0]!.user_id);
@@ -69,15 +69,13 @@ test("the panorama expert is published, needs a confirmed entity and keeps its c
   const cached = await checkpoint.get("company:root", "profile");
   assert.equal(cached?.tool, "get_company_profile");
   assert.equal(await checkpoint.get("company:root", "missing"), null);
-  const jsonl = await panoramaCheckpointJsonl(taskId, (await sql<{ user_id: string }[]>`SELECT user_id FROM member_expert_tasks WHERE id=${taskId}`)[0]!.user_id);
-  const lines = jsonl.trim().split("\n").map(line => JSON.parse(line) as { nodeKey: string; kind: string });
-  assert.equal(lines.length, 2);
-  assert.ok(lines.some(line => line.kind === "relations:0"));
-
-  const download = await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${taskId}/checkpoint`, headers: { cookie, ...common } });
-  assert.equal(download.statusCode, 200);
-  assert.ok(download.headers["content-type"]?.includes("application/x-ndjson"));
-  assert.ok(download.body.includes("get_direct_investment"));
-  const listedTasks = (await (await app.inject({ method: "GET", url: "/api/v1/membership/expert-tasks", headers: { cookie, ...common } })).json() as { tasks: Array<{ id: string; hasCheckpoint: boolean }> }).tasks;
-  assert.equal(listedTasks.find(task => task.id === taskId)?.hasCheckpoint, true, "页面只在采集台账存在时显示 JSONL 下载");
+  assert.equal((await checkpoint.get("company:root", "relations:0"))?.tool, "get_direct_investment", "续跑仍可复用已保存的投资查询");
+  const markdown = Buffer.from("# 对外投资全景图\n\nMarkdown draft\n", "utf8");
+  const digest = createHash("sha256").update(markdown).digest("hex");
+  await sql`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256) VALUES (${taskId},(SELECT user_id FROM member_expert_tasks WHERE id=${taskId}),${`expert-${taskId}.md`},'text/markdown; charset=utf-8',${markdown},${digest})`;
+  const artifact = await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${taskId}/artifact`, headers: { cookie, ...common } });
+  assert.equal(artifact.statusCode, 200);
+  assert.match(String(artifact.headers["content-type"]), /text\/markdown/);
+  assert.match(String(artifact.headers["content-disposition"]), /\.md"/);
+  assert.ok(artifact.body.includes("Markdown draft"));
 });
