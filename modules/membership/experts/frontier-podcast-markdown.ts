@@ -1,7 +1,7 @@
 // The Markdown product of the 前沿播客 result: the points and the summary of every episode that was
 // read, in full, each with the source it came from. The file is what the employee keeps and quotes.
 import { beijingStamp } from "@aihot/contracts/time";
-import { clipped, countLine, coverageLine, dateLabel, durationLabel, editorialSourceLabel, languageLabel, MARKDOWN_TEXT_LIMIT, sourceLink, summaryDownloadUrl, type FrontierPodcastView } from "./frontier-podcast-view.ts";
+import { clipped, countLine, dateLabel, durationLabel, editorialSourceLabel, languageLabel, MARKDOWN_TEXT_LIMIT, sourceLink, summaryDownloadUrl, type FrontierPodcastView } from "./frontier-podcast-view.ts";
 
 function cell(value: string) {
   return value.replace(/[|\r\n\t]/g, " ").trim();
@@ -53,14 +53,12 @@ export function renderFrontierPodcastMarkdown(view: FrontierPodcastView): string
     ``,
     `- 话题：${cell(view.query)}`,
     `- 收录：${cell(countLine(view))}`,
-    `- ${cell(coverageLine(view))}`,
     `- 生成时间：${beijingStamp(view.generatedAt)}（北京时间）`,
     `- 数据来源：公开播客文字库`,
     ``,
     ...sections,
     `## 使用说明`,
     ``,
-    `- 收录集数受检索接口的匹配结果限制，不代表该话题的全部节目。`,
     `- 要点与摘要只覆盖原节目已整理的内容；平台不补写节目未提及的事实、数字或结论。`,
     `- 引用某一条观点前，请打开该集的来源页面核对原文。`,
     `- 仅供公开信息研究参考，不构成投资建议。`,

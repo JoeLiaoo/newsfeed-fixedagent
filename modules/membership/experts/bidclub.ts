@@ -6,8 +6,6 @@
 /** The public API root. Fixed on purpose: the service needs no credentials, so there is nothing to configure. */
 export const PODCAST_API_BASE = "https://bidclub.ai";
 
-/** How many episodes one task includes. More candidates may be read when an English edition lacks Chinese. */
-export const PODCAST_MAX_EPISODES = 6;
 /** How many episodes are read at the same time. The library asks for modest parallelism. */
 export const PODCAST_FETCH_CONCURRENCY = 3;
 /** The search's own limits: the query is 2–100 characters. */
@@ -267,11 +265,10 @@ export type PodcastCollection = {
 };
 
 /**
- * Search both languages, then read candidates with modest parallelism until the report has `max`
- * Chinese-backed episodes or the candidates are exhausted. A failed read does not stop the others;
+ * Search both languages, then read every candidate with modest parallelism. A failed read does not stop the others;
  * its count travels with the result so the report can say so.
  */
-export async function collectPodcastEpisodes(query: string, options: { client?: PodcastClient; max?: number; expandQuery?: (query: string) => Promise<string[]> } = {}): Promise<PodcastCollection> {
+export async function collectPodcastEpisodes(query: string, options: { client?: PodcastClient; expandQuery?: (query: string) => Promise<string[]> } = {}): Promise<PodcastCollection> {
   const client = options.client ?? createPodcastClient();
   const original = query.trim();
   if (original.length < PODCAST_QUERY_MIN || original.length > PODCAST_QUERY_MAX) throw new PodcastSourceError("podcast_query_invalid");
@@ -306,13 +303,12 @@ export async function collectPodcastEpisodes(query: string, options: { client?: 
       if (match && !seen.has(match.slug)) { seen.add(match.slug); ordered.push(match); }
     }
   }
-  const max = Math.max(1, Math.min(options.max ?? PODCAST_MAX_EPISODES, PODCAST_MAX_EPISODES));
   const episodes: PodcastEpisode[] = [];
   let failed = 0;
   let failureCode: string | null = null;
   let skippedWithoutChinese = 0;
-  for (let start = 0; start < ordered.length && episodes.length < max;) {
-    const batch = ordered.slice(start, start + Math.min(PODCAST_FETCH_CONCURRENCY, max - episodes.length));
+  for (let start = 0; start < ordered.length;) {
+    const batch = ordered.slice(start, start + PODCAST_FETCH_CONCURRENCY);
     start += batch.length;
     const read = await Promise.all(batch.map(async (match) => {
       try { return await client.episode(match.slug); }

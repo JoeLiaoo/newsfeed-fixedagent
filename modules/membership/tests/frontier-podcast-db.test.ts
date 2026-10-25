@@ -93,9 +93,11 @@ test("a podcast task ends with the article in the card and the Markdown file to 
   assert.equal(task.result.format, "html");
   assert.equal(task.result.podcast.episodes, 1);
   assert.equal(task.result.podcast.partial, true);
-  for (const part of ["前沿播客", "ra-hero", "ra-toc", "182: 对话梁琛奇", "晚点聊 LateTalk", "https://podcast.latepost.com/182", "结果不完整"]) {
+  for (const part of ["前沿播客", "ra-hero", "ra-toc", "182: 对话梁琛奇", "晚点聊 LateTalk", "https://podcast.latepost.com/182"]) {
     assert.ok(task.result.html.includes(part), part);
   }
+  assert.ok(!task.result.html.includes("结果不完整"));
+  assert.ok(!task.result.html.includes("最近 300 集"));
   assert.ok(!task.result.html.includes("<script"), "the article carries no script");
 
   const artifact = await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${taskId}/artifact`, headers });
@@ -103,6 +105,7 @@ test("a podcast task ends with the article in the card and the Markdown file to 
   assert.match(String(artifact.headers["content-type"]), /^text\/markdown/);
   assert.ok(artifact.body.includes("# 前沿播客 · 具身智能"));
   assert.ok(artifact.body.includes("- 来源：Podcast · https://podcast.latepost.com/182"));
+  assert.ok(!artifact.body.includes("结果不完整"));
 
   // A library that cannot answer leaves the task failed with a readable reason.
   const failing = await app.inject({ method: "POST", url: "/api/v1/membership/expert-tasks", headers: { ...headers, "idempotency-key": randomUUID() }, payload: { slug: FRONTIER_PODCAST_EXPERT_SLUG, query: "半导体" } });

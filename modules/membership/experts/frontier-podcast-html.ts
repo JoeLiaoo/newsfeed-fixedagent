@@ -5,7 +5,7 @@
 // sandboxed frame of the task card.
 import { beijingStamp } from "@aihot/contracts/time";
 import type { PodcastEpisode } from "./bidclub.ts";
-import { clipped, countLine, coverageLine, dateLabel, durationLabel, editorialSourceLabel, languageLabel, PREVIEW_DIGEST_LIMIT, PREVIEW_TLDR_LIMIT, sourceLink, summaryDownloadUrl, type FrontierPodcastView } from "./frontier-podcast-view.ts";
+import { clipped, countLine, dateLabel, durationLabel, editorialSourceLabel, languageLabel, PREVIEW_DIGEST_LIMIT, PREVIEW_TLDR_LIMIT, sourceLink, summaryDownloadUrl, type FrontierPodcastView } from "./frontier-podcast-view.ts";
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -266,24 +266,16 @@ export function renderFrontierPodcastHtml(view: FrontierPodcastView): string {
   const query = escapeHtml(view.query);
   const time = escapeHtml(beijingStamp(view.generatedAt));
   const count = escapeHtml(countLine(view));
-  const coverage = escapeHtml(coverageLine(view));
-  const partial = view.partial ? "结果不完整" : "完整匹配";
-
   const hero = `<header class="ra-hero">
 <span class="ra-hero__eyebrow">公开播客文字库 · 中英双语检索 · 中文正文</span>
 <h1 class="ra-hero__title">前沿播客</h1>
 <p class="ra-hero__subtitle">话题：${query}</p>
 <div class="ra-hero__meta">
 <span class="ra-hero__meta-item"><strong>收录</strong>${count}</span>
-<span class="ra-hero__meta-item"><strong>范围</strong>${partial}</span>
 <span class="ra-hero__meta-item"><strong>生成</strong>${time}（北京时间）</span>
 </div></header>`;
 
   const lead = `<p class="ra-lead">下面是你检索「${query}」在公开播客文字库里得到的结果：收录 ${count}。检索会使用中英文关键词；英文节目只收录该库提供中文正文的版本。每一集给出该库整理的要点与摘要，以及原节目页面；要点与摘要是整理稿，平台未逐条核验，引用前请回到来源页面核对原文。</p>`;
-
-  const scopeAside = view.partial
-    ? `<aside class="ra-aside ra-aside--warning"><span class="ra-aside__label">结果不完整</span><div class="ra-aside__body"><p>${coverage}</p><p>下面的目录列出本次收录的节目。</p><p>收录集数受检索接口的匹配结果限制，不代表该话题的全部节目。平台不补写节目未提及的事实、数字与结论。</p></div></aside>`
-    : `<aside class="ra-aside ra-aside--note"><span class="ra-aside__label">结果覆盖</span><div class="ra-aside__body"><p>${coverage}</p><p>收录集数受检索接口的匹配结果限制，不代表该话题的全部节目。平台不补写节目未提及的事实、数字与结论。</p></div></aside>`;
 
   const sections = view.episodes.length
     ? view.episodes.map((_, index) => episodeSection(view, index)).join("\n")
@@ -293,7 +285,6 @@ export function renderFrontierPodcastHtml(view: FrontierPodcastView): string {
 <span class="ra-conclusion__label">使用说明</span>
 <div class="ra-conclusion__body"><p>这份摘要只整理公开播客文字库已经整理过的内容。引用某一条观点前，请打开该集的来源页面核对原文。</p></div>
 <ul class="ra-conclusion__takeaways">
-<li>收录集数受检索接口的匹配结果限制，不等于该话题的全部节目。</li>
 <li>要点与摘要只覆盖原节目已整理的内容；平台不补写节目未提及的事实、数字或结论。</li>
 <li>每集的完整摘要另有 Markdown 文件，可在任务卡片下载。</li>
 <li>仅供公开信息研究参考，不构成投资建议。</li>
@@ -308,7 +299,6 @@ export function renderFrontierPodcastHtml(view: FrontierPodcastView): string {
 <div class="ra-article-layout"><article class="ra-article">
 ${hero}
 ${lead}
-${scopeAside}
 ${contents(view)}
 ${sections}
 ${conclusion}
