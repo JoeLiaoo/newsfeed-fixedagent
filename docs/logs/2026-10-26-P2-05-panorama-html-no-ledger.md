@@ -3,7 +3,7 @@
 - Agent：Codex
 - 对应任务：P2-05 的员工产物体验维护；真实生产样例与员工验收仍未完成，P2-05 保持 `[ ]`。
 - 完成状态：PR #97 已打开；评审与 CI 待完成。
-- 基线：`origin/main` `c7334e9`；独立 worktree 分支 `fix/panorama-html-no-ledger-download`。
+- 基线：从 `origin/main` `c7334e9` 创建独立 worktree；PR 因 main 前进后 rebase 到 `origin/main` `036cb10`。分支 `fix/panorama-html-no-ledger-download`。
 
 ## 本次改动
 
@@ -13,8 +13,8 @@
 
 ## 最小验证
 
-- 执行的检查及结果：`npm ci` 成功（未改 manifest 或锁文件）；`node --import ./tests/standalone.ts --test modules/membership/tests/panorama.standalone.test.ts modules/membership/tests/task-detail-page.standalone.test.ts modules/membership/tests/frontier-podcast.standalone.test.ts` 45/45 通过；临时 PostgreSQL 17 上运行 `panorama-db.test.ts` 与 `expert-task-detail.test.ts`，2/2 通过；`npx tsc -p modules --noEmit` 通过；`node scripts/check-doc-links.ts` 检查 460 个链接全部通过；`git diff --check` 通过。
-- 未执行或需用户试用的检查：未运行全量测试或网页浏览器视觉检查；真实账号、生产 MCP 全景与员工产物试用待后续验收。PR CI 尚未运行。
+- 执行的检查及结果（更新至 PR head `3500781`，docs 同步 head `6fd849e`）：`npm ci` 成功（未改 manifest 或锁文件）；`node --import ./tests/standalone.ts --test modules/membership/tests/panorama.standalone.test.ts modules/membership/tests/task-detail-page.standalone.test.ts modules/membership/tests/frontier-podcast.standalone.test.ts` 46/46 通过；临时 PostgreSQL 17 上运行 `panorama-db.test.ts` 与 `expert-task-detail.test.ts`，2/2 通过；`npx tsc -p modules --noEmit` 通过；`node scripts/check-doc-links.ts` 检查 472 个链接全部通过；`git diff --check` 通过。
+- 未执行或需用户试用的检查：未运行全量测试或网页浏览器视觉检查；真实账号、生产 MCP 全景与员工产物试用待后续验收。PR CI 尚未启动/未报告。
 
 ## 风险与交接
 
