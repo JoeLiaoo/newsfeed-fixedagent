@@ -5,7 +5,7 @@ import { ModelOutputError, ModelUnavailableError, ProviderRejectedError, Receipt
 import { sql, type Db } from "@aihot/backend/db";
 import { BUILTIN_EXPERT, COMING_SOON_EXPERT_SLUG, EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, PANORAMA_TOOL_LABELS, SECTOR_PEER_EXPERT_SLUG, XINHUA_BASE_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
 import { renderSectorPeerDashboard } from "./sector-peer-html.ts";
-import { collectPodcastEpisodes, PodcastSourceError, PODCAST_MAX_EPISODES } from "./bidclub.ts";
+import { collectPodcastEpisodes, PodcastSourceError } from "./bidclub.ts";
 import { renderFrontierPodcastHtml } from "./frontier-podcast-html.ts";
 import { renderFrontierPodcastMarkdown } from "./frontier-podcast-markdown.ts";
 import type { FrontierPodcastView } from "./frontier-podcast-view.ts";
@@ -380,7 +380,7 @@ async function assertRunning(taskId: string, leaseToken: string) {
 }
 
 /**
- * The podcast expert: the topic is searched in the public library, the leading matches are read, and
+ * The podcast expert: the topic is searched in the public library, the returned matches are read, and
  * the points and the summary of each are written out as the library published them. The model only
  * expands unknown search terms into the other language; it never writes episode content.
  */
@@ -388,7 +388,7 @@ async function runFrontierPodcast(task: TaskRow, leaseToken: string) {
   const query = String(task.input.query ?? "").trim();
   if (query.length < 2) throw new PodcastSourceError("podcast_query_invalid");
   await assertRunning(task.id, leaseToken);
-  const collection = await collectPodcastEpisodes(query, { max: PODCAST_MAX_EPISODES, expandQuery: async topic => {
+  const collection = await collectPodcastEpisodes(query, { expandQuery: async topic => {
     const chineseInput = /[\u3400-\u9fff]/u.test(topic);
     const target = chineseInput ? "English" : "Chinese";
     const answer = await chatJson({

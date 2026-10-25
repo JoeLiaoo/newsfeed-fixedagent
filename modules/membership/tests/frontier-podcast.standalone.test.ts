@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { collectPodcastEpisodes, createPodcastClient, PodcastSourceError, podcastSummaryUrl, PODCAST_MAX_EPISODES } from "../experts/bidclub.ts";
+import { collectPodcastEpisodes, createPodcastClient, PodcastSourceError, podcastSummaryUrl } from "../experts/bidclub.ts";
 import { FRONTIER_PODCAST_EXPERT, FRONTIER_PODCAST_EXPERT_SLUG, HTML_PREVIEW_EXPERT_SLUGS, QUERY_EXPERT_SLUGS } from "../experts/catalog.ts";
 import { renderFrontierPodcastHtml } from "../experts/frontier-podcast-html.ts";
 import { renderFrontierPodcastMarkdown } from "../experts/frontier-podcast-markdown.ts";
@@ -181,10 +181,11 @@ test("English-source episodes without a Chinese edition are skipped for Chinese-
   const collected = await collectPodcastEpisodes("具身智能", { client });
   assert.deepEqual(collected.episodes.map(item => item.slug), ["zh-next"]);
   assert.equal(collected.skippedWithoutChinese, 1);
-  assert.match(renderFrontierPodcastMarkdown(view({ episodes: collected.episodes, skippedWithoutChinese: collected.skippedWithoutChinese })), /缺少中文正文，未收录/);
+  const markdown = renderFrontierPodcastMarkdown(view({ episodes: collected.episodes, skippedWithoutChinese: collected.skippedWithoutChinese }));
+  assert.ok(!markdown.includes("缺少中文正文，未收录"), "employee output omits search coverage warnings");
 });
 
-test("an English query searches Chinese too, and a failed expansion stays visibly partial", async () => {
+test("an English query searches Chinese too, and a failed expansion stays internal", async () => {
   const calls: string[] = [];
   const client = {
     search: async (term: string) => {
@@ -198,7 +199,9 @@ test("an English query searches Chinese too, and a failed expansion stays visibl
   assert.deepEqual(calls, ["embodied intelligence", "具身智能"]);
   assert.equal(collected.searchFailed, true);
   assert.equal(collected.episodes.length, 1);
-  assert.match(renderFrontierPodcastMarkdown(view({ episodes: collected.episodes, queries: collected.queries, searchFailed: true })), /部分扩展检索失败/);
+  const markdown = renderFrontierPodcastMarkdown(view({ episodes: collected.episodes, queries: collected.queries, searchFailed: true }));
+  assert.ok(!markdown.includes("部分扩展检索失败"));
+  assert.ok(!markdown.includes("结果不完整"));
 });
 
 test("a query the library refuses is an error, not an empty report", async () => {
@@ -208,13 +211,26 @@ test("a query the library refuses is an error, not an empty report", async () =>
   await assert.rejects(() => client.episode("missing"), (error: unknown) => error instanceof PodcastSourceError && error.code === "podcast_episode_missing");
 });
 
-test("the digest is capped and an unreadable episode is counted, not silently dropped", async () => {
+test("Personal AI and recursive self improvement use the existing query expansion path", async () => {
+  const searched: string[] = [];
+  const client = {
+    async search(query: string) { searched.push(query); return { matches: [], count: 0, partial: true, searchedRecent: 300 }; },
+    async episode() { throw new Error("no episodes expected"); },
+  };
+  for (const query of ["Personal AI", "recursive self improvement"]) {
+    let expanded = 0;
+    await collectPodcastEpisodes(query, { client, expandQuery: async () => { expanded += 1; return ["模型扩展词"]; } });
+    assert.equal(expanded, 1, `${query} invokes the existing expansion callback`);
+  }
+  assert.deepEqual(searched, ["Personal AI", "模型扩展词", "recursive self improvement", "模型扩展词"]);
+});
+
+test("all usable matches are included and an unreadable episode is counted, not silently dropped", async () => {
   const many = { ...SEARCH_PAYLOAD, count: 10, results: Array.from({ length: 10 }, (_, index) => ({ slug: `ep-${index}`, title: `第 ${index} 集`, shows: { name: "节目" } })) };
   const episodes = Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`ep-${index}`, { ...EPISODE_PAYLOAD, slug: `ep-${index}` }]));
   const client = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: stubFetch(episodes, many) as typeof fetch });
   const collection = await collectPodcastEpisodes("具身智能", { client });
-  assert.equal(collection.episodes.length, PODCAST_MAX_EPISODES);
-  assert.equal(collection.episodes.length, 6, "one digest stays readable");
+  assert.equal(collection.episodes.length, 10, "there is no six-episode product cap");
   assert.equal(collection.partial, true);
   assert.equal(collection.failed, 0);
 
@@ -241,14 +257,14 @@ test("the expert is a runnable builtin that takes a topic, not an entity", () =>
   assert.ok(QUERY_EXPERT_SLUGS.has(FRONTIER_PODCAST_EXPERT_SLUG));
   assert.ok(HTML_PREVIEW_EXPERT_SLUGS.has(FRONTIER_PODCAST_EXPERT_SLUG));
   assert.match(FRONTIER_PODCAST_EXPERT.skillMd, /未提供/);
-  assert.match(FRONTIER_PODCAST_EXPERT.skillMd, /结果不完整/);
+  assert.doesNotMatch(FRONTIER_PODCAST_EXPERT.skillMd, /结果不完整|检索回退到最近/);
 });
 
 test("the article reads as one article: masthead, lead, callouts, contents, sections, closing note", () => {
   const html = renderFrontierPodcastHtml(view());
   for (const part of [
     "ra-hero", "ra-hero__eyebrow", "ra-hero__title", "ra-hero__subtitle", "ra-hero__meta",
-    "ra-lead", "ra-aside", "ra-toc", "ra-toc__list", "ra-section", "ra-section__index", "ra-section__title",
+    "ra-lead", "ra-toc", "ra-toc__list", "ra-section", "ra-section__index", "ra-section__title",
     "ra-quote", "ra-subsection__title", "ra-conclusion", "ra-colophon",
   ]) assert.ok(html.includes(part), part);
   assert.ok(html.includes("前沿播客"));
@@ -258,8 +274,11 @@ test("the article reads as one article: masthead, lead, callouts, contents, sect
   assert.ok(html.includes('id="ep-1"'));
   assert.ok(html.includes("<strong>第一点要点。</strong>"), "the library's bold lead-in is kept");
   assert.ok(html.includes("小节标题"));
-  assert.ok(html.includes("结果不完整"), "a partial answer says so");
-  assert.ok(html.includes("最近 300 集"));
+  assert.ok(!html.includes("结果不完整"), "a partial-search warning is not shown to employees");
+  assert.ok(!html.includes("最近 300 集"));
+  assert.ok(!html.includes("检索回退到"));
+  assert.ok(!html.includes("匹配结果限制"));
+  assert.ok(!html.includes("<strong>范围</strong>"), "the hero has no completeness scope chip");
   assert.ok(html.includes("https://podcast.latepost.com/182"));
   assert.ok(html.includes(podcastSummaryUrl("https://bidclub.ai", "latetalk-182")));
 });
@@ -293,7 +312,7 @@ test("an article without a readable episode says so instead of showing an empty 
   assert.ok(!html.includes('href="#ep-1"'), "an empty result has no contents page");
 });
 
-test("the Markdown product keeps the full text, the source and the limits", () => {
+test("the Markdown product keeps the full text and source without search warnings", () => {
   const markdown = renderFrontierPodcastMarkdown(view({ episodes: [episode({ digest: "- ".padEnd(25_000, "长") })] }));
   assert.ok(markdown.startsWith("# 前沿播客 · 具身智能"));
   assert.ok(markdown.includes("## 1. 182: 对话梁琛奇"));
@@ -301,7 +320,9 @@ test("the Markdown product keeps the full text, the source and the limits", () =
   assert.ok(markdown.includes("- 参与者：梁琛奇、程曼祺"));
   assert.ok(markdown.includes("### 要点"));
   assert.ok(markdown.includes("### 摘要"));
-  assert.ok(markdown.includes("结果不完整"), "a partial answer is stated in the file too");
+  assert.ok(!markdown.includes("结果不完整"));
+  assert.ok(!markdown.includes("检索回退到"));
+  assert.ok(!markdown.includes("匹配结果限制"));
   assert.ok(markdown.includes("不构成投资建议"));
 });
 
@@ -310,4 +331,5 @@ test("the task card shows the podcast article in the same sandboxed frame as the
   assert.ok(detail.includes('srcDoc={task.result.html} sandbox=""'));
   assert.ok(detail.includes("HTML_PREVIEW_EXPERT_SLUGS.has(task.expertSlug)"));
   assert.ok(detail.includes("podcast_query_required"));
+  assert.ok(!detail.includes("检索回退到最近若干集"), "the task card does not show a partial-search alert");
 });
