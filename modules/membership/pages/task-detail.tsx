@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router";
-import { ArrowLeft, Download, FileText, RefreshCw, RotateCcw, Trash2, XCircle } from "lucide-react";
+import { ArrowLeft, Download, RefreshCw, RotateCcw, Trash2, XCircle } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@aihot/web/components/
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS, PANORAMA_EXPERT_SLUG } from "../experts/catalog.ts";
+import { EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS } from "../experts/catalog.ts";
 import { companyRelationLabel } from "../experts/data.ts";
 
 export const handle: Screen = { tab: "me", name: "任务" };
@@ -17,9 +17,9 @@ export const meta = () => pageMeta({ title: "任务详情", path: "/tasks", noin
 type Candidate = { id: string; name: string; status: string | null; creditCode: string | null; address: string | null; startDate: string | null; typeName?: string | null; branchOf?: string | null };
 type Task = {
   id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string; query?: string; notes?: string };
-  result: { candidates?: Candidate[]; preview?: string; approximate?: boolean; query?: string; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null;
+  result: { candidates?: Candidate[]; preview?: string; html?: string; format?: string; approximate?: boolean; query?: string; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null;
   errorCode: string | null; errorMessage: string | null; executionAttempts: number;
-  createdAt: string; updatedAt: string; expiresAt: string; hasArtifact: boolean; hasCheckpoint: boolean;
+  createdAt: string; updatedAt: string; expiresAt: string; hasArtifact: boolean;
   materials: Array<{ id: string; filename: string; byteSize: number; sha256: string; extractionStatus: string; extractionNote: string | null }>;
 };
 
@@ -168,8 +168,9 @@ export default function TaskDetailPage() {
             {candidates.length === 0 && <p className="text-sm text-ink-3">没有可选主体，请回到专家页重新提交。</p>}
             {candidates.map(candidate => <Button key={candidate.id} type="button" variant="outline" disabled={busy} className="h-auto justify-start whitespace-normal px-3 py-3 text-left" onClick={() => void selectEntity(candidate.id)}><span><span className="flex flex-wrap items-center gap-2 font-medium">{candidate.name}{companyRelationLabel(candidate, candidates, task.result?.query ?? task.input?.companyName ?? task.input?.query ?? "", task.result?.approximate) && <Badge variant="secondary">{companyRelationLabel(candidate, candidates, task.result?.query ?? task.input?.companyName ?? task.input?.query ?? "", task.result?.approximate)}</Badge>}</span><span className="mt-1 block text-xs font-normal text-ink-3">{candidate.status ?? "状态未知"} · {candidate.address ?? "地址未提供"} · {candidate.creditCode ?? "统一代码未提供"}</span></span></Button>)}
           </div>}
+          {task.result?.format === "html" && task.result.html && <iframe title={task.expertName} srcDoc={task.result.html} sandbox="" className="h-[720px] w-full rounded-card border border-line bg-white" />}
           {task.result?.preview && <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-control bg-bg-sunk p-3 text-xs leading-relaxed text-ink-2">{task.result.preview}</pre>}
-          {!task.result?.preview && task.state !== "waiting_input" && <p className="text-sm text-ink-3">{active ? `任务进行中，当前步骤：${EXPERT_TASK_STAGE_LABELS[task.stage] ?? task.stage}。` : task.state === "succeeded" ? "任务已完成，产物可下载。" : "任务没有产出结果。"}</p>}
+          {!task.result?.preview && !task.result?.html && task.state !== "waiting_input" && <p className="text-sm text-ink-3">{active ? `任务进行中，当前步骤：${EXPERT_TASK_STAGE_LABELS[task.stage] ?? task.stage}。` : task.state === "succeeded" ? "任务已完成，产物可下载。" : "任务没有产出结果。"}</p>}
         </CardContent>
       </Card>
 
@@ -178,7 +179,6 @@ export default function TaskDetailPage() {
         <CardContent className="grid gap-4">
           <div className="flex flex-wrap gap-2">
             {task.hasArtifact && <Button asChild variant="outline" size="sm"><a href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}><Download size={14} aria-hidden="true" />下载 Markdown 产物</a></Button>}
-            {task.expertSlug === PANORAMA_EXPERT_SLUG && task.hasCheckpoint && <Button asChild variant="outline" size="sm"><a href={`/api/v1/membership/expert-tasks/${task.id}/checkpoint`}><FileText size={14} aria-hidden="true" />下载采集台账 JSONL</a></Button>}
           </div>
           {task.materials.length === 0 ? <p className="text-sm text-ink-3">没有上传材料。</p> : <div className="grid gap-2 text-sm">
             {task.materials.map(material => <div key={material.id} className="flex flex-wrap items-center gap-2">

@@ -16,6 +16,7 @@ import { executionMode } from "./import.ts";
 import { materialContext } from "./materials.ts";
 import { runPanorama, type PanoramaRunResult } from "./panorama-run.ts";
 import { renderPanorama } from "./panorama-markdown.ts";
+import { renderPanoramaHtml } from "./panorama-html.ts";
 import { createPanoramaCheckpoint } from "./panorama-checkpoint.ts";
 import { DEFAULT_PANORAMA_BUDGET, type PanoramaSubject } from "./panorama.ts";
 import type { WikiFormat } from "../knowledge/catalog.ts";
@@ -439,6 +440,7 @@ export async function runExpertTask(taskId: string) {
   try {
     let report: string;
     let previewHtml: string | null = null;
+    let panoramaHtml: string | null = null;
     let podcastStatus: { episodes: number; partial: boolean } | null = null;
     const isSectorPeer = task.expert_slug === SECTOR_PEER_EXPERT_SLUG;
     const isFrontierPodcast = task.expert_slug === FRONTIER_PODCAST_EXPERT_SLUG;
@@ -468,6 +470,7 @@ export async function runExpertTask(taskId: string) {
     else if (task.expert_slug === PANORAMA_EXPERT_SLUG) {
       const panorama = await runPanoramaExpert(task, leaseToken);
       report = panorama.markdown;
+      panoramaHtml = renderPanoramaHtml(report);
       panoramaStatus = { incomplete: panorama.incomplete, gapCount: panorama.gapCount, limits: panorama.limits };
     } else {
       const custom = await runCustom(task, leaseToken);
@@ -483,7 +486,7 @@ export async function runExpertTask(taskId: string) {
       const active = await tx`SELECT id FROM member_expert_tasks WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} AND lease_expires_at > now() FOR UPDATE`;
       if (!active.length) return;
       await tx`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256) VALUES (${taskId},${task.user_id},${`expert-${taskId}.${isSectorPeer ? "html" : "md"}`},${isSectorPeer ? "text/html; charset=utf-8" : "text/markdown; charset=utf-8"},${body},${digest}) ON CONFLICT(task_id) DO NOTHING`;
-      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json(isSectorPeer ? { html: report, format: "html" } : isFrontierPodcast ? { html: previewHtml, format: "html", podcast: podcastStatus } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
+      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json(isSectorPeer ? { html: report, format: "html" } : isFrontierPodcast ? { html: previewHtml, format: "html", podcast: podcastStatus } : task.expert_slug === PANORAMA_EXPERT_SLUG ? { html: panoramaHtml, format: "html", panorama: panoramaStatus } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
     });
   } catch (error) {
     const detail = errorText(error);

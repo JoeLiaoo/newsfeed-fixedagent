@@ -36,7 +36,9 @@ test("the task page reads the one task it shows, and keeps the states of the emp
   assert.match(page, /act\("cancel"\)/, "进行中可取消");
   assert.match(page, /\/entity`/, "等待选择主体时可确认主体");
   assert.match(page, /\/artifact`/, "可下载产物");
-  assert.match(page, /\/checkpoint`/, "可下载采集台账");
+  assert.doesNotMatch(page, /\/checkpoint|下载采集台账/, "员工详情页不暴露内部采集台账");
+  assert.match(page, /srcDoc=\{task\.result\.html\} sandbox=""/, "成功的全景任务显示隔离的 HTML 预览");
+  assert.match(tasksPage, /下载 Markdown 产物/, "全景任务历史页明确下载 Markdown");
   assert.match(page, /companyRelationLabel\(candidate, candidates, task\.result\?\.query/, "任务详情的主体选择复用相同的母公司／分支标签");
   assert.match(page, /\/materials\/\$\{material\.id\}/, "可下载材料");
   assert.match(page, /method: "DELETE"/, "任务结束后可删除材料");

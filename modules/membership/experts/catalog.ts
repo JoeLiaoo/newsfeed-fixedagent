@@ -63,7 +63,7 @@ export const BUILTIN_EXPERT = {
 export const PANORAMA_EXPERT_SLUG = "outbound-investment-panorama";
 export const PANORAMA_EXPERT_SKILL = `# 对外投资全景图
 
-本专家从经员工确认的企业主体出发，逐层核查其对外投资链条，产出分层底稿：逐层投资明细、有限合伙份额链、结构树、全景汇总、已退出部分、年报交叉、缺口清单与采集台账。
+本专家从经员工确认的企业主体出发，逐层核查其对外投资链条，产出分层底稿：逐层投资明细、有限合伙份额链、结构树、全景汇总、已退出部分、年报交叉、缺口清单与覆盖记录（供核对和断点续跑）。
 
 穿透规则按顺序判断：非上市参股即止；控股或合并口径的第一大股东续钻；投资、管理、咨询类主体与投资平台按例外继续下钻；有限合伙份额链未备案分支继续下钻、出到公司即止；上市公司即止；公司制基金即止。
 
@@ -143,7 +143,7 @@ export const FRONTIER_PODCAST_EXPERT = {
 export const QUERY_EXPERT_SLUGS = new Set<string>([SECTOR_PEER_EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG]);
 
 /** The experts whose result is shown as a webpage in the task card. */
-export const HTML_PREVIEW_EXPERT_SLUGS = new Set<string>([SECTOR_PEER_EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG]);
+export const HTML_PREVIEW_EXPERT_SLUGS = new Set<string>([SECTOR_PEER_EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG, PANORAMA_EXPERT_SLUG]);
 
 /** The experts the platform ships; their tasks take an entity name instead of a written brief. */
 export const BUILTIN_SLUGS = new Set<string>([EXPERT_SLUG, PANORAMA_EXPERT_SLUG]);
