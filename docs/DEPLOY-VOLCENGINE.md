@@ -177,6 +177,14 @@
 - web、API、worker 运行 `citic-newsfeed:e3465e58bea25b18f4f273ae60baf135721fb66f`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200，`/experts`、`/experts/sector-peer-landscape` 按会话鉴权 302 跳转登录页。
 - 发布后只读核对：`sector-peer-landscape` = `available`、`company-sentiment-report` = `hidden`；登录后的目录显示仍待人工复验，详见[PR #81 部署日志](logs/2026-10-25-P4-pr81-deployment.md)。
 
+### PR #83 + PR #84 全景图与问答修复发布（2026-10-25）
+
+- [PR #83](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/83) 与 [PR #84](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/84) 已先后 squash 合并，tip 提交 `b44e574a396ec22bcfcd43a1b350e5273e010f58`（短 `b44e574`）已发布到 `/opt/citic-newsfeed/releases/b44e574a396ec22bcfcd43a1b350e5273e010f58`。PR #83 让「对外投资全景图」端到端跑通（候选按页读取并反查母公司登记名、模型摘要失败不再带走底稿、失败原因落地、任务卡显示已确认主体、同一次提交重试复用幂等键）；PR #84 让知识库对有覆盖的问题答得出来（脚注编号由平台给出、核不上回 422 而非 502、被拒答复释放回执不再重放）。
+- 发布前保存 `.env.before-release-b44e574-20261025` 与 `backups/db-before-b44e574-20261025.dump`，权限均为 `0600`，转储经 `pg_restore --list` 检查可读（573 条 TOC，未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变。
+- **0 条新迁移**：两个 PR 都不含任何 `.sql` 变更，两个发布目录的迁移文件清单完全相同（各 164 个 `.sql`），`schema_migrations` 发布前后均为 164 条、最大仍为 `0190`。setup 退出码 0，输出 `database is up to date`、`sources: 0 added, 26 already there`、`experts: the platform's own catalog entries are in place`；信源未重复写入。
+- web、API、worker 运行 `citic-newsfeed:b44e574a396ec22bcfcd43a1b350e5273e010f58`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200，`/experts`、`/experts/outbound-investment-panorama`、`/knowledge` 按会话鉴权 302 跳转登录页。发布镜像自带的 standalone 回归 120 个用例全部通过（不连数据库）。
+- **登录后复验仍待人工完成**：全景图以「宁德时代」发起一次端到端，知识库提问「AGI 六问」应返回 200 并带可核对脚注，无覆盖问题仍返回 422。详见[PR #83 + PR #84 发布日志](logs/2026-10-25-P4-pr83-pr84-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
