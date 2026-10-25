@@ -51,7 +51,9 @@
 | `GET /tasks`、`POST /tasks/:id/retry` | 库内构建状态列表；重跑失败的任务（从上次成功的检查点继续） |
 | `GET /pages`、`GET /pages/:slug` | 已发布知识页列表（可检索，`?baseId=`、`?query=`）与单页正文、引用、质量问题（下架的页面对其他员工是 404） |
 | `GET /versions/:id/original` | 下载原件（经会话鉴权，带 `nosniff`；已撤回材料的原件只对上传者与管理员开放，其余为 404） |
-| `POST /answers` | 提问：按问题在**所在库**内路由到已发布页面，生成带脚注引用的回答（请求体带 `baseId`） |
+| `POST /answers` | 提问：按问题在**所在库**内路由到已发布页面，生成带脚注引用的回答（请求体带 `baseId`）；有引用时返回 200，无覆盖时返回 422 `knowledge_no_coverage` 与中文 `message`，库不存在时返回 404 `knowledge_base_not_found` |
+
+问答接口的 `GET /answers` 返回 405 和 `Allow: POST`。排查 404 时先看响应体的 `error`：`knowledge_base_not_found` 是库号问题，`not_found` 是路由／部署版本问题；无覆盖不再与路由缺失共用 404。员工页把问答错误显示在提问表单下方。生产发布后应分别用已发布页面覆盖的问题和无覆盖的问题验收；只检查健康接口不能证明问答可用。
 
 ## 4. 构建流程
 

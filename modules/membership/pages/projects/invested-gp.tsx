@@ -70,6 +70,8 @@ export default function InvestedGpProjectsPage() {
                   {item.source_url && <a className="inline-flex min-h-11 items-center gap-1.5 rounded-control text-accent underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" href={item.source_url} target="_blank" rel="noreferrer">
                     核对来源<ExternalLink size={14} aria-hidden="true" />
                   </a>}
+                  {item.source_placeholder && <span className="text-xs text-ink-3">演示/导入占位 · 无可核对来源</span>}
+                  {!item.source_url && !item.source_placeholder && <span className="text-xs text-ink-3">来源待补充</span>}
                 </div>
               </Card>
             </li>)}
