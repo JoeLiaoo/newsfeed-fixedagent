@@ -2,6 +2,19 @@
 
 本手册面向现有火山云 `ai-work` Ubuntu 实例。已完成只读盘点、隔离预部署，并按用户明确确认将 IP 的 HTTPS 入口切换到新平台。旧版本曾在同机归档，后按用户授权退役；旧版无需恢复演练，P4 仍需完成新平台运维及员工验收。未经影响核对不得停止其他服务或删除数据。
 
+## 每次发布前：应用员工端更新日志
+
+功能 PR 为本次要发布的员工可见变更添加 `site/changelog/pending/*.json`（[填写约定](../site/changelog/pending/README.md)）。发布负责人在**将要构建的 Git tip** 上先核对待发布文件与实际发布范围，然后运行：
+
+```sh
+npm run changelog:apply
+git diff -- site/changelog.json site/changelog/pending
+git add site/changelog.json site/changelog/pending
+git commit -m "docs: apply employee changelog for release"
+```
+
+无待发布文件时命令输出 `no pending changelog`，无需提交。提交后从包含新 `site/changelog.json` 的固定提交制作发布包和构建镜像；不能先归档或构建旧 tip 再在另一棵工作树运行命令。后端在启动后从镜像内 `REPO_ROOT/site/changelog.json` 读取并缓存，故运行中的容器不会因主机文件更新而改变。发布后核对 `/api/site/meta` 的 `changelogVersion` 与 `/api/site/changelog` 的 `latestVersion` 均为新值；登录后红点仍由员工已读状态决定。回滚使用上一镜像所带的旧 JSON，并在发布日志中记录本次应用结果、提交和回退版本。
+
 ## 当前前置状态
 
 - [x] 已通过用户提供的 SSH 密钥访问实例并完成基础只读盘点；私钥内容未读取或写入文档。
