@@ -122,7 +122,7 @@ export const TASK_ERRORS: Record<string, string> = {
   knowledge_document_not_found: "材料不存在。",
   knowledge_not_permitted: "没有权限执行该操作。",
   knowledge_answer_failed: "问答生成失败，可重试。",
-  knowledge_answer_unverified: "回答没有可核对的引用来源，未生成回答，请重试。",
+  knowledge_answer_unverified: "回答未能绑定共享库里的可核对引用，本次未生成回答；请重试或换一种问法。",
   knowledge_no_coverage: "共享库中没有覆盖该问题的已发布内容。",
   knowledge_page_withdrawn: "该知识页已下架。",
   knowledge_page_not_found: "知识页不存在或已下架。",

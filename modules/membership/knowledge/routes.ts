@@ -490,11 +490,13 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     try { answer = await answerQuestion(question, routed.map(entry => entry.page)); }
     catch (error) {
       const code = error instanceof Error && error.message === "knowledge_answer_unverified" ? "knowledge_answer_unverified" : "knowledge_answer_failed";
-      return reply.code(502).send({ error: code, message: TASK_ERRORS[code] });
+      // An answer the library cannot check is not an upstream failure: the request was understood, the
+      // answer was refused. A model that could not be reached stays a gateway failure.
+      return reply.code(code === "knowledge_answer_unverified" ? 422 : 502).send({ error: code, message: TASK_ERRORS[code] });
     }
     const citations = answer.citations;
     // An answer that rests on nothing the library can show is not an answer: it is refused.
-    if (!citations.length) return reply.code(502).send({ error: "knowledge_answer_unverified", message: TASK_ERRORS.knowledge_answer_unverified });
+    if (!citations.length) return reply.code(422).send({ error: "knowledge_answer_unverified", message: TASK_ERRORS.knowledge_answer_unverified });
     let bodyText = answer.answer;
     const usedPages = new Set(citations.map(citation => citation.pageSlug));
     for (const citation of citations) {
