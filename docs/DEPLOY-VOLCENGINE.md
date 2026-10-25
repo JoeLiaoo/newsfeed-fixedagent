@@ -210,6 +210,16 @@
 - web、API、worker 运行 `citic-newsfeed:7858842dc2c04d1f2e1b1527df05b66fcd152e4d`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 与 `/favicon.ico` 返回 200，`/experts`、`/experts/outbound-investment-panorama`、`/tasks`、`/tasks/x1` 按会话鉴权 302 跳转登录页。
 - 候选徽标的登录后人工复测仍未完成，详见[PR #92 部署日志](logs/2026-10-25-P4-pr92-deployment.md)。
 
+### PR #93 前沿播客中英双语检索发布（2026-10-25）
+
+- [PR #93](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/93) 已合并，提交 `f472ad09b73db7c0ea88fdbe2e2f4fc86b841be1` 已发布到 `/opt/citic-newsfeed/releases/f472ad09b73db7c0ea88fdbe2e2f4fc86b841be1`。前沿播客专家按「原词 + 另一语言关键词」检索公开播客文字库：固定对应词（如 具身智能 ↔ embodied intelligence）走对照表，其余话题只让模型扩展检索词；结果按 slug 去重，最多收录 6 集；英文节目必须存在中文要点或中文摘要，否则跳过并在产物中说明。
+- 发布前公网 `/api/health` 仍为上一版 `7858842dc2c04d1f2e1b1527df05b66fcd152e4d`（PR #92），与预期一致后才开始发布。发布包取自重新拉取的 `origin/main` tip，归档 sha256 与主机逐字节一致，发布目录 1007 个文件逐文件 sha256 比对与本地 `git archive` 完全相同。
+- **0 条新迁移**：PR #93 未改动任何 `.sql`。setup 先于新代码上线运行，退出码 0，输出「database is up to date / sources: 0 added, 26 already there」；`schema_migrations` 164 → 164，最大版本仍是 `0190_member_experts_status_coming_soon_validate.sql`。
+- 发布前保存 `.env.before-release-f472ad0-20261025` 与 `backups/db-before-f472ad0-20261025.dump`，权限均为 `0600`，转储在数据库容器内经 `pg_restore --list` 检查可读（573 条 TOC，未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变。
+- 构建使用 `-f docker-compose.yml -f compose.volcengine.yml` 并指定完整发布号，未产生游离的 `aihot-app` 镜像。web、API、worker 运行 `citic-newsfeed:f472ad09b73db7c0ea88fdbe2e2f4fc86b841be1`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 与 `/favicon.ico` 返回 200，`/experts/frontier-podcast`、`/experts`、`/tasks` 按会话鉴权 302 跳转登录页。
+- PR #93 的 `BILINGUAL_TERMS`、`podcastQueryVariants`、`expandQuery`、`skippedWithoutChinese` 与 `editorialSourceLabel` 均在运行镜像中确认存在；镜像内独立回归套件以 `--network none` 重跑 147/147 通过（上一版 144 条，新增 3 条来自 PR #93）。
+- Hermes 网关、Nginx、证书续期、数据库容器与命名卷未改动，四个 P3 开关保持 `true`，未清理旧发布目录与旧镜像。登录后用「具身智能」与「embodied intelligence」各跑一次前沿播客的复验仍待人工完成，详见[PR #93 部署日志](logs/2026-10-25-P4-pr93-deployment.md)。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
