@@ -13,7 +13,7 @@ import { Textarea } from "@aihot/web/components/member-ui/textarea";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_STAGE_LABELS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, SECTOR_PEER_EXPERT_SLUG, modeNeedsEntity, expertStatusBadge } from "../experts/catalog.ts";
+import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_STAGE_LABELS, FRONTIER_PODCAST_EXPERT_SLUG, HTML_PREVIEW_EXPERT_SLUGS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, SECTOR_PEER_EXPERT_SLUG, modeNeedsEntity, expertStatusBadge } from "../experts/catalog.ts";
 import { companyRelationLabel, isBranchType } from "../experts/data.ts";
 
 export const handle: Screen = { tab: "me", name: "专家" };
@@ -21,13 +21,13 @@ export const meta = () => pageMeta({ title: "专家详情", path: "/experts", no
 
 type Expert = {
   slug: string; name: string; description: string; version: string; status: string;
-  execution_mode: "xinhua_trial" | "xinhua_panorama" | "text_only"; missing_dependencies: string[];
+  execution_mode: "xinhua_trial" | "xinhua_panorama" | "text_only" | "podcast_search"; missing_dependencies: string[];
 };
 type Candidate = { id: string; name: string; status: string | null; creditCode: string | null; address: string | null; startDate: string | null; typeName?: string | null; branchOf?: string | null };
 type Task = {
   id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string; query?: string; notes?: string };
   selectedEntity: { id?: string; name?: string; creditCode?: string | null } | null;
-  result: { candidates?: Candidate[]; preview?: string; html?: string; format?: string; approximate?: boolean; query?: string; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null; errorCode: string | null; errorMessage: string | null;
+  result: { candidates?: Candidate[]; preview?: string; html?: string; format?: string; approximate?: boolean; query?: string; podcast?: { episodes: number; partial: boolean }; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null; errorCode: string | null; errorMessage: string | null;
   createdAt: string; hasArtifact: boolean; hasCheckpoint: boolean; executionAttempts: number;
   materials: Array<{ id: string; filename: string; byteSize: number; sha256: string; extractionStatus: string; extractionNote: string | null }>;
 };
@@ -53,6 +53,7 @@ function branchNote(candidate: Candidate) {
 /** The error of a failed request: the API's own code when it gave one, its status when it did not. */
 function submitErrorText(data: { error?: string; message?: string }, status: number) {
   if (data.error === "sector_query_required") return "请输入至少 2 个汉字或英文字母的企业或赛道名称。";
+  if (data.error === "podcast_query_required") return "请输入 2 到 100 个字的话题。";
   if (data.error === "expert_dependencies_missing") return "该专家依赖尚未接入。";
   if (data.error === "expert_coming_soon") return "该专家仍在开发中，暂不接收任务。";
   if (data.error === "expert_task_rate_limited") return "任务并发或每小时提交上限已达到，请稍后重试。";
@@ -104,6 +105,11 @@ export default function ExpertDetailPage() {
     event.preventDefault();
     if (slug === SECTOR_PEER_EXPERT_SLUG && [...query.trim()].filter(char => /[\p{Script=Han}\p{Script=Latin}]/u.test(char)).length < 2) {
       setQueryError("请输入至少 2 个汉字或英文字母的企业或赛道名称。");
+      queryInput.current?.focus();
+      return;
+    }
+    if (slug === FRONTIER_PODCAST_EXPERT_SLUG && [...query.trim()].filter(char => /[\p{Script=Han}\p{Script=Latin}\p{Nd}]/u.test(char)).length < 2) {
+      setQueryError("请输入至少 2 个汉字、英文字母或数字的话题。");
       queryInput.current?.focus();
       return;
     }
@@ -198,13 +204,17 @@ export default function ExpertDetailPage() {
               <p id="sector-query-hint" className="text-xs leading-relaxed text-ink-3">输入企业或赛道即可。P0 只生成公开数据空看板；数据源未接入，企业与赛道消歧将在 P1 完成。</p>
               <div className="grid gap-2"><Label htmlFor="sector-notes">备注（可选）</Label><Textarea id="sector-notes" name="notes" maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={3} /></div>
             </>}
+            {slug === FRONTIER_PODCAST_EXPERT_SLUG && <>
+              <div className="grid gap-2"><Label htmlFor="podcast-query">话题</Label><Input ref={queryInput} id="podcast-query" name="query" required maxLength={100} value={query} aria-invalid={!!queryError} aria-describedby={queryError ? "podcast-query-error" : "podcast-query-hint"} onInvalid={() => setQueryError("请输入至少 2 个汉字、英文字母或数字的话题。")} onChange={event => { setQuery(event.target.value); if (queryError) setQueryError(""); }} placeholder="例如：具身智能、半导体…" />{queryError && <p id="podcast-query-error" className="text-sm text-hot" role="alert">{queryError}</p>}</div>
+              <p id="podcast-query-hint" className="text-xs leading-relaxed text-ink-3">输入一个话题（2 到 100 字）。系统检索公开播客文字库，取回最相关几集的中文要点与摘要，结果以网页摘要呈现，并可下载 Markdown 产物。检索结果可能不完整，页面上会写明覆盖范围。</p>
+            </>}
             {modeNeedsEntity(expert.execution_mode) ? <>
               <div className="grid gap-2"><Label htmlFor="company-name">目标企业名称</Label><Input ref={companyInput} id="company-name" required minLength={2} maxLength={200} value={companyName} aria-invalid={!!companyError} aria-describedby={companyError ? "company-name-error" : undefined} onInvalid={() => setCompanyError("请填写至少 2 个字的目标企业名称。")} onChange={event => { setCompanyName(event.target.value); if (companyError) setCompanyError(""); }} placeholder="输入待核查主体" />{companyError && <p id="company-name-error" className="text-sm text-hot" role="alert">{companyError}</p>}</div>
               <p className="text-xs leading-relaxed text-ink-3">示例：{SAMPLE_COMPANIES.join("；")}。系统先检索同名候选，须由你确认主体后才查询。{expert.execution_mode === "xinhua_panorama" ? "确认后逐层核查。默认预算为最多 4 层、25 个主体、90 次查询，每个主体最多处理 20 条关系；达到上限或遇到无法核实的数据时，报告会标明不完整并列出缺口。" : "当前仅生成一层直接投资底稿，不代表完整穿透。"}</p>
             </> : null}
-            {expert.execution_mode === "text_only" && slug !== SECTOR_PEER_EXPERT_SLUG && <div className="grid gap-2"><Label htmlFor="task-notes">任务要求</Label><Textarea id="task-notes" required minLength={2} maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={5} /></div>}
+            {expert.execution_mode === "text_only" && slug !== SECTOR_PEER_EXPERT_SLUG && slug !== FRONTIER_PODCAST_EXPERT_SLUG && <div className="grid gap-2"><Label htmlFor="task-notes">任务要求</Label><Textarea id="task-notes" required minLength={2} maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={5} /></div>}
             {modeNeedsEntity(expert.execution_mode) && <div className="grid gap-2"><Label htmlFor="task-notes">核查备注（内置专家可选）</Label><Textarea id="task-notes" required={!BUILTIN_SLUGS.has(slug ?? "")} minLength={BUILTIN_SLUGS.has(slug ?? "") ? undefined : 2} maxLength={20000} value={notes} onChange={event => setNotes(event.target.value)} rows={4} /></div>}
-            {slug !== SECTOR_PEER_EXPERT_SLUG && <div className="grid gap-2"><Label htmlFor="task-materials">任务材料（可选）</Label><FileInput id="task-materials" multiple accept=".pdf,.docx,.pptx,.md,.markdown,.txt" onChange={event => setFiles(Array.from(event.target.files ?? []))} /><p className="text-xs text-ink-3">PDF、DOCX、PPTX、Markdown；最多 3 个，单个 5 MB、总计 10 MB。材料与报告仅本人可访问，七天后清理。</p></div>}
+            {slug !== SECTOR_PEER_EXPERT_SLUG && slug !== FRONTIER_PODCAST_EXPERT_SLUG && <div className="grid gap-2"><Label htmlFor="task-materials">任务材料（可选）</Label><FileInput id="task-materials" multiple accept=".pdf,.docx,.pptx,.md,.markdown,.txt" onChange={event => setFiles(Array.from(event.target.files ?? []))} /><p className="text-xs text-ink-3">PDF、DOCX、PPTX、Markdown；最多 3 个，单个 5 MB、总计 10 MB。材料与报告仅本人可访问，七天后清理。</p></div>}
             <Button type="submit" disabled={busy}>{busy ? "请稍候…" : "提交任务"}</Button>
           </form>
         </CardContent>
@@ -221,8 +231,9 @@ export default function ExpertDetailPage() {
             {task.errorMessage && <Alert className="mt-3" variant="destructive">{task.errorMessage ?? ERROR_TEXT[task.errorCode ?? ""] ?? task.errorCode}</Alert>}
             {task.expertSlug === PANORAMA_EXPERT_SLUG && task.state === "succeeded" && task.result?.panorama?.incomplete && <Alert className="mt-3">结果不完整：{task.result.panorama.gapCount} 项核实缺口{task.result.panorama.limits.length ? `；达到上限：${task.result.panorama.limits.join("、")}` : ""}。请先查看报告中的缺口与未覆盖关系。</Alert>}
             {task.state === "waiting_input" && <div className="mt-4 grid gap-2"><p className="text-sm">请选择正确的工商主体，确认后系统才会继续：</p>{task.result?.approximate && <p className="text-xs text-ink-3">未找到名称包含「{taskSubject(task)}」的登记主体，以下为近似候选。</p>}{task.result?.candidates?.map(candidate => <Button key={candidate.id} type="button" variant="outline" disabled={busy} className="h-auto justify-start whitespace-normal px-3 py-3 text-left" onClick={() => void selectEntity(task.id, candidate.id)}><span><span className="flex flex-wrap items-center gap-2 font-medium">{candidate.name}{companyRelationLabel(candidate, task.result?.candidates ?? []) && <Badge variant="secondary">{companyRelationLabel(candidate, task.result?.candidates ?? [])}</Badge>}</span><span className="mt-1 block text-xs font-normal text-ink-3">{candidate.status ?? "状态未知"} · {candidate.address ?? "地址未提供"} · {candidate.creditCode ?? "统一代码未提供"}</span>{branchNote(candidate) && <span className="mt-1 block text-xs font-normal text-ink-3">{branchNote(candidate)}</span>}</span></Button>)}</div>}
+            {task.expertSlug === FRONTIER_PODCAST_EXPERT_SLUG && task.state === "succeeded" && task.result?.podcast?.partial && <Alert className="mt-3">检索回退到最近若干集的子串匹配，结果可能不完整；收录集数以本卡片为准。</Alert>}
             {task.result?.preview && <pre className="mt-4 max-h-72 overflow-auto whitespace-pre-wrap rounded-control bg-bg-sunk p-3 text-xs text-ink-2">{task.result.preview}</pre>}
-            {task.expertSlug === SECTOR_PEER_EXPERT_SLUG && task.result?.format === "html" && task.result.html && <div className="mt-4"><p className="mb-2 break-words text-sm font-medium">网页看板 · {task.input.query}</p><iframe title={`赛道同业竞争看板：${task.input.query ?? "查询"}`} srcDoc={task.result.html} sandbox="" className="h-[680px] w-full rounded-card border border-line bg-white" /></div>}
+            {HTML_PREVIEW_EXPERT_SLUGS.has(task.expertSlug) && task.result?.format === "html" && task.result.html && <div className="mt-4"><p className="mb-2 break-words text-sm font-medium">{task.expertSlug === SECTOR_PEER_EXPERT_SLUG ? "网页看板" : "播客摘要"} · {task.input.query}{task.result.podcast ? ` · 收录 ${task.result.podcast.episodes} 集` : ""}</p><iframe title={`${task.expertSlug === SECTOR_PEER_EXPERT_SLUG ? "赛道同业竞争看板" : "前沿播客"}：${task.input.query ?? "查询"}`} srcDoc={task.result.html} sandbox="" className="h-[680px] w-full rounded-card border border-line bg-white" /></div>}
             {task.materials?.length > 0 && <div className="mt-3 text-sm">{task.materials.map(material => <div key={material.id} className="flex flex-wrap items-center gap-2">{task.state === "cancelled" ? <span>{material.filename}</span> : <a className="text-accent underline-offset-4 hover:underline" href={`/api/v1/membership/expert-tasks/${task.id}/materials/${material.id}`}>{material.filename}</a>}<span className="text-xs text-ink-3">{Math.ceil(material.byteSize / 1024)} KB · {material.extractionStatus === "available" ? "已用于任务" : material.extractionStatus === "unavailable" ? "无法提取文字" : "等待处理"}</span>{["succeeded", "failed", "cancelled"].includes(task.state) && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void deleteMaterial(task.id, material.id)}>删除</Button>}</div>)}</div>}
             <div className="mt-4 flex flex-wrap gap-2">
               {task.hasArtifact && <Button asChild variant="link" className="h-9 px-0"><a href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}>下载{task.expertSlug === SECTOR_PEER_EXPERT_SLUG ? " HTML 看板" : " Markdown 产物"}</a></Button>}

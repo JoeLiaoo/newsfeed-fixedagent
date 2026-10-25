@@ -121,6 +121,30 @@ export const SECTOR_PEER_EXPERT = {
   missingDependencies: [],
 };
 
+export const FRONTIER_PODCAST_EXPERT_SLUG = "frontier-podcast";
+export const FRONTIER_PODCAST_EXPERT_SKILL = `# 前沿播客
+
+输入一个话题（中文或英文），在公开播客文字库中检索最相关的节目，取回每一集的中文要点与摘要，生成网页预览与 Markdown 产物。
+
+只使用检索接口返回的节目标题、节目名、日期、时长、要点、摘要、参与者标签与来源链接。缺失的字段写“未提供”，不补造嘉宾观点、数字、结论或节目未提及的事实。要点与摘要是公开播客文字库对原节目的整理稿，平台未逐条核验；引用前须回到该集的来源页面核对。
+
+检索结果被标记为部分结果（回退到最近若干集的子串匹配）时，产物与页面都写明结果不完整，不当作全量命中。收录集数受接口匹配结果限制，不等于该话题的全部节目。
+`;
+export const FRONTIER_PODCAST_EXPERT = {
+  slug: FRONTIER_PODCAST_EXPERT_SLUG,
+  name: "前沿播客",
+  description: "输入一个话题，检索公开播客文字库，取回最相关几集的中文要点与摘要，生成网页预览与 Markdown 产物。",
+  version: "0.1.0",
+  skillMd: FRONTIER_PODCAST_EXPERT_SKILL,
+  missingDependencies: [],
+};
+
+/** The experts that take a topic query instead of an entity or a written brief. */
+export const QUERY_EXPERT_SLUGS = new Set<string>([SECTOR_PEER_EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG]);
+
+/** The experts whose result is shown as a webpage in the task card. */
+export const HTML_PREVIEW_EXPERT_SLUGS = new Set<string>([SECTOR_PEER_EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG]);
+
 /** The experts the platform ships; their tasks take an entity name instead of a written brief. */
 export const BUILTIN_SLUGS = new Set<string>([EXPERT_SLUG, PANORAMA_EXPERT_SLUG]);
 
@@ -152,17 +176,19 @@ export function expertStatusBadge(status: string) {
  * Employee-facing labels for an execution mode. They name the capability an employee gets, never the
  * upstream tool or model that runs it; those stay internal (`xinhua_trial`, provider hostnames, env vars).
  */
-export const EXPERT_MODE_LABELS: Record<"xinhua_trial" | "xinhua_panorama" | "text_only", string> = {
+export const EXPERT_MODE_LABELS: Record<"xinhua_trial" | "xinhua_panorama" | "text_only" | "podcast_search", string> = {
   xinhua_trial: "一层对外投资核查",
   xinhua_panorama: "对外投资全景图",
   text_only: "文本任务专家",
+  podcast_search: "公开播客检索",
 };
 
 /** What the employee has to supply in each mode, so the mode label explains itself. */
-export const EXPERT_MODE_INPUTS: Record<"xinhua_trial" | "xinhua_panorama" | "text_only", string> = {
+export const EXPERT_MODE_INPUTS: Record<"xinhua_trial" | "xinhua_panorama" | "text_only" | "podcast_search", string> = {
   xinhua_trial: "需先确认企业主体",
   xinhua_panorama: "需先确认企业主体",
   text_only: "直接填写任务要求",
+  podcast_search: "直接填写话题",
 };
 
 /** The modes that need a confirmed entity before the run can start. */

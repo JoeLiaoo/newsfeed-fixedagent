@@ -3,8 +3,12 @@ import { z } from "zod";
 import { chatJson } from "@aihot/backend/providers/llm";
 import { ModelOutputError, ModelUnavailableError, ProviderRejectedError, ReceiptUnknownError, redactMembershipTaskResponses } from "@aihot/backend/providers/receipts";
 import { sql, type Db } from "@aihot/backend/db";
-import { BUILTIN_EXPERT, COMING_SOON_EXPERT_SLUG, EXPERT_SLUG, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, PANORAMA_TOOL_LABELS, SECTOR_PEER_EXPERT_SLUG, XINHUA_BASE_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
+import { BUILTIN_EXPERT, COMING_SOON_EXPERT_SLUG, EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, PANORAMA_TOOL_LABELS, SECTOR_PEER_EXPERT_SLUG, XINHUA_BASE_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
 import { renderSectorPeerDashboard } from "./sector-peer-html.ts";
+import { collectPodcastEpisodes, PodcastSourceError, PODCAST_MAX_EPISODES } from "./bidclub.ts";
+import { renderFrontierPodcastHtml } from "./frontier-podcast-html.ts";
+import { renderFrontierPodcastMarkdown } from "./frontier-podcast-markdown.ts";
+import type { FrontierPodcastView } from "./frontier-podcast-view.ts";
 import { ExpertProviderError, withXinhua, type XinhuaCall } from "./xinhua.ts";
 import { candidateSearchOutcome, carriesQuery, mapCompanyCandidates, mapInvestmentEvidence, markBranchRelations, parseInvestmentPage, parentNameCandidates, querySelectedCompanyProfile, rankCompanyCandidates, relaxedCompanyKeywords, textField, type EntityCandidate } from "./data.ts";
 import { collectProviderPages, investmentRowIdentity } from "../provider-pages.ts";
@@ -21,6 +25,7 @@ type EvidenceRow = { id: string; name: string; pct: string | null; subscribed: s
 
 function errorText(error: unknown) {
   const code = error instanceof ExpertProviderError ? error.code
+    : error instanceof PodcastSourceError ? error.code
     : error instanceof ModelUnavailableError ? "expert_model_unavailable"
     : error instanceof ModelOutputError ? "expert_model_output_invalid"
     : error instanceof ReceiptUnknownError ? "expert_model_unknown"
@@ -38,6 +43,12 @@ function errorText(error: unknown) {
     xinhua_entity_mismatch: "平台企业信息查询返回的企业与已确认主体不一致，未生成报告。",
     xinhua_unavailable: "平台企业信息查询服务暂时不可用，任务可重新提交。",
     expert_material_unreadable: "任务材料无法提取文字，请换用有文字层的 PDF、DOCX、PPTX 或 UTF-8 Markdown。",
+    podcast_query_invalid: "话题太短或太长，请换一个 2 到 100 个字的话题。",
+    podcast_source_unavailable: "公开播客文字库暂时不可用，任务可重新提交。",
+    podcast_source_timeout: "公开播客文字库响应超时，任务可重新提交。",
+    podcast_response_invalid: "公开播客文字库返回内容无法解析，未生成报告。",
+    podcast_episode_missing: "检索到的节目已不在公开播客文字库中，未生成报告。",
+    podcast_no_results: "公开播客文字库没有匹配到该话题的节目，请换一个关键词。",
     expert_model_unavailable: "文字整理模型未配置或已停用，任务未完成；请联系管理员。",
     expert_model_output_invalid: "文字整理模型返回的内容无法使用，任务未完成；可稍后重试。",
     expert_model_unknown: "文字整理模型的调用结果未知（可能已计费），任务未完成；请联系管理员核对后重试。",
@@ -367,6 +378,35 @@ async function assertRunning(taskId: string, leaseToken: string) {
   if (!rows.length) throw new Error("expert_task_cancelled");
 }
 
+/**
+ * The podcast expert: the topic is searched in the public library, the leading matches are read, and
+ * the points and the summary of each are written out as the library published them. No model and no
+ * enterprise lookup take part: the report is what the library answered, with its own limits said out.
+ */
+async function runFrontierPodcast(task: TaskRow, leaseToken: string) {
+  const query = String(task.input.query ?? "").trim();
+  if (query.length < 2) throw new PodcastSourceError("podcast_query_invalid");
+  await assertRunning(task.id, leaseToken);
+  const collection = await collectPodcastEpisodes(query, { max: PODCAST_MAX_EPISODES });
+  await assertRunning(task.id, leaseToken);
+  // Nothing to show: either the library matched nothing, or every match could not be read. The
+  // reason that is known is named, so a broken source is not read as an empty topic.
+  if (!collection.episodes.length) throw new PodcastSourceError(collection.failureCode ?? "podcast_no_results");
+  const view: FrontierPodcastView = {
+    query,
+    episodes: collection.episodes,
+    partial: collection.partial,
+    searchedRecent: collection.searchedRecent,
+    failed: collection.failed,
+    generatedAt: new Date(),
+  };
+  return {
+    markdown: renderFrontierPodcastMarkdown(view),
+    html: renderFrontierPodcastHtml(view),
+    status: { episodes: collection.episodes.length, partial: collection.partial },
+  };
+}
+
 export async function runExpertTask(taskId: string) {
   const leaseToken = randomUUID();
   const tasks = await sql<TaskRow[]>`UPDATE member_expert_tasks SET state='running', stage='processing', updated_at=now(), lease_token=${leaseToken}, lease_expires_at=now() + interval '5 minutes', execution_attempts=execution_attempts+1,last_attempt_at=now(),error_code=NULL,error_message=NULL WHERE id=${taskId} AND state='queued' AND expires_at > now() AND execution_attempts < 3 RETURNING id,user_id,expert_slug,input,selected_entity,execution_attempts`;
@@ -381,7 +421,10 @@ export async function runExpertTask(taskId: string) {
   heartbeat.unref?.();
   try {
     let report: string;
+    let previewHtml: string | null = null;
+    let podcastStatus: { episodes: number; partial: boolean } | null = null;
     const isSectorPeer = task.expert_slug === SECTOR_PEER_EXPERT_SLUG;
+    const isFrontierPodcast = task.expert_slug === FRONTIER_PODCAST_EXPERT_SLUG;
     let panoramaStatus: { incomplete: boolean; gapCount: number; limits: string[] } | null = null;
     const experts = await sql<{ manifest: { tools?: string[] }; status: string }[]>`SELECT manifest,status FROM member_experts WHERE slug=${task.expert_slug}`;
     // The one-layer builtin still runs historical tasks after hiding. The retired sentiment slug
@@ -398,6 +441,12 @@ export async function runExpertTask(taskId: string) {
       return;
     }
     if (isSectorPeer) report = renderSectorPeerDashboard(String(task.input.query ?? ""), new Date());
+    else if (isFrontierPodcast) {
+      const podcast = await runFrontierPodcast(task, leaseToken);
+      report = podcast.markdown;
+      previewHtml = podcast.html;
+      podcastStatus = podcast.status;
+    }
     else if (task.expert_slug === EXPERT_SLUG) report = await runBuiltin(task, leaseToken);
     else if (task.expert_slug === PANORAMA_EXPERT_SLUG) {
       const panorama = await runPanoramaExpert(task, leaseToken);
@@ -417,7 +466,7 @@ export async function runExpertTask(taskId: string) {
       const active = await tx`SELECT id FROM member_expert_tasks WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} AND lease_expires_at > now() FOR UPDATE`;
       if (!active.length) return;
       await tx`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256) VALUES (${taskId},${task.user_id},${`expert-${taskId}.${isSectorPeer ? "html" : "md"}`},${isSectorPeer ? "text/html; charset=utf-8" : "text/markdown; charset=utf-8"},${body},${digest}) ON CONFLICT(task_id) DO NOTHING`;
-      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json(isSectorPeer ? { html: report, format: "html" } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
+      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json(isSectorPeer ? { html: report, format: "html" } : isFrontierPodcast ? { html: previewHtml, format: "html", podcast: podcastStatus } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
     });
   } catch (error) {
     const detail = errorText(error);

@@ -1,0 +1,249 @@
+// The podcast expert: what the public library answers, what the report may claim, and what the
+// article that shows in the task card is allowed to contain.
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { collectPodcastEpisodes, createPodcastClient, PodcastSourceError, podcastSummaryUrl, PODCAST_MAX_EPISODES } from "../experts/bidclub.ts";
+import { FRONTIER_PODCAST_EXPERT, FRONTIER_PODCAST_EXPERT_SLUG, HTML_PREVIEW_EXPERT_SLUGS, QUERY_EXPERT_SLUGS } from "../experts/catalog.ts";
+import { renderFrontierPodcastHtml } from "../experts/frontier-podcast-html.ts";
+import { renderFrontierPodcastMarkdown } from "../experts/frontier-podcast-markdown.ts";
+import type { FrontierPodcastView } from "../experts/frontier-podcast-view.ts";
+import type { PodcastEpisode } from "../experts/bidclub.ts";
+
+const SEARCH_PAYLOAD = {
+  q: "具身智能",
+  count: 2,
+  partial: true,
+  searched_recent: 300,
+  results: [
+    {
+      slug: "latetalk-182",
+      title: "182: 对话梁琛奇",
+      shows: { name: "晚点聊 LateTalk" },
+      date: "2026-09-24",
+      published_at: "2026-09-23T23:00:00+00:00",
+      duration_min: 202,
+      lang: "ZH",
+      dek: "推理成本下降，AI 娱乐窗口已开启。",
+      source_url: "https://podcast.latepost.com/182",
+      source_label: "Podcast",
+      chips: ["person:梁琛奇", "person:程曼祺"],
+      tag_sectors: ["ai_software", "consumer"],
+      tag_focus: ["company_building"],
+    },
+    { slug: "empty-record", title: "只有标题的一集", shows: { name: "十字路口" } },
+  ],
+};
+
+const EPISODE_PAYLOAD = {
+  slug: "latetalk-182",
+  title: "182: 对话梁琛奇",
+  shows: { name: "晚点聊 LateTalk" },
+  date: "2026-09-24",
+  published_at: "2026-09-23T23:00:00+00:00",
+  duration_min: 202,
+  lang: "ZH",
+  lang_alt: "EN",
+  dek: "推理成本下降，AI 娱乐窗口已开启。",
+  source_url: "https://podcast.latepost.com/182",
+  source_label: "Podcast",
+  chips: ["person:梁琛奇", "person:程曼祺"],
+  tag_sectors: ["ai_software", "consumer"],
+  tag_focus: ["company_building", "technical"],
+  tldr_md: "- **第一点要点。** 展开说明。",
+  digest_md: "### 1. 小节标题\n- 摘要第一行。",
+  tldr_md_alt: "- English points.",
+  digest_md_alt: "### 1. English section",
+};
+
+/** The library as a stub: the search answers, and the episodes answer or fail as the test says. */
+function stubFetch(episodes: Record<string, unknown>, search: Record<string, unknown> = SEARCH_PAYLOAD) {
+  return async (input: string | URL | Request): Promise<Response> => {
+    const url = String(input);
+    if (url.includes("/api/v1/search")) return new Response(JSON.stringify(search), { status: 200, headers: { "content-type": "application/json" } });
+    const slug = url.split("/api/v1/episodes/")[1] ?? "";
+    const payload = episodes[slug];
+    if (!payload) return new Response("not found", { status: 404 });
+    return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+  };
+}
+
+function episode(overrides: Partial<PodcastEpisode> = {}): PodcastEpisode {
+  return {
+    slug: "latetalk-182",
+    title: "182: 对话梁琛奇",
+    showName: "晚点聊 LateTalk",
+    date: "2026-09-24",
+    publishedAt: "2026-09-23T23:00:00+00:00",
+    durationMin: 202,
+    lang: "ZH",
+    dek: "推理成本下降，AI 娱乐窗口已开启。",
+    sourceUrl: "https://podcast.latepost.com/182",
+    sourceLabel: "Podcast",
+    tldr: "- **第一点要点。** 展开说明。",
+    tldrLang: "ZH",
+    digest: "### 1. 小节标题\n- 摘要第一行。",
+    digestLang: "ZH",
+    altLang: "EN",
+    people: ["梁琛奇", "程曼祺"],
+    sectors: ["人工智能与软件", "消费"],
+    focus: ["公司建设", "技术"],
+    ...overrides,
+  };
+}
+
+function view(overrides: Partial<FrontierPodcastView> = {}): FrontierPodcastView {
+  return {
+    query: "具身智能",
+    episodes: [episode()],
+    partial: true,
+    searchedRecent: 300,
+    failed: 0,
+    generatedAt: new Date("2026-10-26T04:00:00Z"),
+    ...overrides,
+  };
+}
+
+test("the library client reads the search and one episode as the service answered", async () => {
+  const client = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: stubFetch({ "latetalk-182": EPISODE_PAYLOAD }) as typeof fetch });
+  const search = await client.search("具身智能");
+  assert.equal(search.count, 2);
+  assert.equal(search.partial, true);
+  assert.equal(search.searchedRecent, 300);
+  assert.equal(search.matches[0]?.slug, "latetalk-182");
+  assert.equal(search.matches[0]?.showName, "晚点聊 LateTalk");
+  assert.equal(search.matches[1]?.durationMin, null, "a field the service did not send stays missing");
+  const read = await client.episode("latetalk-182");
+  assert.equal(read.tldrLang, "ZH");
+  assert.equal(read.tldr, "- **第一点要点。** 展开说明。");
+  assert.equal(read.digestLang, "ZH");
+  assert.deepEqual(read.people, ["梁琛奇", "程曼祺"]);
+  assert.deepEqual(read.sectors, ["人工智能与软件", "消费"]);
+  assert.deepEqual(read.focus, ["公司建设", "技术"]);
+});
+
+test("an episode without a Chinese text keeps the language it does have", async () => {
+  // The library keeps the text of an episode in `lang` and the other language in `lang_alt`.
+  const englishOnly = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: stubFetch({ "en-only": { ...EPISODE_PAYLOAD, slug: "en-only", lang: "EN", lang_alt: null, tldr_md: "- English points.", tldr_md_alt: null, digest_md: "### English", digest_md_alt: null } }) as typeof fetch });
+  const read = await englishOnly.episode("en-only");
+  assert.equal(read.tldrLang, "EN");
+  assert.equal(read.tldr, "- English points.");
+  assert.equal(read.digestLang, "EN");
+
+  // A record whose Chinese text sits in the alternate field is read as Chinese.
+  const chineseAlternate = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: stubFetch({ "alt-zh": { ...EPISODE_PAYLOAD, slug: "alt-zh", lang: "EN", lang_alt: "ZH", tldr_md: "- English points.", tldr_md_alt: "- 中文要点。" } }) as typeof fetch });
+  const alternate = await chineseAlternate.episode("alt-zh");
+  assert.equal(alternate.tldrLang, "ZH");
+  assert.equal(alternate.tldr, "- 中文要点。");
+});
+
+test("a query the library refuses is an error, not an empty report", async () => {
+  const client = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: stubFetch({}) as typeof fetch });
+  await assert.rejects(() => client.search("短"), (error: unknown) => error instanceof PodcastSourceError && error.code === "podcast_query_invalid");
+  await assert.rejects(() => client.search("x".repeat(200)), (error: unknown) => error instanceof PodcastSourceError && error.code === "podcast_query_invalid");
+  await assert.rejects(() => client.episode("missing"), (error: unknown) => error instanceof PodcastSourceError && error.code === "podcast_episode_missing");
+});
+
+test("the digest is capped and an unreadable episode is counted, not silently dropped", async () => {
+  const many = { ...SEARCH_PAYLOAD, count: 10, results: Array.from({ length: 10 }, (_, index) => ({ slug: `ep-${index}`, title: `第 ${index} 集`, shows: { name: "节目" } })) };
+  const episodes = Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`ep-${index}`, { ...EPISODE_PAYLOAD, slug: `ep-${index}` }]));
+  const client = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: stubFetch(episodes, many) as typeof fetch });
+  const collection = await collectPodcastEpisodes("具身智能", { client });
+  assert.equal(collection.episodes.length, PODCAST_MAX_EPISODES);
+  assert.equal(collection.episodes.length, 6, "one digest stays readable");
+  assert.equal(collection.partial, true);
+  assert.equal(collection.failed, 0);
+
+  const withGap = { ...many, results: [{ slug: "gone", title: "读不到的一集", shows: { name: "节目" } }, { slug: "ep-0", title: "第一集", shows: { name: "节目" } }] };
+  const gapped = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: stubFetch(episodes, withGap) as typeof fetch });
+  const partial = await collectPodcastEpisodes("具身智能", { client: gapped });
+  assert.equal(partial.episodes.length, 1);
+  assert.equal(partial.failed, 1, "a missing episode is counted so the report can say so");
+  assert.equal(partial.failureCode, "podcast_episode_missing", "the reason travels with the result");
+});
+
+test("a library that matches nothing is an empty topic, not a broken source", async () => {
+  const client = createPodcastClient({ baseUrl: "https://podcasts.example", fetchImpl: stubFetch({}, { q: "x", count: 0, results: [], partial: true, searched_recent: 300 }) as typeof fetch });
+  const collection = await collectPodcastEpisodes("毫无相关", { client });
+  assert.equal(collection.episodes.length, 0);
+  assert.equal(collection.failed, 0);
+  assert.equal(collection.failureCode, null, "nothing was read, so nothing failed");
+});
+
+test("the expert is a runnable builtin that takes a topic, not an entity", () => {
+  assert.equal(FRONTIER_PODCAST_EXPERT_SLUG, "frontier-podcast");
+  assert.equal(FRONTIER_PODCAST_EXPERT.name, "前沿播客");
+  assert.deepEqual(FRONTIER_PODCAST_EXPERT.missingDependencies, []);
+  assert.ok(QUERY_EXPERT_SLUGS.has(FRONTIER_PODCAST_EXPERT_SLUG));
+  assert.ok(HTML_PREVIEW_EXPERT_SLUGS.has(FRONTIER_PODCAST_EXPERT_SLUG));
+  assert.match(FRONTIER_PODCAST_EXPERT.skillMd, /未提供/);
+  assert.match(FRONTIER_PODCAST_EXPERT.skillMd, /结果不完整/);
+});
+
+test("the article reads as one article: masthead, lead, callouts, contents, sections, closing note", () => {
+  const html = renderFrontierPodcastHtml(view());
+  for (const part of [
+    "ra-hero", "ra-hero__eyebrow", "ra-hero__title", "ra-hero__subtitle", "ra-hero__meta",
+    "ra-lead", "ra-aside", "ra-toc", "ra-toc__list", "ra-section", "ra-section__index", "ra-section__title",
+    "ra-quote", "ra-subsection__title", "ra-conclusion", "ra-colophon",
+  ]) assert.ok(html.includes(part), part);
+  assert.ok(html.includes("前沿播客"));
+  assert.ok(html.includes("具身智能"));
+  assert.ok(html.includes("晚点聊 LateTalk"));
+  assert.ok(html.includes('href="#ep-1"'), "the contents page links to the episode");
+  assert.ok(html.includes('id="ep-1"'));
+  assert.ok(html.includes("<strong>第一点要点。</strong>"), "the library's bold lead-in is kept");
+  assert.ok(html.includes("小节标题"));
+  assert.ok(html.includes("结果不完整"), "a partial answer says so");
+  assert.ok(html.includes("最近 300 集"));
+  assert.ok(html.includes("https://podcast.latepost.com/182"));
+  assert.ok(html.includes(podcastSummaryUrl("https://bidclub.ai", "latetalk-182")));
+});
+
+test("the article is self-contained: no script, no outside stylesheet, font or image", () => {
+  const html = renderFrontierPodcastHtml(view({ episodes: [episode({ title: '<script>alert("x")</script> & "危险"' })] }));
+  assert.ok(!/<script/i.test(html));
+  assert.ok(!/<link\b/i.test(html));
+  assert.ok(!/<img\b/i.test(html));
+  assert.ok(!/@import/i.test(html));
+  assert.ok(!/url\(/i.test(html), "no remote resource is fetched");
+  assert.ok(!/\son[a-z]+=/i.test(html), "no inline event handler");
+  assert.ok(html.includes("default-src 'none'; style-src 'unsafe-inline'"));
+  assert.ok(html.includes("&lt;script&gt;"), "a title that carries markup is escaped, not executed");
+  assert.ok(html.includes("&amp;"));
+  assert.ok(html.includes("&quot;"));
+});
+
+test("the article carries the press theme's tokens rather than a look of its own", () => {
+  const html = renderFrontierPodcastHtml(view());
+  for (const token of ["--ra-color-bg:#fbf7ee", "--ra-color-accent:#7b1e22", "--ra-color-text:#211e18", "--ra-font-body", "--ra-space-7", "--ra-measure:46rem"]) {
+    assert.ok(html.includes(token), token);
+  }
+  assert.ok(html.includes('data-theme="press"'));
+});
+
+test("an article without a readable episode says so instead of showing an empty digest", () => {
+  const html = renderFrontierPodcastHtml(view({ episodes: [], failed: 2 }));
+  assert.ok(html.includes("没有可展示的节目"));
+  assert.ok(html.includes("另有 2 集读取失败未收录"));
+  assert.ok(!html.includes('href="#ep-1"'), "an empty result has no contents page");
+});
+
+test("the Markdown product keeps the full text, the source and the limits", () => {
+  const markdown = renderFrontierPodcastMarkdown(view({ episodes: [episode({ digest: "- ".padEnd(25_000, "长") })] }));
+  assert.ok(markdown.startsWith("# 前沿播客 · 具身智能"));
+  assert.ok(markdown.includes("## 1. 182: 对话梁琛奇"));
+  assert.ok(markdown.includes("- 来源：Podcast · https://podcast.latepost.com/182"));
+  assert.ok(markdown.includes("- 参与者：梁琛奇、程曼祺"));
+  assert.ok(markdown.includes("### 要点"));
+  assert.ok(markdown.includes("### 摘要"));
+  assert.ok(markdown.includes("结果不完整"), "a partial answer is stated in the file too");
+  assert.ok(markdown.includes("不构成投资建议"));
+});
+
+test("the task card shows the podcast article in the same sandboxed frame as the sector dashboard", () => {
+  const detail = readFileSync(new URL("../pages/expert-detail.tsx", import.meta.url), "utf8");
+  assert.ok(detail.includes('srcDoc={task.result.html} sandbox=""'));
+  assert.ok(detail.includes("HTML_PREVIEW_EXPERT_SLUGS.has(task.expertSlug)"));
+  assert.ok(detail.includes("podcast_query_required"));
+});
