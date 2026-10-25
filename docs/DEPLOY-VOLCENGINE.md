@@ -108,7 +108,7 @@
 
 ### 待发布改动：PR #50～#54
 
-截至 [2026-10-24 本地核查](logs/2026-10-24-progress-check-release-readiness.md)，已记录的生产版本仍为 `9e116bd`。后续合并的 PR #50（GP 候选与日期）、#51（全景硬化）、#52（员工已核实项目）、#53（GP 管理筛选）、#54（员工关注匹配）均未见生产发布记录。与 `9e116bd` 比较，没有新增数据库迁移文件；本地类型、迁移安全及针对性用例通过。这些结果不证明生产环境或供应商链路可用。
+截至 [2026-10-24 本地核查](logs/2026-10-24-progress-check-release-readiness.md)，当时已记录的生产版本为 `9e116bd`。后续合并的 PR #50（GP 候选与日期）、#51（全景硬化）、#52（员工已核实项目）、#53（GP 管理筛选）、#54（员工关注匹配）均未见生产发布记录。与 `9e116bd` 比较，没有新增数据库迁移文件；本地类型、迁移安全及针对性用例通过。这些结果不证明生产环境或供应商链路可用。
 
 下次发布按以下顺序留存证据：
 
@@ -160,6 +160,14 @@
 - **无新增迁移**：setup 输出 `database is up to date`，`schema_migrations` 164 → 164、最大仍为 `0190`，信源未重复写入（`sources: 0 added, 26 already there`）；setup 先于新代码上线，退出码 0 之后才更新 web、API、worker。
 - web、API、worker 运行 `citic-newsfeed:bd4b150afb49cebb408215713827b1e02b8ed432`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200、`/favicon.ico` 返回 200，`/knowledge/documents/:id` 等知识库路径按会话鉴权 302 跳转登录页。
 - 文档正文渲染、无效库缺失态与关联页／来源计数的登录后表现仍未验收，详见[PR #77 部署日志](logs/2026-10-25-P4-pr77-deployment.md)。
+
+### PR #79 合并后发布（2026-10-25）
+
+- [PR #79](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/79) 已合并，提交 `b8eb08bb75f708f6b309d58f61b3d98427f9d519` 已发布到 `/opt/citic-newsfeed/releases/b8eb08bb75f708f6b309d58f61b3d98427f9d519`。目录里以可运行的「赛道同业竞争看板」替换企业舆情报告入口，旧 slug 保留行并隐藏；worker 产出独立 HTML 空看板（三主区 + 美国参考带 + 数据源未接入），生成时间统一走 `@aihot/contracts/time` 的 `beijingStamp`。
+- 发布前保存 `.env.before-release-b8eb08b-20261025` 与 `backups/db-before-b8eb08b-20261025.dump`，权限均为 `0600`，转储经 `pg_restore --list` 检查可读（573 条 TOC 目录项，未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变。
+- **无新增迁移**：setup 输出 `database is up to date`，`schema_migrations` 164 → 164、最大仍为 `0190`，信源未重复写入（`sources: 0 added, 26 already there`）；setup 先于新代码上线，退出码 0 之后才更新 web、API、worker。
+- web、API、worker 运行 `citic-newsfeed:b8eb08bb75f708f6b309d58f61b3d98427f9d519`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login` 返回 200、`/favicon.ico` 返回 200，`/experts`、`/experts/sector-peer-landscape` 按会话鉴权 302 跳转登录页。
+- 目录播种是惰性的：`seedBuiltin()` 在鉴权通过后执行，本次发布后 `member_experts` 仍是发布前的 3 行，新目录行会在第一位员工首次打开专家目录时写入。赛道的空 HTML 预览与下载仍需登录后复测，详见[PR #79 部署日志](logs/2026-10-25-P4-pr79-deployment.md)。
 
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
