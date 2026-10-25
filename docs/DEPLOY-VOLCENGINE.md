@@ -233,6 +233,17 @@ git commit -m "docs: apply employee changelog for release"
 - PR #93 的 `BILINGUAL_TERMS`、`podcastQueryVariants`、`expandQuery`、`skippedWithoutChinese` 与 `editorialSourceLabel` 均在运行镜像中确认存在；镜像内独立回归套件以 `--network none` 重跑 147/147 通过（上一版 144 条，新增 3 条来自 PR #93）。
 - Hermes 网关、Nginx、证书续期、数据库容器与命名卷未改动，四个 P3 开关保持 `true`，未清理旧发布目录与旧镜像。登录后用「具身智能」与「embodied intelligence」各跑一次前沿播客的复验仍待人工完成，详见[PR #93 部署日志](logs/2026-10-25-P4-pr93-deployment.md)。
 
+### PR #114 员工端更新日志待发布流程与回填发布（2026-10-26）
+
+- **当前生产版本为 `300e527aa555d6ec1dafef428b0ac045ea56b906`（短 `300e527`）**，发布目录 `/opt/citic-newsfeed/releases/300e527aa555d6ec1dafef428b0ac045ea56b906`，发布窗口 2026-10-26 07:24–07:33（UTC+8）。该版本即 [PR #114](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/114) `Apply pending employee changelog on release and backfill shipped updates` 的合并提交（2026-10-26 07:24 CST，CI 三项全绿），只增加员工端更新日志的「待发布文件 → 发布时统一写入」工具链与已上线功能的员工公告回填，不改路由、界面、schema 或迁移。发布前生产版本为 `781f6d1`（PR #113），两者为快进关系。
+- **0 条新迁移**：`git diff 781f6d1..300e527 -- '*.sql'` 为空，发布归档含 164 个 `.sql` 文件。setup 先于新代码上线运行，退出码 0，输出「database is up to date / sources: 0 added, 26 already there / experts: the platform's own catalog entries are in place」；`schema_migrations` 164 → 164，最大版本仍是 `0190_member_experts_status_coming_soon_validate.sql`。
+- 发布前保存 `.env.before-release-300e527-20261026` 与 `backups/db-before-300e527-20261026.dump`，权限均为 `0600`，转储在数据库容器内经 `pg_restore --list` 检查可读（573 条 TOC，未做完整恢复演练）。Docker Hub 不可达，仍只在发布目录内把 `Dockerfile.volcengine` 的基础镜像指向 `docker.m.daocloud.io/library/node:24-trixie-slim`，仓库源码不变（逐文件比对确认只有该文件的 `FROM` 一行不同）。
+- 发布包取自重新拉取的 `origin/main` SHA 的 `git archive`，归档 sha256 本地与主机逐字节一致（1,053 个文件，全树清单与本地解包一致）。web、API、worker 运行 `citic-newsfeed:300e527aa555d6ec1dafef428b0ac045ea56b906`。本机与公网 `/api/health` 返回 `ok=true`、`db=ok` 与该 release，公网 `/login`、`/register`、`/favicon.ico` 返回 200，`/changelog`、`/experts`、`/tasks`、`/knowledge`、`/account/artifacts`、`/notifications`、`/profile` 等按会话鉴权 302 跳转登录页，membership API 未登录返回 401。
+- **`/api/site/changelog` 与 `/api/site/meta` 在会话鉴权之后**，未登录返回 `401 login_required`（与发布前基线一致，PR #114 未改变暴露范围）。因此改在运行中的 api 容器内读回同一代码路径的取值：`latestVersion` = `2026-10-26T07:15`，release 记录 **10** 条，`siteMeta().changelogVersion` 同值；镜像内 `/app/site/changelog.json` 一致。已发布镜像上的 `npm run changelog:apply` 输出 `no pending changelog`（该 tip 已带应用后的状态，发布时未重复应用），PR #114 自带的 `tests/employee-changelog.standalone.test.ts` 在镜像内以 `--network none` 执行 5/5 通过。
+- 镜像内独立回归套件以 `--network none` 重跑：membership 范围 **164/164 通过**（与发布前基线 `781f6d1` 相同，PR #114 不涉及 membership），全量范围 397／382 通过／15 失败——那 15 个失败在发布前基线镜像上完全相同，属既有环境性失败，非本次发布引入。
+- Hermes 网关、Nginx、证书续期、数据库容器与命名卷未改动，四个 P3 开关保持 `true`，未清理旧发布目录与旧镜像（发布目录与镜像各 35 → 36）。**本次未做登录后的人工冒烟**：员工端更新日志页 `/changelog` 的渲染与红点已读状态仍需人工登录后核对；数据侧已确认 `latestVersion = 2026-10-26T07:15`，详见[PR #114 发布日志](logs/2026-10-26-P4-pr114-deployment.md)。
+- 记录 release `e2daacd`（PR #96 + #97）的文档 PR [#101](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/101)、记录 release `cc1a5af`（PR #100）的文档 PR [#102](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/102)、记录 release `55244fc`（功能批次）的文档 PR [#108](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/108)、记录 release `07488ac`（员工端 UI 与后端复核）的文档 PR [#111](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/111) 与记录 release `781f6d1`（PR #113）的文档 PR [#115](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/115) **仍处于打开状态**，其独有日志文件未在本 PR 中重复加入；合并时按发布先后保留各自小节与日志文件即可。
+
 ## PR #15：iLink 扫码功能的发布隔离与回滚
 
 此节针对 [P3 扫码与订阅推送](P3-ILINK-QR-DESIGN.md) 的部署后试用。代码合并后也不能推定本功能已经部署，原 Hermes 单账号网关和旧服务须保留。
