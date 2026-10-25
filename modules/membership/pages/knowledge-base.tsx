@@ -92,8 +92,9 @@ export default function KnowledgeBasePage() {
       fetch(`${ENDPOINT}tasks?baseId=${scope}`),
       fetch(`${ENDPOINT}pages?baseId=${scope}&query=${encodeURIComponent(term)}`),
     ]);
-    if (!overviewResponse.ok) { location.href = "/login"; return; }
-    if (!baseResponse.ok) { setMissing(true); setMessage("该知识库不存在，或你无权查看。"); setLoading(false); return; }
+    if (baseResponse.status === 401 || overviewResponse.status === 401) { location.href = "/login"; return; }
+    if (baseResponse.status === 404 || overviewResponse.status === 404) { setMissing(true); setMessage("知识库不存在。"); return; }
+    if (!baseResponse.ok || !overviewResponse.ok || !documentsResponse.ok || !tasksResponse.ok || !pagesResponse.ok) throw new Error("knowledge_base_load_failed");
     setBase((await baseResponse.json() as { base: Base }).base);
     setOverview((await overviewResponse.json() as { overview: Overview }).overview);
     setDocuments((await documentsResponse.json() as { documents: DocumentRow[] }).documents);
@@ -186,7 +187,7 @@ export default function KnowledgeBasePage() {
     <p className="text-sm text-ink-3" role="status">正在加载知识库…</p>
   </main>;
 
-  if (missing) return <main className="mx-auto w-full max-w-4xl px-5 py-8">
+  if (missing || !base) return <main className="mx-auto w-full max-w-4xl px-5 py-8">
     <h1 className="text-2xl font-semibold tracking-tight text-ink">知识库</h1>
     <Alert className="mt-4" role="status">{message}</Alert>
     <p className="mt-4"><Link to="/knowledge" className="text-sm text-accent underline-offset-4 hover:underline">返回知识库</Link></p>

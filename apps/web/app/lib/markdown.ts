@@ -1,5 +1,4 @@
-// Minimal Markdown → HTML for our own static site copy (legal pages, about, agent guide).
-// Trusted input only: never used for third-party content.
+// Minimal Markdown → HTML for site copy and knowledge text. Escape inline HTML and link attributes.
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -10,6 +9,7 @@ function inline(s: string, site: string): string {
   out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, text: string, href: string) => {
+    if (!/^(?:\/|#|https?:\/\/)/i.test(href) || href.startsWith("//")) return text;
     // A link to this site's own address becomes an in-site path; any other address opens in a new tab.
     const own = href === site || href.startsWith(`${site}/`);
     const external = /^https?:\/\//.test(href) && !own;
@@ -39,9 +39,9 @@ export function renderMarkdown(md: string, site: string): RenderedCopy {
       i++;
       continue;
     }
-    const heading = /^(#{2,4})\s+(.+)$/.exec(line);
+    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
     if (heading) {
-      const level = heading[1]!.length;
+      const level = Math.max(2, heading[1]!.length);
       const text = heading[2]!.trim();
       const id = `s${++h}`;
       if (level === 2) outline.push({ id, text });
@@ -80,7 +80,7 @@ export function renderMarkdown(md: string, site: string): RenderedCopy {
       continue;
     }
     const para: string[] = [];
-    while (i < lines.length && lines[i]!.trim() && !/^(#{2,4}\s|\||>|\s*[-*]\s|\s*\d+[.．]\s)/.test(lines[i]!)) para.push(lines[i++]!.trim());
+    while (i < lines.length && lines[i]!.trim() && !/^(#{1,4}\s|\||>|\s*[-*]\s|\s*\d+[.．]\s)/.test(lines[i]!)) para.push(lines[i++]!.trim());
     html.push(`<p>${inline(para.join(""), site)}</p>`);
   }
   return { html: html.join("\n"), outline };

@@ -90,10 +90,11 @@ export function lintPage(page: PageDraft, knownSlugs: Set<string>): Finding[] {
 export function lintDraft(draft: CompiledDraft, knownSlugs: Set<string>): Finding[] {
   const findings: Finding[] = [];
   const slugs = new Set<string>();
+  const reachable = new Set([...knownSlugs, ...draft.pages.map(page => page.slug)]);
   for (const page of draft.pages) {
     if (slugs.has(page.slug)) findings.push({ level: "P0", category: "duplicate-page", target: page.slug, message: "同一批里出现了两个同名页面。", evidence: null });
     slugs.add(page.slug);
-    findings.push(...lintPage(page, knownSlugs));
+    findings.push(...lintPage(page, reachable));
   }
   return findings;
 }

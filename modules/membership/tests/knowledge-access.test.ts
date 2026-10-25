@@ -171,11 +171,21 @@ test("the shared library is open to approved employees and closed to everyone el
   const citations = await sql`SELECT label, analyst, organization FROM member_wiki_citations`;
   assert.deepEqual(citations.map(citation => citation.label), ["S1"]);
   assert.equal(citations[0]?.analyst, "张三");
+  const [publishedPage] = await sql<{ id: string }[]>`SELECT id FROM member_wiki_pages WHERE slug='view-company-example'`;
+  await sql`INSERT INTO member_wiki_quality_issues(id,page_id,level,category,target,message)
+    VALUES (${randomUUID()},${publishedPage!.id},'P1','related-target-missing','view-company-example','Related Pages 指向不存在的页面：view-company-example。'),
+           (${randomUUID()},${publishedPage!.id},'P1','related-target-missing','view-company-example','Related Pages 指向不存在的页面：not-published。')`;
+  const pageDetail = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages/view-company-example", headers: { cookie: cookies[1]!, ...common } });
+  assert.equal(pageDetail.statusCode, 200);
+  assert.deepEqual((await pageDetail.json() as { issues: Array<{ category: string; message: string }> }).issues.filter(issue => issue.category === "related-target-missing").map(issue => issue.message), ["Related Pages 指向不存在的页面：not-published。"]);
 
   // The other employee sees the same library, and may read the original.
   const shared = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/pages", headers: { cookie: cookies[1]!, ...common } });
   assert.equal(shared.statusCode, 200);
   assert.equal((await shared.json() as { pages: unknown[] }).pages.length, 1);
+  const detail = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/documents/${uploaded.documentId}`, headers: { cookie: cookies[1]!, ...common } });
+  assert.equal(detail.statusCode, 200);
+  assert.match((await detail.json() as { versions: Array<{ bodyMd: string | null }> }).versions[0]?.bodyMd ?? "", /# 某公司深度报告\n\n张三\/某券商/);
   const original = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: { cookie: cookies[1]!, ...common } });
   assert.equal(original.statusCode, 200);
   assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: common })).statusCode, 401);

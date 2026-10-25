@@ -9,7 +9,7 @@ import { WIKI_QUEUE } from "./queue.ts";
 import { answerQuestion } from "./answer.ts";
 import { routePages, type RoutableCitation, type RoutablePage } from "./routing.ts";
 import { FORMAT_MEDIA_TYPES, freshnessTier, FRESHNESS_LABELS, MAX_WIKI_ATTEMPTS, TASK_ERRORS, maxFileBytes } from "./catalog.ts";
-import { DEFAULT_BASE_ID, MAX_BASES, ensureDefaultBase, newBaseId, resolveBase } from "./bases.ts";
+import { DEFAULT_BASE_ID, MAX_BASES, baseSlugOf, ensureDefaultBase, newBaseId, resolveBase } from "./bases.ts";
 import { checksum, versionBody } from "./worker.ts";
 import { withdrawDocumentPages } from "./publish.ts";
 import { detectFormat } from "./extract.ts";
@@ -184,6 +184,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const versions = await sql`
       SELECT v.id, v.version_no AS "versionNo", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.sha256, v.source_title AS "sourceTitle", v.source_author AS "sourceAuthor",
         v.source_org AS "sourceOrg", v.source_date AS "sourceDate", v.source_kind AS "sourceKind", v.extraction_status AS "extractionStatus", v.extraction_note AS "extractionNote",
+        CASE WHEN v.format = 'markdown' AND v.extraction_status = 'available' THEN convert_from(v.body, 'UTF8') ELSE NULL END AS "bodyMd",
         v.created_at AS "createdAt", u.real_name AS "uploaderName",
         t.id AS "taskId", t.state AS "taskState", t.stage AS "taskStage", t.error_code AS "errorCode", t.error_message AS "errorMessage", t.attempt_count AS "attemptCount", t.updated_at AS "updatedAt"
       FROM member_wiki_document_versions v JOIN member_users u ON u.id = v.uploader_id
@@ -385,9 +386,21 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       SELECT c.label, c.anchor, c.analyst, c.organization, to_char(c.published_on, 'YYYY-MM-DD') AS "publishedOn", c.source_title AS "sourceTitle", v.id AS "versionId", v.file_name AS "fileName", v.format, d.id AS "documentId", d.title AS "documentTitle"
       FROM member_wiki_citations c JOIN member_wiki_document_versions v ON v.id = c.version_id JOIN member_wiki_documents d ON d.id = v.document_id
       WHERE c.page_id=${page.id} AND c.revision=${page.revision} ORDER BY c.label, c.created_at`;
-    const issues = await sql`SELECT level, category, target, message, evidence, detected_at AS "detectedAt" FROM member_wiki_quality_issues WHERE page_id=${page.id} AND status='open' ORDER BY level, detected_at DESC`;
+    const related = await sql<{ slug: string; targetName: string | null }[]>`
+      SELECT slug, target_name AS "targetName" FROM member_wiki_pages
+      WHERE base_id=${page.baseId} AND status='published'`;
+    const knownRelated = new Set(related.flatMap(item => [item.slug, baseSlugOf(item.slug, page.baseId)]));
+    const storedIssues = await sql<{ level: string; category: string; target: string | null; message: string; evidence: string | null; detectedAt: string }[]>`
+      SELECT level, category, target, message, evidence, detected_at AS "detectedAt"
+      FROM member_wiki_quality_issues WHERE page_id=${page.id} AND status='open' ORDER BY level, detected_at DESC`;
+    const issues = storedIssues.filter(issue => {
+      if (issue.category !== "related-target-missing") return true;
+      const slug = /Related Pages 指向不存在的页面：(.+?)。?$/.exec(issue.message)?.[1];
+      return !slug || !knownRelated.has(slug);
+    });
     const tier = freshnessTier(page.coverage?.last_report ?? null);
-    return { page: { ...page, freshness: tier, freshnessLabel: FRESHNESS_LABELS[tier] }, citations, issues };
+    return { page: { ...page, freshness: tier, freshnessLabel: FRESHNESS_LABELS[tier] }, citations, issues,
+      related: related.map(item => ({ ...item, localSlug: baseSlugOf(item.slug, page.baseId) })) };
   });
 
   /** The original material, for an employee who may see it. */

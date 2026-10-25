@@ -53,6 +53,8 @@
 | `GET /versions/:id/original` | 下载原件（经会话鉴权，带 `nosniff`；已撤回材料的原件只对上传者与管理员开放，其余为 404） |
 | `POST /answers` | 提问：按问题在**所在库**内路由到已发布页面，生成带脚注引用的回答（请求体带 `baseId`）；有引用时返回 200，无覆盖时返回 422 `knowledge_no_coverage` 与中文 `message`，库不存在时返回 404 `knowledge_base_not_found` |
 
+材料详情 `GET /documents/:id` 对可读取的 Markdown 版本额外返回 `bodyMd`（UTF-8 原件正文），供已批准员工在详情页直接阅读；其他格式仍只保留元数据与原件下载。知识页详情 `GET /pages/:slug` 返回同库已发布页面的 `related` 标题与 slug，页面据此把历史正文里的短 slug／完整 slug 链接解析为标题与有效地址；来源计数按详情实际返回的引用条数显示。已发布目标存在时，历史遗留的 `related-target-missing` 误报不会在详情继续展示；库中确实不存在的目标仍报告。
+
 问答接口的 `GET /answers` 返回 405 和 `Allow: POST`。排查 404 时先看响应体的 `error`：`knowledge_base_not_found` 是库号问题，`not_found` 是路由／部署版本问题；无覆盖不再与路由缺失共用 404。员工页把问答错误显示在提问表单下方。生产发布后应分别用已发布页面覆盖的问题和无覆盖的问题验收；只检查健康接口不能证明问答可用。
 
 ## 4. 构建流程

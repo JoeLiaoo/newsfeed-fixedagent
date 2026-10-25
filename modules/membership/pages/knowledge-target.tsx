@@ -19,6 +19,7 @@ const FRESHNESS_VARIANT: Record<string, "default" | "secondary" | "success" | "w
 
 type Citation = { label: string; anchor: string | null; analyst: string | null; organization: string | null; publishedOn: string | null; sourceTitle: string | null; versionId: string; fileName: string; format: string; documentId: string; documentTitle: string };
 type Issue = { level: string; category: string; target: string | null; message: string; evidence: string | null; detectedAt: string };
+type RelatedPage = { slug: string; localSlug: string; targetName: string | null };
 type PageDetail = {
   id: string; slug: string; pageType: string; targetType: string | null; targetName: string | null; track: string | null; status: string;
   baseId: string; revision: number; bodyMd: string; publishedAt: string; updatedAt: string; freshness: string; freshnessLabel: string;
@@ -32,21 +33,33 @@ function body(markdown: string): string {
   return end < 0 ? markdown : markdown.slice(end + 4);
 }
 
+function resolvedBody(markdown: string, related: RelatedPage[]): string {
+  const bySlug = new Map(related.flatMap(page => [[page.slug, page], [page.localSlug, page]] as const));
+  return body(markdown).replace(/\[([^\]]+)\]\(\/knowledge\/targets\/([^)]+)\)/g, (link, _label: string, slug: string) => {
+    const page = bySlug.get(slug);
+    if (!page) return link;
+    const title = (page.targetName?.trim() || page.localSlug).replace(/[\[\]]/g, "");
+    return `[${title}](/knowledge/targets/${encodeURIComponent(page.slug)})`;
+  });
+}
+
 export default function KnowledgeTargetPage() {
   const { slug } = useParams();
   const [page, setPage] = useState<PageDetail | null>(null);
   const [citations, setCitations] = useState<Citation[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
+  const [related, setRelated] = useState<RelatedPage[]>([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     const response = await fetch(`${ENDPOINT}pages/${encodeURIComponent(slug ?? "")}`);
     if (!response.ok) { setMessage("知识页不存在或已下架。"); return; }
-    const result = await response.json() as { page: PageDetail; citations: Citation[]; issues: Issue[] };
+    const result = await response.json() as { page: PageDetail; citations: Citation[]; issues: Issue[]; related?: RelatedPage[] };
     setPage(result.page);
     setCitations(result.citations);
     setIssues(result.issues);
+    setRelated(result.related ?? []);
   }, [slug]);
 
   useEffect(() => { void load().catch(() => setMessage("加载失败，请刷新重试。")).finally(() => setLoading(false)); }, [load]);
@@ -68,14 +81,14 @@ export default function KnowledgeTargetPage() {
         <Badge variant={FRESHNESS_VARIANT[page.freshness] ?? "secondary"}>{page.freshnessLabel}</Badge>
         {page.track && <Badge variant="outline">{page.track}</Badge>}
       </div>
-      <p className="mt-2 text-xs text-ink-3">修订 {page.revision} · 分析师 {page.coverage?.analysts ?? 0} · 机构 {page.coverage?.firms ?? 0} · 来源 {page.coverage?.reports ?? 0} · {page.coverage?.first_report ?? "起始日期未知"} 至 {page.coverage?.last_report ?? "最近日期未知"} · 更新于 {new Date(page.updatedAt).toLocaleString("zh-CN")}</p>
+      <p className="mt-2 text-xs text-ink-3">修订 {page.revision} · 分析师 {page.coverage?.analysts ?? 0} · 机构 {page.coverage?.firms ?? 0} · 来源 {citations.length} · {page.coverage?.first_report ?? "起始日期未知"} 至 {page.coverage?.last_report ?? "最近日期未知"} · 更新于 {new Date(page.updatedAt).toLocaleString("zh-CN")}</p>
       <p className="mt-1"><Link to={back} className="text-sm text-accent underline-offset-4 hover:underline">返回知识库</Link></p>
     </header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
 
     <Card className="mb-6">
       <CardContent className="pt-5">
-        <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(body(page.bodyMd), siteUrl()).html }} />
+        <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(resolvedBody(page.bodyMd, related), siteUrl()).html }} />
       </CardContent>
     </Card>
 
