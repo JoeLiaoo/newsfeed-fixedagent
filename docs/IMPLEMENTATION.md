@@ -20,7 +20,7 @@
 
 2026-10-24 针对 UI 审查的[控件语义与信息密度维护](logs/2026-10-24-ui-controls-density.md)已随 PR #64 合并（`85784df`）：操作菜单、页内单选切换和主题选择改用 Radix，控件动画改用 Motion，相关图标改用 Lucide；专家、GP 与知识库列表收起重复状态和技术元数据。此项只涉及前端呈现，尚无生产发布记录；不改变 P1～P5 的真实业务验收勾选。
 
-2026-10-24 按用户对 [Issue #65](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/65) 的决定，[PPT 上传收口](logs/2026-10-24-i65-disable-pptx.md)改为只接收 PDF、DOCX、Markdown：知识库与专家上传 API 均拒绝 PPT/PPTX，旧待处理 PPTX 在解压前失败。此维护改动尚待 PR 评审与发布，不改变 P2/P5 的业务验收勾选。
+2026-10-24 按用户对 [Issue #65](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/65) 的决定，[PPT 上传收口](logs/2026-10-24-i65-disable-pptx.md)改为只接收 PDF、DOCX、Markdown：知识库与专家上传 API 均拒绝 PPT/PPTX，旧待处理 PPTX 在解压前失败。PR #69 已于 `e88564a` 合并；尚无生产发布记录，不改变 P2/P5 的业务验收勾选。
 
 ## P0 · 可行性与设计
 
