@@ -1,11 +1,13 @@
 /** Public-data dashboard shell. No network or model calls are made in P0. */
+import { beijingStamp } from "@aihot/contracts/time";
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 }
 
 export function renderSectorPeerDashboard(query: string, generatedAt: Date): string {
   const name = escapeHtml(query);
-  const time = escapeHtml(new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", dateStyle: "medium", timeStyle: "short" }).format(generatedAt));
+  const time = escapeHtml(beijingStamp(generatedAt));
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><meta name="color-scheme" content="light"><title>赛道同业竞争看板 · ${name}</title>
 <style>

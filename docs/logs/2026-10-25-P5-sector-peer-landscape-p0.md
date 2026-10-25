@@ -31,3 +31,11 @@
 - 未在生产或真实员工账号验证目录、预览和下载；未连接公开数据源，也未验证 P1 的事实准确性。`result` 内嵌 HTML 适合当前小型空看板，真实数据接入时需核对列表响应大小。
 - P1：企业／赛道消歧；中国同业边界和公开阶段信号；人民币融资、境内并购及 IPO 事件的来源 URL、时间口径与密度定义；美国同业／融资参考；逐项缺失显示「未披露／未检索到」及来源可达性复核。
 - 评审 PR 后再由独立发布流程部署；本分支不合并、不操作火山云。
+
+## CI 修复（PR #79，2026-10-25）
+
+- 做了什么：PR #79 的 quality 与 postgres-integration 均因架构测试「Beijing time is converted only in contracts/time.ts」失败。`modules/membership/experts/sector-peer-html.ts` 用 `new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", ... })` 自行格式化生成时间，被架构测试判为绕过 `packages/contracts/src/time.ts`。
+- 修改文件：`modules/membership/experts/sector-peer-html.ts` 改为从 `@aihot/contracts/time` 导入 `beijingStamp`，用 `beijingStamp(generatedAt)` 取代 `Intl.DateTimeFormat`，转义仍走 `escapeHtml`。
+- 关键决定：走 contracts 助手而非把文件加入 `CONVERTS_BEIJING_TIME` 白名单；`@aihot/contracts` 已在 `@citic/membership` 的依赖里，不新增依赖。除时间戳来源外未改产品行为，HTML 分区、CSP、离线与「无模拟数字」约束原样保留；时间戳文字按仓库既有 `beijingStamp` 口径显示为「10月25日 08:00（北京时间）」。
+- 最小验证与结果：`node --import ./tests/standalone.ts --test --test-skip-pattern='every table and column' tests/architecture.test.ts` 修复前 12/13（仅北京时失败），修复后 13/13 通过；`node --import ./tests/standalone.ts --test modules/membership/tests/expert-coming-soon.standalone.test.ts modules/membership/tests/experts.standalone.test.ts modules/membership/tests/experts-search.standalone.test.ts` 17/17 通过；`npm run typecheck` 通过；`git diff --check` 通过。
+- 未验证事项、风险与下一步：未重跑完整 CI（依赖网络的 PostgreSQL 集成任务在本地不可全量复现），以 GitHub Actions 重跑结果为准；本分支不合并、不部署。
