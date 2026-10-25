@@ -38,7 +38,10 @@ export default function ExpertsPage() {
   return <main className="mx-auto w-full max-w-5xl px-5 py-8">
     <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
       <h1 className="text-2xl font-semibold tracking-tight text-ink">专家平台</h1>
-      <Button asChild><IntentLink to="/experts/new"><Plus size={16} aria-hidden="true" />新增专家</IntentLink></Button>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline"><IntentLink to="/tasks">任务记录</IntentLink></Button>
+        <Button asChild><IntentLink to="/experts/new"><Plus size={16} aria-hidden="true" />新增专家</IntentLink></Button>
+      </div>
     </header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
     {loading
