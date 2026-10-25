@@ -196,17 +196,35 @@ export function isBranchType(typeName: string | null | undefined) {
 export function markBranchRelations(candidates: EntityCandidate[]): EntityCandidate[] {
   return candidates.map(candidate => {
     const name = candidate.name.trim();
+    const normalizedName = normalizeCompanyName(name);
     const parent = candidates
-      .filter(other => other.id !== candidate.id && other.name.trim().length < name.length && name.startsWith(other.name.trim()))
-      .sort((left, right) => right.name.trim().length - left.name.trim().length)[0];
+      .filter(other => {
+        if (other.id === candidate.id) return false;
+        const parentName = other.name.trim();
+        const normalizedParentName = normalizeCompanyName(parentName);
+        return normalizedParentName.length < normalizedName.length && normalizedName.startsWith(normalizedParentName);
+      })
+      .sort((left, right) => normalizeCompanyName(right.name).length - normalizeCompanyName(left.name).length)[0];
     return { ...candidate, branchOf: parent?.name.trim() ?? null };
   });
 }
 
+/** Normalize spacing and common registry punctuation before comparing registered-name prefixes. */
+function normalizeCompanyName(value: string) {
+  return value.trim().replace(/[\s·•,，:：()（）]/g, "");
+}
+
+/** The short employee-facing relation label for a candidate among the choices in one search. */
+export function companyRelationLabel(candidate: EntityCandidate, candidates: EntityCandidate[]) {
+  if (candidate.branchOf || isBranchType(candidate.typeName)) return "分支机构";
+  if (candidates.some(other => other.id !== candidate.id && other.branchOf === candidate.name.trim())) return "母公司候选";
+  return null;
+}
+
 /** Whether a candidate's registered name carries the name the employee typed. */
 export function carriesQuery(candidateName: string, query: string) {
-  const name = candidateName.trim();
-  const typed = query.trim();
+  const name = normalizeCompanyName(candidateName);
+  const typed = normalizeCompanyName(query);
   if (!typed || !name) return false;
   return name === typed || name.startsWith(typed);
 }
@@ -217,10 +235,15 @@ export function carriesQuery(candidateName: string, query: string) {
  * branches built on it, because it is the shorter name), then the rest. The employee still confirms.
  */
 export function rankCompanyCandidates(candidates: EntityCandidate[], query: string): EntityCandidate[] {
-  const typed = query.trim();
+  const typed = normalizeCompanyName(query);
+  const parentNames = new Set(candidates.map(candidate => candidate.branchOf).filter((name): name is string => Boolean(name)).map(normalizeCompanyName));
   const scored = candidates.map(candidate => {
-    const name = candidate.name.trim();
-    const tier = name === typed ? 0 : name.startsWith(typed) ? 1 : typed.startsWith(name) ? 2 : 3;
+    const name = normalizeCompanyName(candidate.name);
+    const isParent = parentNames.has(name);
+    const exact = name === typed;
+    const carriesQuery = Boolean(typed && name.startsWith(typed));
+    const isBranch = Boolean(candidate.branchOf) || isBranchType(candidate.typeName);
+    const tier = isParent ? 0 : exact && !isBranch ? 1 : carriesQuery && !isBranch ? 2 : !isBranch ? 3 : 4;
     return { candidate, tier, length: name.length };
   });
   return scored

@@ -1,9 +1,12 @@
 // The subject search: the provider's answer is read as it is, a name is tried in its shorter forms
 // when the provider matches nothing, and the profile is read over the whole record.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { candidateSearchOutcome, carriesQuery, hasNotFoundMarker, isBranchType, mapCompanyCandidates, markBranchRelations, parentNameCandidates, parseInvestmentPage, querySelectedCompanyProfile, relaxedCompanyKeywords, XINHUA_ALL_TIME } from "../experts/data.ts";
+import { candidateSearchOutcome, carriesQuery, companyRelationLabel, hasNotFoundMarker, isBranchType, mapCompanyCandidates, markBranchRelations, parentNameCandidates, parseInvestmentPage, querySelectedCompanyProfile, rankCompanyCandidates, relaxedCompanyKeywords, XINHUA_ALL_TIME } from "../experts/data.ts";
 import { searchCompanyCandidates } from "../experts/worker.ts";
+
+const expertDetailSource = readFileSync(new URL("../pages/expert-detail.tsx", import.meta.url), "utf8");
 
 test("the candidate search reads the provider's list and knows an answer without one", () => {
   const live = candidateSearchOutcome({ result: { total: 2, results: [{ company_id: "a", company_name: "甲" }], pagination: { limit: 10, offset: 0, count: 2, has_more: false, next_offset: null } } });
@@ -120,6 +123,36 @@ test("a branch is told from the parent it hangs on", () => {
   assert.equal(isBranchType("分公司"), true);
   assert.equal(isBranchType("有限责任公司"), false);
   assert.equal(isBranchType(null), false);
+});
+
+test("宁德时代 parent candidate ranks ahead of a branch-heavy result and gets visible relations", async () => {
+  const parentName = "宁德时代新能源科技股份有限公司";
+  const parent = { company_id: "parent", company_name: parentName, credit_code: "91350900587527783P", company_type_name: "股份有限公司" };
+  const branches = Array.from({ length: 12 }, (_, index) => ({ company_id: `branch-${index}`, company_name: `${parentName}${index + 1}号分公司`, company_type_name: "分公司" }));
+  const call = async (_tool: string, args: Record<string, unknown>) => {
+    const keyword = String(args.keyword);
+    const offset = Number(args.offset);
+    if (keyword === "宁德时代" && offset === 0) return { results: branches.slice(0, 10) };
+    if (keyword === "宁德时代" && offset === 10) return { results: branches.slice(10) };
+    if (keyword === parentName) return { results: [parent] };
+    return { results: [] };
+  };
+  const found = await searchCompanyCandidates(call as never, "宁德时代");
+  assert.equal(found.candidates[0]?.creditCode, "91350900587527783P", "母公司必须排在分支候选之前");
+  assert.equal(found.candidates.length, 12, "候选数仍按页面上限截取");
+  assert.equal(companyRelationLabel(found.candidates[0]!, found.candidates), "母公司候选");
+  assert.equal(companyRelationLabel(found.candidates[1]!, found.candidates), "分支机构");
+  assert.match(expertDetailSource, /companyRelationLabel\(candidate, task\.result\?\.candidates/, "候选选择器渲染关系标签");
+});
+
+test("ranking promotes an identified parent above branches when registry names include punctuation", () => {
+  const related = markBranchRelations([
+    { id: "p", name: "宁德时代新能源科技股份有限公司", status: null, creditCode: "91350900587527783P", address: null, startDate: null, typeName: "股份有限公司", branchOf: null },
+    { id: "b", name: " 宁德时代新能源科技股份有限公司 · 福州分公司 ", status: null, creditCode: null, address: null, startDate: null, typeName: "分公司", branchOf: null },
+  ]);
+  const ranked = rankCompanyCandidates(related, "宁德时代");
+  assert.equal(ranked[0]?.id, "p");
+  assert.equal(ranked[1]?.branchOf, "宁德时代新能源科技股份有限公司");
 });
 
 test("the provider's 'no such record' answer is read as an answer, not as a missing list", () => {

@@ -116,8 +116,8 @@ export async function searchCompanyCandidates(call: XinhuaCall, name: string): P
     if (rowsSeen) throw new ExpertProviderError("xinhua_entity_id_missing");
     throw new ExpertProviderError("xinhua_no_candidates");
   }
-  const ranked = rankCompanyCandidates([...found.values()], typed);
-  const candidates = markBranchRelations(ranked).slice(0, MAX_CANDIDATES);
+  const related = markBranchRelations([...found.values()]);
+  const candidates = rankCompanyCandidates(related, typed).slice(0, MAX_CANDIDATES);
   // The candidates are near matches when none of them carries the name the employee typed.
   const approximate = !candidates.some(candidate => carriesQuery(candidate.name, typed));
   return { candidates, approximate };
