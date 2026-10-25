@@ -3,6 +3,7 @@
 ## 从这里开始
 
 - [项目 README](../README.md)：本地启动、各阶段代码与上线状态。
+- [员工端更新日志补齐](logs/2026-10-25-employee-changelog.md)：按已合并功能与用户提供的生产版本，补录员工可见变更及保留的验收边界。
 - [产品需求基线](PLAN.md)：v0.81；需求讨论与确认范围，不代表功能已验收。
 - [本轮进度核查与发布准备](logs/2026-10-24-progress-check-release-readiness.md)：本地专家、GP、通知、知识库与临时库恢复检查结果，列明生产发布和业务验收缺口。
 - [计划与实施状态核对](logs/2026-10-24-plan-implementation-actual-state.md)：按 `main` 已合并代码及最新生产发布核对专家、GP 网页能力和待验收边界。
