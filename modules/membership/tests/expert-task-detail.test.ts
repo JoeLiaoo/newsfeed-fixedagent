@@ -105,8 +105,11 @@ test("a single expert task is read by its owner alone, with the row the list ret
   assert.equal(failed.errorCode, "xinhua_no_candidates");
   assert.equal(failed.errorMessage, "未匹配到该名称的企业主体。");
 
-  // A task past its retention is gone for its owner too.
+  // A generated artifact keeps its task visible even if the original task clock expires.
   await sql`UPDATE member_expert_tasks SET expires_at=now()-interval '1 second' WHERE id=${taskId}`;
+  assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${taskId}`, headers: { cookie: cookies[0]!, ...common } })).statusCode, 200);
+  // Once both clocks expire, the task is gone for its owner too.
+  await sql`UPDATE member_expert_artifacts SET expires_at=now()-interval '1 second' WHERE task_id=${taskId}`;
   const expired = await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${taskId}`, headers: { cookie: cookies[0]!, ...common } });
   assert.equal(expired.statusCode, 404);
 });

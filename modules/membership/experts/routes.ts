@@ -5,7 +5,7 @@ import { enqueueOn } from "@aihot/backend/jobs/queue";
 import type { MemberSession } from "../server.ts";
 import { EXPERT_QUEUE } from "./queue.ts";
 import { parseSkillUpload, expertSlug, executionMode } from "./import.ts";
-import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, QUERY_EXPERT_SLUGS, SECTOR_PEER_EXPERT_SLUG } from "./catalog.ts";
+import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, QUERY_EXPERT_SLUGS, SECTOR_PEER_EXPERT_SLUG, XINHUA_ALLOWED_TOOLS, XINHUA_BASE_TOOLS } from "./catalog.ts";
 import { seedBuiltinExperts } from "./seed.ts";
 import { parseTaskMaterials, MAX_TOTAL_MATERIAL_BYTES } from "./materials.ts";
 import { getTaskArtifact } from "./worker.ts";
@@ -32,6 +32,7 @@ function taskId() { return randomBytes(16).toString("hex"); }
 
 /** The list preview is enough to recognise a task without returning the full private brief. */
 const NOTES_PREVIEW = 200;
+const taskVisibleUntil = sql`GREATEST(t.expires_at, COALESCE((SELECT max(a.expires_at) FROM member_expert_artifacts a WHERE a.task_id=t.id), t.expires_at))`;
 
 export function registerExpertRoutes(app: FastifyInstance, authenticate: Authenticate) {
   app.get("/api/v1/membership/experts", async (req, reply) => {
@@ -40,7 +41,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     if (!user) return reply.code(401).send({ error: "login_required" });
     await seedBuiltinExperts();
     const experts = await sql<{ slug: string; name: string; description: string; version: string; status: string; missing_dependencies: string[]; execution_mode: string; created_at: Date }[]>`
-      SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${PANORAMA_EXPERT_SLUG} THEN 'xinhua_panorama' WHEN slug=${FRONTIER_PODCAST_EXPERT_SLUG} THEN 'podcast_search' WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
+      SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${PANORAMA_EXPERT_SLUG} OR manifest->'tools' @> ${sql.json([...XINHUA_ALLOWED_TOOLS])}::jsonb THEN 'xinhua_panorama' WHEN slug=${FRONTIER_PODCAST_EXPERT_SLUG} THEN 'podcast_search' WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json([...XINHUA_BASE_TOOLS])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
       WHERE status <> ${HIDDEN_EXPERT_STATUS} AND (status IN ('available', ${COMING_SOON_EXPERT_STATUS}) OR owner_id = ${user.id} OR ${user.role === "admin"})
       ORDER BY (status = 'available') DESC, (slug = ${PANORAMA_EXPERT_SLUG}) DESC, (slug = ${SECTOR_PEER_EXPERT_SLUG}) DESC, (slug = ${FRONTIER_PODCAST_EXPERT_SLUG}) DESC, created_at DESC`;
     return { experts };
@@ -79,11 +80,11 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const rows = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage,
         json_build_object('companyName', t.input->>'companyName', 'query', t.input->>'query', 'notes', left(coalesce(t.input->>'notes',''), ${NOTES_PREVIEW}), 'notesTruncated', length(coalesce(t.input->>'notes','')) > ${NOTES_PREVIEW}) AS input,
         t.selected_entity AS "selectedEntity", t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
-        t.expires_at AS "expiresAt",
+        ${taskVisibleUntil} AS "expiresAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
         COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
-      WHERE t.user_id=${user.id} AND t.expires_at > now() ${slugFilter} ${stateFilter}
+      WHERE t.user_id=${user.id} AND ${taskVisibleUntil} > now() ${slugFilter} ${stateFilter}
       ORDER BY t.created_at DESC, t.id DESC LIMIT ${limit + 1} OFFSET ${offset}`;
     return { tasks: rows.slice(0, limit), pagination: taskPagination(limit, offset, rows.length) };
   });
@@ -94,11 +95,11 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     if (!user) return reply.code(401).send({ error: "login_required" });
     const { id } = req.params as { id: string };
     const tasks = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
-        t.selected_entity AS "selectedEntity", t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt", t.expires_at AS "expiresAt",
+        t.selected_entity AS "selectedEntity", t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt", ${taskVisibleUntil} AS "expiresAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
         COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
-      WHERE t.id=${id} AND t.user_id=${user.id} AND t.expires_at > now()`;
+      WHERE t.id=${id} AND t.user_id=${user.id} AND ${taskVisibleUntil} > now()`;
     if (!tasks[0]) return reply.code(404).send({ error: "task_not_found" });
     return { task: tasks[0] };
   });

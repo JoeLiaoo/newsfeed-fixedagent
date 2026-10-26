@@ -3,6 +3,7 @@ import { sql, type Db } from "@aihot/backend/db";
 import { listedCondition } from "@aihot/backend/publication/scope";
 import { beijingDate, beijingTime } from "@aihot/contracts/time";
 import { dueNotificationKinds, offDay } from "../gp/core.ts";
+import { employeeSource } from "../gp/source.ts";
 import { getDailyDigest, type DigestItem } from "./digest.ts";
 import {decryptSecret,ilinkConfigured,ilinkErrorKind,sendIlinkText} from "./ilink.ts";
 
@@ -16,6 +17,12 @@ type SourceSegment={key:string;start:number;end:number};
 type MessagePart={payload:string;sources:SourceSegment[]};
 type RenderCandidate=Pick<Candidate,"key"|"text">;
 const MAX_NOTIFICATION_LENGTH=1600;
+
+function gpNotificationText(item:{gp_name:string;investee_name:string;approved_event_date:string;approved_source_url:string;sector_tags:string[]}):string{
+  const source=employeeSource(item.approved_source_url);
+  return "• "+item.gp_name+" → "+item.investee_name+"（"+item.approved_event_date+"）\n"+
+    item.sector_tags.join("、")+"\n"+(source.url??(source.placeholder?"演示/导入占位 · 无可核对来源":"来源待补充"));
+}
 
 function dateInfo(now=new Date()) {
   const day=beijingDate(now);
@@ -95,13 +102,10 @@ export async function generateDueNotifications(now=new Date()) {
         const overlap=new Date(Math.max(minimum.getTime(),since.getTime()-48*60*60*1000));
         const observations=await sql<{id:string;gp_name:string;investee_name:string;approved_event_date:string;approved_source_url:string;sector_tags:string[]}[]>`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.approved_event_date::text,i.approved_source_url,i.sector_tags
           FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
-          WHERE i.status='verified' AND g.status='active' AND i.approved_at>=${overlap} AND i.approved_at<${cutoff}
-            AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id} AND t.tag=ANY(i.sector_tags))
+          WHERE i.status='verified' AND g.status='active' AND g.entity_role='gp' AND i.approved_at>=${overlap} AND i.approved_at<${cutoff}
+            AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id} AND t.tag=ANY(i.sector_tags) AND t.tag<>'战略配售')
           ORDER BY i.approved_at,i.id`;
-        for(const o of observations) candidates.push({
-          key:o.id,seenKey:"gp:"+o.id,text:"• "+o.gp_name+" → "+o.investee_name+"（"+o.approved_event_date+"）\n"+
-            o.sector_tags.join("、")+"\n"+o.approved_source_url,
-        });
+        for(const o of observations) candidates.push({key:o.id,seenKey:"gp:"+o.id,text:gpNotificationText(o)});
       }else{
         const digest=await getDailyDigest(user.id,day,now);
         if(!digest) continue;
@@ -168,8 +172,8 @@ async function currentSource(key:string,kind:"news"|"gp",userId:string,at:Date):
   const [item]=await sql<{gp_name:string;investee_name:string;approved_event_date:string;approved_source_url:string;sector_tags:string[]}[]>`SELECT g.canonical_name AS gp_name,i.investee_name,i.approved_event_date::text,i.approved_source_url,i.sector_tags
     FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
     WHERE i.id=${key} AND i.status='verified' AND g.status='active' AND g.entity_role='gp'
-      AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${userId} AND t.tag=ANY(i.sector_tags))`;
-  return item?"• "+item.gp_name+" → "+item.investee_name+"（"+item.approved_event_date+"）\n"+item.sector_tags.join("、")+"\n"+item.approved_source_url:null;
+      AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${userId} AND t.tag=ANY(i.sector_tags) AND t.tag<>'战略配售')`;
+  return item?gpNotificationText(item):null;
 }
 
 async function cancelAndRelease(id:string,errorCode:string,db?:Db):Promise<void>{

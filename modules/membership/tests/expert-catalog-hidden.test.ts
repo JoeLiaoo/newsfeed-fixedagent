@@ -7,7 +7,7 @@ import { stopBossNow } from "@aihot/backend/jobs/queue";
 import { buildApp } from "../../../apps/api/src/app.ts";
 import { SERVER_MODULES } from "../../../site/modules/server.ts";
 import { tag } from "../../../tests/setup.ts";
-import { EXPERT_SLUG, PANORAMA_EXPERT_SLUG } from "../experts/catalog.ts";
+import { EXPERT_SLUG, PANORAMA_EXPERT_SLUG, XINHUA_ALLOWED_TOOLS } from "../experts/catalog.ts";
 import { runExpertTask } from "../experts/worker.ts";
 
 const THREE_TOOL_SKILL = [
@@ -73,6 +73,16 @@ test("the one-layer builtin is hidden while the panorama and the three-tool skil
   const afterImport = (await (await app.inject({ method: "GET", url: "/api/v1/membership/experts", headers: { cookie, ...common } })).json() as { experts: Array<{ slug: string; execution_mode: string }> }).experts;
   assert.ok(!afterImport.some(expert => expert.slug === EXPERT_SLUG), "导入不把一层专家放回目录");
   assert.ok(afterImport.some(expert => expert.slug === importedExpert.slug && expert.execution_mode === "xinhua_trial"), "只声明三个基础工具的自定义技能仍是一层对外投资核查模式");
+
+  const eightToolSkill = THREE_TOOL_SKILL.replace("name: 三工具核查", "name: 八工具全景").replace("# 三工具核查", "# 八工具全景")
+    .replace("    - get_direct_investment", ["    - get_direct_investment", ...XINHUA_ALLOWED_TOOLS.slice(3).map(tool => `    - ${tool}`)].join("\n"));
+  const panoramaImport = await app.inject({ method: "POST", url: "/api/v1/membership/experts/import", headers: { cookie, ...common }, payload: { fileName: "eight-tools.md", base64: Buffer.from(eightToolSkill, "utf8").toString("base64") } });
+  assert.equal(panoramaImport.statusCode, 201);
+  const panoramaExpert = (await panoramaImport.json() as { expert: { slug: string; status: string; executionMode: string } }).expert;
+  assert.equal(panoramaExpert.status, "available");
+  assert.equal(panoramaExpert.executionMode, "xinhua_panorama");
+  const panoramaCatalog = (await (await app.inject({ method: "GET", url: "/api/v1/membership/experts", headers: { cookie, ...common } })).json() as { experts: Array<{ slug: string; execution_mode: string }> }).experts;
+  assert.equal(panoramaCatalog.find(expert => expert.slug === panoramaExpert.slug)?.execution_mode, "xinhua_panorama");
 
   // A task that was created before the expert was hidden still runs: the worker does not refuse it.
   const user = (await sql<{ id: string }[]>`SELECT id FROM member_users WHERE username=${account.username}`)[0]!;

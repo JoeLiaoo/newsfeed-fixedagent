@@ -144,10 +144,29 @@ test("notification editions share the web digest and revalidate subscriptions an
   const gpId=randomUUID();
   await sql`INSERT INTO member_gp_watchlist(id,canonical_name,entity_id,entity_role,status,source_ref,reviewed_by)
     VALUES(${gpId},${"GP-"+suffix},${"entity-"+suffix},'gp','active','https://example.test/gp',${userId})`;
+  await sql`UPDATE member_weixin_bindings SET bound_at=now()-interval '2 days' WHERE user_id=${userId}`;
   const investmentIds=[randomUUID(),randomUUID()];
   for(const [index,id] of investmentIds.entries()) await sql`INSERT INTO member_gp_investments
     (id,gp_id,investee_key,investee_name,raw_evidence,status,sector_tags,approved_event_date,approved_source_url,approved_by,approved_at)
-    VALUES(${id},${gpId},${"key-"+index},${"被投企业"+index},${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-20','https://example.test/source',${userId},now())`;
+    VALUES(${id},${gpId},${"key-"+index},${"被投企业"+index},${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-20',${index===0?'https://example.org/demo':'https://example.test/source'},${userId},now()-interval '1 hour')`;
+  await sql`UPDATE member_notification_settings SET gp_enabled=true,gp_version=gp_version+1 WHERE user_id=${userId}`;
+  const gpFlag=process.env.P3_NOTIFICATIONS_ENABLED;
+  process.env.P3_NOTIFICATIONS_ENABLED="true";
+  try { await generateDueNotifications(beijingAt(date,"23:59")); }
+  finally { if(gpFlag===undefined)delete process.env.P3_NOTIFICATIONS_ENABLED;else process.env.P3_NOTIFICATIONS_ENABLED=gpFlag; }
+  const gpParts=await sql<{id:string;payload:string;part_index:number;subscription_version:number}[]>`SELECT id,payload,part_index,subscription_version
+    FROM member_notification_outbox WHERE user_id=${userId} AND kind='gp' AND subscription_version=2 ORDER BY part_index`;
+  assert(gpParts.some(part=>part.payload.includes("演示/导入占位 · 无可核对来源")));
+  assert(gpParts.some(part=>part.payload.includes("https://example.test/source")));
+  assert(gpParts.every(part=>!part.payload.includes("example.org")));
+  const placeholderPart=gpParts.find(part=>part.payload.includes("演示/导入占位 · 无可核对来源"))!;
+  await sql`UPDATE member_notification_outbox SET status='sending' WHERE id=${placeholderPart.id}`;
+  const refreshed=await revalidatePayload({id:placeholderPart.id,user_id:userId,kind:"gp",payload:placeholderPart.payload,attempts:1,binding_version:1,subscription_version:2,local_date:date,part_index:placeholderPart.part_index,sources_tracked:true});
+  assert(refreshed?.includes("演示/导入占位 · 无可核对来源"));
+  assert(!refreshed?.includes("example.org"));
+  await sql`DELETE FROM member_notification_seen WHERE outbox_id=ANY(${sql.array(gpParts.map(part=>part.id))}::text[])`;
+  await sql`DELETE FROM member_notification_outbox WHERE id=ANY(${sql.array(gpParts.map(part=>part.id))}::text[])`;
+  await sql`UPDATE member_notification_settings SET gp_enabled=false WHERE user_id=${userId}`;
   for(const [index,id] of investmentIds.entries()){
     const outboxId=randomUUID();
     await sql`INSERT INTO member_notification_outbox(id,user_id,kind,local_date,binding_version,subscription_version,part_index,payload,payload_sha256,window_end_at)

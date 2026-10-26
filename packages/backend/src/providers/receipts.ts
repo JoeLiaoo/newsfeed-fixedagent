@@ -403,7 +403,7 @@ export async function completeReceipt(db: Db, receiptId: number): Promise<void> 
   await db`UPDATE receipts SET status = 'completed', completed_at = coalesce(completed_at, now()), updated_at = now() WHERE id = ${receiptId}`;
 }
 
-/** Redact task-owned response bodies after their seven-day artifact/task retention period. */
+/** Redact task-owned response bodies after seven days, independently of artifact visibility. */
 export async function redactMembershipTaskResponses(db: Db, taskIds: readonly string[], now = new Date()): Promise<number> {
   if (!taskIds.length) return 0;
   const rows = await db`UPDATE receipts SET response=NULL,response_redacted_at=${now}
