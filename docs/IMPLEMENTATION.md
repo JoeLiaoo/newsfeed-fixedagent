@@ -95,6 +95,8 @@ P2 已交付专家导入、依赖状态、私有任务材料、持久化队列�
 
 2026-10-26 员工任务入口合并：专家平台页头只保留「我的任务与产物」，`/account/artifacts` 每行新增「查看任务」进入 `/tasks/:id`，旧 `/tasks` 地址重定向到 `/account/artifacts`（保留分页参数），任务详情页与相关接口不变。本项是维护工作，不新增勾选，P2-05 仍保持 `[ ]`，见[工作日志](logs/2026-10-26-tasks-ui-36kr-feed.md)。
 
+2026-10-27 [任务详情阅读区与下载格式维护](logs/2026-10-27-P2-task-detail-flat-b.md)：成功任务在页头直接显示状态、到期时间和下载入口，随后展示结果；任务元数据和材料移到结果后，文本预览随页面滚动。任务与产物列表按当前 worker 的实际下载格式标明 HTML 或 Markdown。HTML 仍以空 sandbox 的 iframe 展示，双滚动需真机复核；未改变接口、鉴权或七天保留，也不新增 P2 验收勾选。
+
 2026-10-24 针对 [Issue #41](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/41) 与 [#42](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/42) 增加任务私有材料上传、本人下载与提前删除、七天清理，以及自定义专家对平台固定新华财经三工具的受控调用。未适配的其他工具和未发布专项 skill 仍阻止运行；新增链路尚待真实环境验收，见 [P2 适配说明](P2-EXPERT-ADAPTER.md) 与[工作日志](logs/2026-10-24-P2-P5-backend-hardening.md)。
 
 专家目录、任务提交、导入、状态与产物页面已使用相同的组件体系，见 [P1/P2 前端组件整改](logs/2026-10-21-P1-P2-ui.md)。

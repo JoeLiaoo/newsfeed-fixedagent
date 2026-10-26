@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS } from "../experts/catalog.ts";
+import { artifactDownloadLabel, EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS, FRONTIER_PODCAST_EXPERT_SLUG, LISTED_FUND_PARTICIPATION_EXPERT_SLUG, PANORAMA_EXPERT_SLUG, SECTOR_PEER_EXPERT_SLUG } from "../experts/catalog.ts";
 
 const moduleSource = readFileSync(new URL("../module.ts", import.meta.url), "utf8");
 const page = readFileSync(new URL("../pages/task-detail.tsx", import.meta.url), "utf8");
@@ -49,7 +49,8 @@ test("the task page reads the one task it shows, and keeps the states of the emp
   assert.match(page, /\/artifact`/, "可下载产物");
   assert.doesNotMatch(page, /\/checkpoint|下载采集台账/, "员工详情页不暴露内部采集台账");
   assert.match(page, /srcDoc=\{task\.result\.html\} sandbox=""/, "成功的全景任务显示隔离的 HTML 预览");
-  assert.match(artifactsPage, /下载 Markdown 产物/, "任务与产物页明确下载 Markdown");
+  assert.match(artifactsPage, /artifactDownloadLabel\(task\.expertSlug\)/, "列表按实际产物格式命名下载");
+  assert.match(page, /artifactDownloadLabel\(task\.expertSlug\)/, "详情与列表使用相同格式文案");
   assert.match(page, /companyRelationLabel\(candidate, candidates, task\.result\?\.query/, "任务详情的主体选择复用相同的母公司／分支标签");
   assert.match(page, /\/materials\/\$\{material\.id\}/, "可下载材料");
   assert.match(page, /method: "DELETE"/, "任务结束后可删除材料");
@@ -61,7 +62,18 @@ test("query expert input is visible on the task page without changing company ta
   assert.match(page, /查询：\{query\}/);
   assert.match(page, /核查主体：\{task\.input\.companyName\}/);
   assert.match(page, /!task\.input\?\.companyName && !query && !task\.input\?\.region && !notes/, "有查询词、地区或任务要求时不能显示空输入");
-  assert.match(page, /SECTOR_PEER_EXPERT_SLUG \? " HTML 看板"/, "看板产物按实际 HTML 格式命名");
+  assert.equal(artifactDownloadLabel(SECTOR_PEER_EXPERT_SLUG), "下载 HTML 看板");
+  for (const slug of [FRONTIER_PODCAST_EXPERT_SLUG, PANORAMA_EXPERT_SLUG, LISTED_FUND_PARTICIPATION_EXPERT_SLUG, "custom-expert"])
+    assert.equal(artifactDownloadLabel(slug), "下载 Markdown 产物");
+});
+
+test("successful tasks read before metadata without an outer result card or fixed text scroll", () => {
+  assert.ok(page.indexOf('aria-label="任务结果"') < page.indexOf('>任务信息</summary>'));
+  assert.match(page, /srcDoc=\{task\.result\.html\} sandbox=""/);
+  assert.doesNotMatch(page, /max-h-96/);
+  assert.doesNotMatch(page, /<Card/);
+  assert.match(page, /task\.result\?\.panorama\?\.incomplete/);
+  assert.match(page, /IntentLink to="\/account\/artifacts"/);
 });
 
 test("the employee sees capability words, never the service or model behind the task", () => {

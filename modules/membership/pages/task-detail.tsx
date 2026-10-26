@@ -4,11 +4,10 @@ import { ArrowLeft, Download, RefreshCw, RotateCcw, Trash2, XCircle } from "luci
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@aihot/web/components/member-ui/card";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS, QUERY_EXPERT_SLUGS, SECTOR_PEER_EXPERT_SLUG } from "../experts/catalog.ts";
+import { artifactDownloadLabel, EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS, QUERY_EXPERT_SLUGS } from "../experts/catalog.ts";
 import { companyRelationLabel } from "../experts/data.ts";
 
 export const handle: Screen = { tab: "experts", name: "任务" };
@@ -121,83 +120,86 @@ export default function TaskDetailPage() {
   const candidates = task.result?.candidates ?? [];
   const notes = task.input?.notes?.trim() ?? "";
   const query = QUERY_EXPERT_SLUGS.has(task.expertSlug) ? task.input?.query?.trim() ?? "" : "";
+  const succeeded = task.state === "succeeded";
+  const subject = query || task.input?.companyName || task.input?.region || notes.split("\n")[0];
 
   return <main className="mx-auto w-full max-w-4xl px-5 py-8">
-    <header className="mb-6">
-      <Button asChild variant="outline" size="sm" className="mb-4"><IntentLink to="/experts"><ArrowLeft size={14} aria-hidden="true" />专家平台</IntentLink></Button>
+    <header className="mb-5 border-b border-line-soft pb-5">
+      <nav className="mb-4 flex flex-wrap gap-2" aria-label="任务导航">
+        <Button asChild variant="outline" size="sm"><IntentLink to="/account/artifacts"><ArrowLeft size={14} aria-hidden="true" />我的任务与产物</IntentLink></Button>
+        <Button asChild variant="ghost" size="sm"><IntentLink to="/experts">专家平台</IntentLink></Button>
+      </nav>
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-1 text-2xl font-semibold tracking-tight text-ink">
           <IntentLink to={`/experts/${encodeURIComponent(task.expertSlug)}`} className="underline-offset-4 hover:underline">{task.expertName}</IntentLink>
         </h1>
         <Badge variant={EXPERT_TASK_STATE_VARIANTS[task.state] ?? "secondary"}>{EXPERT_TASK_STATE_LABELS[task.state] ?? task.state}</Badge>
       </div>
-      <p className="mt-2 text-xs text-ink-3">
-        步骤：{EXPERT_TASK_STAGE_LABELS[task.stage] ?? task.stage} · 创建 {when(task.createdAt)} · 更新 {when(task.updatedAt)} · 到期清理 {when(task.expiresAt)} · {task.selectedEntity ? `检索尝试 ${task.executionAttempts - task.confirmedAttempts}/3 · 执行尝试 ${task.confirmedAttempts}/3` : task.state === "waiting_input" ? `检索尝试 ${task.executionAttempts}/3` : `执行尝试 ${task.executionAttempts}/3`}
-      </p>
+      {subject && <p className="mt-2 break-words text-sm text-ink-2">{subject}</p>}
+      <p className="mt-2 text-xs text-ink-3">到期清理 {when(task.expiresAt)}</p>
+      {succeeded && <div className="mt-3 flex flex-wrap gap-2">
+        {task.hasArtifact && <Button asChild variant="outline" size="sm"><a href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}><Download size={14} aria-hidden="true" />{artifactDownloadLabel(task.expertSlug)}</a></Button>}
+        <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void load()}><RefreshCw size={14} aria-hidden="true" />刷新</Button>
+      </div>}
     </header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
 
-    <div className="grid gap-6">
-      <Card>
-        <CardHeader><CardTitle>任务信息</CardTitle></CardHeader>
-        <CardContent className="grid gap-3 text-sm">
-          {task.input?.companyName ? <p className="text-ink-2">核查主体：{task.input.companyName}</p> : null}
-          {query ? <p className="break-words text-ink-2">查询：{query}</p> : null}
-          {notes ? <p className="max-h-40 overflow-auto whitespace-pre-wrap rounded-control bg-bg-sunk p-3 text-xs leading-relaxed text-ink-2">{notes}</p> : null}
-          {task.input?.region ? <p className="text-ink-2">地区：{task.input.region} · 报告期：{task.input.startDate ?? "未提供"} 至 {task.input.endDate ?? "未提供"}</p> : null}
-          {task.input?.stockCodes?.length ? <p className="break-words text-ink-2">证券代码：{task.input.stockCodes.join("、")}</p> : null}
-          {!task.input?.companyName && !query && !task.input?.region && !notes ? <p className="text-ink-3">没有填写输入内容。</p> : null}
-          <p className="text-xs text-ink-3">任务编号 {task.id}</p>
-        </CardContent>
-      </Card>
-
+    <div className="grid min-w-0 gap-6">
       {isFailed && <Alert variant="destructive">
         <p className="font-medium">任务未完成</p>
         <p className="mt-1">{EXPERT_TASK_ERROR_LABELS[task.errorCode ?? ""] ?? task.errorMessage ?? "任务未完成，请重试。"}</p>
       </Alert>}
 
-      {task.result?.panorama?.incomplete && <Alert>
+      {succeeded && task.result?.panorama?.incomplete && <Alert>
         结果不完整：{task.result.panorama.gapCount} 项核实缺口{task.result.panorama.limits.length ? `；达到上限：${task.result.panorama.limits.join("、")}` : ""}。请先查看报告中的缺口与未覆盖关系。
       </Alert>}
 
-      <Card>
-        <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>结果</CardTitle>
-          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void load()}><RefreshCw size={14} aria-hidden="true" />刷新</Button>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          {task.state === "waiting_input" && <div className="grid gap-2">
+      {task.state === "waiting_input" && <section className="grid gap-2" aria-label="选择企业主体">
             <p className="text-sm">请选择正确的企业主体，确认后系统才会继续：</p>
             {task.result?.approximate && <p className="text-xs text-ink-3">未匹配到完全一致的名称，以下为近似候选，请确认主体后再继续。</p>}
             {candidates.length === 0 && <p className="text-sm text-ink-3">没有可选主体，请回到专家页重新提交。</p>}
             {candidates.map(candidate => <Button key={candidate.id} type="button" variant="outline" disabled={busy} className="h-auto justify-start whitespace-normal px-3 py-3 text-left" onClick={() => void selectEntity(candidate.id)}><span><span className="flex flex-wrap items-center gap-2 font-medium">{candidate.name}{companyRelationLabel(candidate, candidates, task.result?.query ?? task.input?.companyName ?? task.input?.query ?? "", task.result?.approximate) && <Badge variant="secondary">{companyRelationLabel(candidate, candidates, task.result?.query ?? task.input?.companyName ?? task.input?.query ?? "", task.result?.approximate)}</Badge>}</span><span className="mt-1 block text-xs font-normal text-ink-3">{candidate.status ?? "状态未知"} · {candidate.address ?? "地址未提供"} · {candidate.creditCode ?? "统一代码未提供"}</span></span></Button>)}
-          </div>}
-          {task.result?.format === "html" && task.result.html && <iframe title={task.expertName} srcDoc={task.result.html} sandbox="" className="h-[720px] w-full rounded-card border border-line bg-white" />}
-          {task.result?.preview && <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-control bg-bg-sunk p-3 text-xs leading-relaxed text-ink-2">{task.result.preview}</pre>}
-          {!task.result?.preview && !task.result?.html && task.state !== "waiting_input" && <p className="text-sm text-ink-3">{active ? `任务进行中，当前步骤：${EXPERT_TASK_STAGE_LABELS[task.stage] ?? task.stage}。` : task.state === "succeeded" ? "任务已完成，产物可下载。" : "任务没有产出结果。"}</p>}
-        </CardContent>
-      </Card>
+      </section>}
 
-      <Card>
-        <CardHeader><CardTitle>产物与材料</CardTitle></CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="flex flex-wrap gap-2">
-            {task.hasArtifact && <Button asChild variant="outline" size="sm"><a href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}><Download size={14} aria-hidden="true" />下载{task.expertSlug === SECTOR_PEER_EXPERT_SLUG ? " HTML 看板" : " Markdown 产物"}</a></Button>}
-          </div>
-          {task.materials.length === 0 ? <p className="text-sm text-ink-3">没有上传材料。</p> : <div className="grid gap-2 text-sm">
+      {succeeded ? <section className="min-w-0" aria-label="任务结果">
+        {task.result?.format === "html" && task.result.html
+          ? <iframe title={`${task.expertName}报告`} srcDoc={task.result.html} sandbox="" className="h-[720px] w-full rounded-card border border-line bg-white" />
+          : task.result?.preview
+            ? <><p className="mb-2 text-xs text-ink-3">内容预览，完整产物请下载。</p><pre className="whitespace-pre-wrap break-words rounded-control bg-bg-sunk p-3 text-xs leading-relaxed text-ink-2">{task.result.preview}</pre></>
+            : <p className="text-sm text-ink-3">任务已完成，{task.hasArtifact ? "产物可下载。" : "没有可显示的结果。"}</p>}
+      </section> : task.state !== "waiting_input" && <p className="text-sm text-ink-3">{active ? `任务进行中，当前步骤：${EXPERT_TASK_STAGE_LABELS[task.stage] ?? task.stage}。` : "任务没有产出结果。"}</p>}
+
+      {!succeeded && <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void load()}><RefreshCw size={14} aria-hidden="true" />刷新</Button>
+        {task.hasArtifact && <Button asChild variant="outline" size="sm"><a href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}><Download size={14} aria-hidden="true" />{artifactDownloadLabel(task.expertSlug)}</a></Button>}
+        {isFailed && (task.selectedEntity ? task.confirmedAttempts : task.executionAttempts) < 3 && <Button type="button" variant="outline" disabled={busy} onClick={() => void act("retry")}><RotateCcw size={14} aria-hidden="true" />重试</Button>}
+        {active && <Button type="button" variant="ghost" disabled={busy} onClick={() => void act("cancel")}><XCircle size={14} aria-hidden="true" />取消任务</Button>}
+      </div>}
+
+      <details className="border-t border-line-soft pt-4 text-sm">
+        <summary className="min-h-11 cursor-pointer py-3 font-medium text-ink">任务信息</summary>
+        <div className="grid gap-3 pt-2 text-ink-2">
+          {task.input?.companyName ? <p className="break-words">核查主体：{task.input.companyName}</p> : null}
+          {query ? <p className="break-words">查询：{query}</p> : null}
+          {notes ? <p className="whitespace-pre-wrap break-words">任务要求：{notes}</p> : null}
+          {task.input?.region ? <p className="break-words">地区：{task.input.region} · 报告期：{task.input.startDate ?? "未提供"} 至 {task.input.endDate ?? "未提供"}</p> : null}
+          {task.input?.stockCodes?.length ? <p className="break-words">证券代码：{task.input.stockCodes.join("、")}</p> : null}
+          {!task.input?.companyName && !query && !task.input?.region && !notes ? <p className="text-ink-3">没有填写输入内容。</p> : null}
+          <p className="text-xs text-ink-3">任务编号 {task.id} · 创建 {when(task.createdAt)} · 更新 {when(task.updatedAt)}</p>
+          <p className="text-xs text-ink-3">步骤：{EXPERT_TASK_STAGE_LABELS[task.stage] ?? task.stage} · {task.selectedEntity ? `检索尝试 ${task.executionAttempts - task.confirmedAttempts}/3 · 执行尝试 ${task.confirmedAttempts}/3` : task.state === "waiting_input" ? `检索尝试 ${task.executionAttempts}/3` : `执行尝试 ${task.executionAttempts}/3`}</p>
+        </div>
+      </details>
+
+      {task.materials.length > 0 && <section className="border-t border-line-soft pt-5" aria-label="任务材料">
+        <h2 className="mb-3 text-sm font-medium text-ink">任务材料</h2>
+        <div className="grid gap-2 text-sm">
             {task.materials.map(material => <div key={material.id} className="flex flex-wrap items-center gap-2">
               {task.state === "cancelled" ? <span>{material.filename}</span> : <a className="text-accent underline-offset-4 hover:underline" href={`/api/v1/membership/expert-tasks/${task.id}/materials/${material.id}`}>{material.filename}</a>}
               <span className="text-xs text-ink-3">{Math.ceil(material.byteSize / 1024)} KB · {material.extractionStatus === "available" ? "已用于任务" : material.extractionStatus === "unavailable" ? "无法提取文字" : "等待处理"}</span>
               {terminal && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void deleteMaterial(material.id)}><Trash2 size={14} aria-hidden="true" />删除</Button>}
             </div>)}
-          </div>}
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-wrap gap-2">
-        {isFailed && (task.selectedEntity ? task.confirmedAttempts : task.executionAttempts) < 3 && <Button type="button" variant="outline" disabled={busy} onClick={() => void act("retry")}><RotateCcw size={14} aria-hidden="true" />重试</Button>}
-        {active && <Button type="button" variant="ghost" disabled={busy} onClick={() => void act("cancel")}><XCircle size={14} aria-hidden="true" />取消任务</Button>}
-      </div>
+        </div>
+      </section>}
     </div>
   </main>;
 }
