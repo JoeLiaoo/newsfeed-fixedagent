@@ -49,7 +49,7 @@ npm run typecheck
 
 「前沿播客」已随 [PR #93](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/93) 合并：员工提交中文或英文话题，平台用双语检索词读取公开播客文字库，优先展示标题直接提及话题的节目；宁德时代/CATL、机器人/具身智能等常见中英别名会扩展检索。英文源节目使用该库中文版，缺少中文版的集数跳过。网页摘要为单文件静态 HTML（按 beautiful-article / reacticle 的 press 主题排版），并提供 Markdown 产物；要点与摘要标明是该库的整理稿且平台未逐条核验。检索排序增强已随 [PR #104](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/104) 合并（`281ac12`），尚未部署或做真实员工验收。员工摘要调整与全部可用匹配节目的展示另见[本轮实施记录](docs/logs/2026-10-26-P2-frontier-podcast-ux.md)；检索探测、验证与限制见[检索排序改进记录](docs/logs/2026-10-26-P2-frontier-podcast-search-quality.md)和[双语改进记录](docs/logs/2026-10-25-P2-frontier-podcast-bilingual.md)。
 
-「地区上市公司基金参与」已加入可运行专家目录：支持地区、报告期与代码输入，按公告候选与可选备案公示数据生成参与明细、统计摘要、缺口、HTML 预览和 Markdown 底稿。缺省地区发行人表只是有限浙江样本，备案查询地址未配置时会保留相关字段未知并在报告列出缺口；当前分支代码尚待 PR 评审、发布和员工真实样例复核，见[实施日志](docs/logs/2026-10-26-P2-07-listed-fund-participation.md)。
+「地区上市公司基金参与」已加入可运行专家目录：支持地区、报告期与代码输入，按公告候选与可选备案公示数据生成参与明细、统计摘要、缺口、HTML 预览和 Markdown 底稿。公告按发行人读取披露列表后在平台侧按标题和日期筛选；缺省地区发行人表只是有限浙江样本，备案查询地址未配置时会保留相关字段未知并在报告列出缺口。公告来源修复待 PR 评审、发布和员工真实样例复核，见[实施日志](docs/logs/2026-10-26-P2-07-listed-fund-participation.md)、[来源修复记录](docs/logs/2026-10-26-P2-07-listed-fund-announcement-source.md)及[分页与关键词跟进](docs/logs/2026-10-26-P2-07-eastmoney-pagination-keywords.md)。
 
 全景图 HTML 预览、Markdown 下载及移除员工采集台账下载的改动已随 [PR #97](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/97) 合并（`aa1323a`）；未记录生产发布，真实 MCP 全景样例和员工产物体验仍待验收。
 扫码后由服务端确认绑定的修复已随 PR #18 合并（`4a8299f`），并随 [PR #19 发布](docs/logs/2026-10-23-P4-pr19-deployment.md)。二维码新标签页与互动状态框已随 [PR #22 部署](docs/logs/2026-10-23-P4-pr22-deployment.md)。

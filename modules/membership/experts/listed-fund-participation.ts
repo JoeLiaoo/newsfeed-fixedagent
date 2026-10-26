@@ -18,7 +18,7 @@ export const LISTED_ISSUER_SEEDS: ListedIssuer[] = [
 ];
 
 export const LISTED_FUND_DEFAULT_BUDGET = { maxIssuers: 40, maxAnnouncements: 200, maxPdfExtracts: 80 } as const;
-export const ANNOUNCEMENT_KEYWORDS = ["产业基金", "股权投资", "参与出资", "私募基金", "合作投资", "基金合伙", "合伙企业"] as const;
+export const ANNOUNCEMENT_KEYWORDS = ["产业基金", "股权投资", "参与出资", "私募基金", "合作投资", "基金合伙", "合伙企业", "投资基金"] as const;
 const asText = (value: unknown) => typeof value === "string" ? value.trim() : "";
 const norm = (value: string) => value.toLowerCase().replace(/[\s\p{P}\p{S}（）()【】]/gu, "");
 let lastExternalRequestAt = 0;
@@ -105,84 +105,96 @@ export function resolveListedIssuers(input: ListedFundInput, seeds = LISTED_ISSU
   return { issuers: candidates.slice(0, input.maxIssuers), gaps: candidates.length ? [] : [`平台地区代码样本中没有「${input.region}」发行人；请补充证券代码或由管理员扩充样本。`] };
 }
 
-function cninfoHost(code: string) { return /^[69]/.test(code) ? "sh" : "sz"; }
-function announcementDate(item: Record<string, unknown>) { return safeDate(item.noticeDate ?? item.announcementTime ?? item.date); }
-function announcementUrl(item: Record<string, unknown>) {
-  const adjunct = asText(item.adjunctUrl ?? item.pdfUrl ?? item.url);
-  if (/^https:\/\//i.test(adjunct)) {
-    try { const parsed = new URL(adjunct); return parsed.hostname === "static.cninfo.com.cn" ? parsed.toString() : ""; } catch { return ""; }
+function announcementDate(item: Record<string, unknown>) { return safeDate(item.notice_date ?? item.noticeDate ?? item.announcementTime ?? item.date); }
+function eastmoneyPdfUrl(item: Record<string, unknown>, artCode: string) {
+  const attachUrl = asText(item.attach_url ?? item.attachUrl ?? item.adjunct_url ?? item.pdf_url ?? item.pdfUrl);
+  if (attachUrl) {
+    try {
+      const parsed = new URL(attachUrl, "https://pdf.dfcfw.com");
+      if (parsed.protocol === "https:" && parsed.hostname === "pdf.dfcfw.com" && parsed.pathname.toLowerCase().endsWith(".pdf")) return parsed.toString();
+    } catch { /* use the stable public PDF route below */ }
   }
-  if (/^[\w./-]+\.pdf(?:\?.*)?$/i.test(adjunct)) return `https://static.cninfo.com.cn/${adjunct.replace(/^\//, "")}`;
-  return "";
+  return /^[\w-]+$/.test(artCode) ? `https://pdf.dfcfw.com/pdf/H2_${artCode}_1.pdf` : "";
 }
+const inDateRange = (date: string | null, input: ListedFundInput) => Boolean(date && date >= input.startDate && date <= input.endDate);
+const hasAnnouncementKeyword = (title: string) => {
+  if (!ANNOUNCEMENT_KEYWORDS.some((keyword) => title.includes(keyword))) return false;
+  // Keep generic securities-fund notices out unless the title describes a participation or establishment action.
+  if (title.includes("证券投资基金") && !/(?:参与|发起|设立|合作|共同|投资)/.test(title.replace("证券投资基金", ""))) return false;
+  return true;
+};
 
-/** CNINFO-compatible public disclosure adapter. Callers can inject fetch for fixture-only tests. */
+/** Public per-issuer disclosure adapter. Default tests inject fixtures and never use live HTTP. */
 export async function fetchIssuerAnnouncements(issuer: ListedIssuer, input: ListedFundInput, deps: { fetch?: typeof fetch; beforeRequest?: () => Promise<void> } = {}): Promise<{ items: ListedAnnouncement[]; gaps: string[] }> {
   const fetcher = deps.fetch ?? fetch;
   const items: ListedAnnouncement[] = [];
   const gaps: string[] = [];
-  for (const keyword of ANNOUNCEMENT_KEYWORDS) {
-    let pageNum = 1;
-    let totalPages = 1;
-    while (pageNum <= totalPages) {
-      await deps.beforeRequest?.();
-      const url = new URL("https://www.cninfo.com.cn/new/hisAnnouncement/query");
-      url.searchParams.set("stock", `${issuer.code},${cninfoHost(issuer.code)}`);
-      url.searchParams.set("searchkey", keyword);
-      url.searchParams.set("category", "");
-      url.searchParams.set("plate", "");
-      url.searchParams.set("seDate", `${input.startDate}~${input.endDate}`);
-      url.searchParams.set("column", cninfoHost(issuer.code));
-      url.searchParams.set("columnTitle", "历史公告查询");
-      url.searchParams.set("pageNum", String(pageNum));
-      url.searchParams.set("pageSize", "30");
-      url.searchParams.set("tabName", "fulltext");
-      let response: Response;
-      try {
-        response = await externalRequest(fetcher, url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ListedFundDisclosure/1.0)", accept: "application/json,text/plain,*/*" } }, Boolean(deps.fetch));
-      } catch {
-        gaps.push(`${issuer.code}「${keyword}」公告检索请求失败。`);
-        break;
-      }
-      if (!response.ok) { gaps.push(`${issuer.code}「${keyword}」公告检索返回 HTTP ${response.status}。`); break; }
-      let payload: { announcements?: unknown[]; totalpages?: unknown };
-      try { payload = await jsonResponse(response) as typeof payload; }
-      catch { gaps.push(`${issuer.code}「${keyword}」公告检索响应无法解析。`); break; }
-      const rows = Array.isArray(payload.announcements) ? payload.announcements : [];
-      totalPages = Math.max(1, Math.min(500, Number(payload.totalpages) || 1));
-      for (const raw of rows) {
-        if (!raw || typeof raw !== "object") continue;
-        const item = raw as Record<string, unknown>;
-        const date = announcementDate(item);
-        const title = asText(item公告Title(item));
-        const url = announcementUrl(item);
-        const announcementId = asText(item.announcementId ?? item.announcementID ?? item.id);
-        if (!title || !announcementId || !url || (date && (date < input.startDate || date > input.endDate))) continue;
-        if (!date && !gaps.includes(`${issuer.code}《${title}》缺少可解析披露日期，日期范围待核。`)) gaps.push(`${issuer.code}《${title}》缺少可解析披露日期，日期范围待核。`);
-        items.push({ issuer, title, date, url, announcementId, text: null });
-      }
-      if (items.length >= input.maxAnnouncements) break;
-      if (pageNum >= totalPages) break;
-      pageNum += 1;
+  let pageIndex = 1;
+  let totalPages = 1;
+  while (pageIndex <= totalPages && pageIndex <= 500) {
+    await deps.beforeRequest?.();
+    const url = new URL("https://np-anotice-stock.eastmoney.com/api/security/ann");
+    url.searchParams.set("sr", "-1");
+    url.searchParams.set("page_size", "30");
+    url.searchParams.set("page_index", String(pageIndex));
+    url.searchParams.set("ann_type", "A");
+    url.searchParams.set("stock_list", issuer.code);
+    url.searchParams.set("f_node", "0");
+    url.searchParams.set("s_node", "0");
+    let response: Response;
+    try {
+      response = await externalRequest(fetcher, url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ListedFundDisclosure/1.0)", accept: "application/json,text/plain,*/*" } }, Boolean(deps.fetch));
+    } catch {
+      gaps.push(`${issuer.code} 公告检索服务请求失败；未能读取披露列表。`);
+      break;
     }
-    if (items.length >= input.maxAnnouncements) { gaps.push(`公告达到上限 ${input.maxAnnouncements} 条；后续关键词与页面未读取。`); break; }
+    if (!response.ok) { gaps.push(`${issuer.code} 公告检索服务返回 HTTP ${response.status}；未能读取披露列表。`); break; }
+    let payload: { data?: { list?: unknown[]; page_size?: unknown; total_hits?: unknown } };
+    try { payload = await jsonResponse(response) as typeof payload; }
+    catch { gaps.push(`${issuer.code} 公告检索服务响应无法解析；未能读取披露列表。`); break; }
+    const data = payload.data;
+    if (!data || !Array.isArray(data.list)) { gaps.push(`${issuer.code} 公告检索服务返回的列表结构不可用；未能读取披露列表。`); break; }
+    const rows = data.list;
+    const pageSize = Number(data.page_size);
+    const totalHits = Number(data.total_hits);
+    if (Number.isFinite(pageSize) && pageSize > 0 && Number.isFinite(totalHits) && totalHits >= 0) {
+      totalPages = Math.max(1, Math.min(500, Math.ceil(totalHits / pageSize)));
+    }
+    for (const raw of rows) {
+      if (!raw || typeof raw !== "object") continue;
+      const item = raw as Record<string, unknown>;
+      const date = announcementDate(item);
+      const title = asText(item公告Title(item));
+      const announcementId = asText(item.art_code ?? item.announcementId ?? item.id);
+      const pdfUrl = eastmoneyPdfUrl(item, announcementId);
+      if (!title || !hasAnnouncementKeyword(title)) continue;
+      if (!date) { gaps.push(`${issuer.code}《${title}》缺少可解析披露日期，日期范围待核。`); continue; }
+      if (!inDateRange(date, input) || !announcementId || !pdfUrl) continue;
+      items.push({ issuer, title, date, url: pdfUrl, announcementId, text: null });
+    }
+    const pageDates = rows.flatMap((raw) => raw && typeof raw === "object" ? [announcementDate(raw as Record<string, unknown>)] : []).filter((date): date is string => Boolean(date));
+    const oldestDate = pageDates.length ? pageDates.reduce((oldest, date) => date < oldest ? date : oldest) : null;
+    if (!rows.length || (oldestDate !== null && oldestDate < input.startDate) || pageIndex >= totalPages || items.length >= input.maxAnnouncements) break;
+    pageIndex += 1;
   }
+  if (!items.length && !gaps.length) gaps.push(`${issuer.code} 公告检索返回空列表或没有匹配报告期和关键词的公告；本次检索不能确认不存在相关披露。`);
+  if (items.length >= input.maxAnnouncements) gaps.push(`公告达到上限 ${input.maxAnnouncements} 条；后续页面未读取。`);
   const unique = new Map<string, ListedAnnouncement>();
   for (const item of items) unique.set(`${item.issuer.code}:${item.announcementId}`, item);
   const sorted = [...unique.values()].sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "") || a.issuer.code.localeCompare(b.issuer.code));
   return { items: sorted.slice(0, input.maxAnnouncements), gaps };
 }
 
-function item公告Title(item: Record<string, unknown>) { return item.announcementTitle ?? item.title ?? item.announcementName; }
+function item公告Title(item: Record<string, unknown>) { return item.title ?? item.title_ch ?? item.announcementTitle ?? item.announcementName; }
 
 /** Extract disclosure body text from a PDF, with strict byte and character limits. */
 export async function extractAnnouncementText(url: string, deps: { fetch?: typeof fetch; beforeRequest?: () => Promise<void> } = {}): Promise<string> {
   const parsedUrl = new URL(url);
-  if (parsedUrl.protocol !== "https:" || parsedUrl.hostname !== "static.cninfo.com.cn") throw new Error("listed_fund_pdf_url_invalid");
+  if (parsedUrl.protocol !== "https:" || !["static.cninfo.com.cn", "pdf.dfcfw.com"].includes(parsedUrl.hostname)) throw new Error("listed_fund_pdf_url_invalid");
   const fetcher = deps.fetch ?? fetch;
   await deps.beforeRequest?.();
   const response = await externalRequest(fetcher, url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ListedFundDisclosure/1.0)", accept: "application/pdf,*/*" } }, Boolean(deps.fetch), 20_000);
-  if (!response.ok) throw new Error("listed_fund_pdf_http_error");
+  if (!response.ok) throw new Error(`listed_fund_pdf_http_${response.status}`);
   const type = response.headers.get("content-type") ?? "";
   if (!type.includes("pdf") && !url.toLowerCase().includes(".pdf")) throw new Error("listed_fund_pdf_type_invalid");
   const declaredSize = Number(response.headers.get("content-length"));
