@@ -31,9 +31,9 @@
 
 ## 最小验证
 
-- `node --import ./tests/standalone.ts --test modules/membership/tests/sector-peer-board.standalone.test.ts`：9/9 通过。回归用例用生产回答的形状（10／7／4／9／5，其中一条引用 5 个来源）固定住失败形状：断言旧结构仍拒绝它并指出问题路径，新请求接受它，读取器给出 10／7／4／3 的看板。
+- `node --import ./tests/standalone.ts --test modules/membership/tests/sector-peer-board.standalone.test.ts`：10/10 通过。回归用例用生产回答的形状（10／7／4／9／5，其中一条引用 5 个来源）固定住失败形状：断言旧结构仍拒绝它并指出问题路径，新请求接受它，读取器给出 10／7／4／3 的看板。
 - 用生产收据里的真实模型回答与真实来源在本地内存中跑新的读取器（未写入仓库、未打印原文）：得到 peers 10、stageSignals 7、capitalEvents 4、usReferences 3，缺口 6 条（含 6 条「美国参考」结论引用了中国来源而被略过的说明）；渲染出的 16 个链接全部来自本次检索的来源，没有模型自带的链接。
-- `node --import ./tests/standalone.ts --test "modules/membership/tests/*.standalone.test.ts"`：173/173 通过。
+- `node --import ./tests/standalone.ts --test "modules/membership/tests/*.standalone.test.ts"`：174/174 通过。
 - `node --import ./tests/standalone.ts --test --test-skip-pattern='every table and column' tests/architecture.test.ts`：13/13 通过。
 - `npm run typecheck`：通过。
 - `node scripts/check-doc-links.ts`：通过。
