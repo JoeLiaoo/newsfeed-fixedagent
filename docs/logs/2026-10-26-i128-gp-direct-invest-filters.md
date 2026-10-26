@@ -2,7 +2,7 @@
 
 - Agent：Codex
 - 对应任务：维护任务（不对应 P0–P5 验收项）
-- 完成状态：代码和本地非数据库验证完成；待数据库集成 CI、PR 评审、发布与员工复验
+- 完成状态：PR #135 开放；代码、本地验证及 PR CI 通过；待评审、发布与员工复验
 
 ## 本次改动
 
@@ -33,8 +33,9 @@
   - GP 项目分页/筛选 loader 与省份解析 standalone 定向测试：10/10 通过。
   - `node scripts/check-migrations.ts --base=origin/main`：通过。
   - `git diff --check`：通过。
+  - PR #135 head `b3b6d7076fbbb58ae1f7376099ed6bea4d0b39ad` 的 `quality`、`links`、`postgres-integration` CI：全部通过。
 - 未执行或需用户试用的检查：
-  - `gp-projects-access.test.ts` 与 `gp-admin-access.test.ts` 数据库集成用例已扩充覆盖四项 AND 过滤、未知/省级展示与筛选选项、基金归属证据门槛和省份核验鉴权；本地没有 `DATABASE_URL`，因此未运行，需要 PR 的 postgres-integration CI 执行。
+  - `gp-projects-access.test.ts` 与 `gp-admin-access.test.ts` 数据库集成用例已扩充覆盖四项 AND 过滤、未知/省级展示与筛选选项、基金归属证据门槛和省份核验鉴权；本地没有 `DATABASE_URL`，由 PR 的 postgres-integration CI 执行并通过。
   - 未调用真实新华财经 MCP，也未验证真实员工账号或生产数据；运行时需要既有 `XINHUA_MCP_API_KEY`。
   - 未部署。
 
@@ -44,4 +45,4 @@
   - 历史记录的母基金、子基金和省份均保留未知，须管理员逐项维护关系依据或用新华财经核验省份。
   - 新华财经资料只能按准确主体 ID 与名称完成身份核对；缺 ID 或名称不一致时不会给出省份。
   - P3-01～P3-04 的 GP 主体、投资事实、数据同步、通知和员工验收状态不变。
-- 下一步：PR CI 执行数据库集成测试；评审通过后再按独立发布流程处理。员工和真实新华财经资料验收仍待用户侧完成。
+- 下一步：等待 PR #135 评审；合并后再按独立发布流程处理。员工和真实新华财经资料验收仍待用户侧完成。
