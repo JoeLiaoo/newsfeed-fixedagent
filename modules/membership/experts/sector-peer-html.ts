@@ -1,14 +1,8 @@
 import { beijingStamp } from "@aihot/contracts/time";
 import type { PublicSearchSource } from "@aihot/backend/providers/deepseek-search";
+import type { SectorPeerBoard, SectorPeerClaim } from "./sector-peer-board.ts";
 
-export type SectorPeerClaim = { text: string; sourceIds: string[] };
-export type SectorPeerBoard = {
-  peers: SectorPeerClaim[];
-  stageSignals: SectorPeerClaim[];
-  capitalEvents: SectorPeerClaim[];
-  usReferences: SectorPeerClaim[];
-  gaps: string[];
-};
+export type { SectorPeerBoard, SectorPeerClaim };
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
