@@ -16,6 +16,9 @@ const api = fakeApi((url) => {
   if (path === "/api/v1/membership/me") return { user: { username: "tester", realName: "测试", role: "member" }, tags: ["ai-models"], catalog: ["ai-models", "ai-products"] };
   if (path === "/api/v1/membership/digest/history") return { digests: [] };
   if (path === "/api/v1/membership/digest") return { date: "2026-10-04", preferenceVersion: 1, window: { start: "2026-10-03T16:00:00.000Z", cutoff: "2026-10-04T16:00:00.000Z" }, items: [] };
+  if (path === "/api/v1/membership/knowledge/bases") return { bases: [] };
+  if (path === "/api/v1/membership/experts") return { experts: [] };
+  if (path === "/api/site/reports/daily/latest-page") return { index: [], report: null };
   if (path === "/api/site/hot") return { computedAt: at, windowHours: 48, entries: [] };
   if (path === "/api/site/timeline") return { filters: { channel: "all", category: null, tag: null }, cards: [], nextCursor: null, hot: null, dayCounts: {} };
   return undefined;
@@ -81,4 +84,48 @@ test("the phone's 我的 page opens and closes the groups by the same rule", asy
     await child.evaluate((el) => (el as HTMLElement).focus());
     assert.equal(await child.evaluate((el) => el === document.activeElement), false, "a hidden child cannot be focused");
   } finally { await context.close(); }
+});
+
+test("phone tabs open knowledge and experts while desktop keeps its sidebar entries", async () => {
+  const phone = await chrome.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
+  const desktop = await chrome.newContext({ viewport: { width: 1280, height: 900 } });
+  try {
+    const page = await phone.newPage();
+    await visit(page, web.origin + "/");
+    const bar = page.getByRole("navigation", { name: "底部导航" });
+    const links = bar.getByRole("link");
+    await expect(links).toHaveText(["精选", "知识库", "专家平台", "我的"]);
+    for (const [index, path] of ["/", "/knowledge", "/experts", "/more"].entries()) {
+      await expect(links.nth(index)).toHaveAttribute("href", path);
+    }
+    await expect(links.nth(0)).toHaveAttribute("aria-current", "page");
+
+    await links.nth(1).click();
+    await expect(page).toHaveURL(web.origin + "/knowledge");
+    await expect(links.nth(1)).toHaveAttribute("aria-current", "page");
+    await links.nth(2).click();
+    await expect(page).toHaveURL(web.origin + "/experts");
+    await expect(links.nth(2)).toHaveAttribute("aria-current", "page");
+    await links.nth(3).click();
+    await expect(page).toHaveURL(web.origin + "/more");
+    await expect(links.nth(3)).toHaveAttribute("aria-current", "page");
+
+    await visit(page, web.origin + "/knowledge/bases/new");
+    await expect(bar.getByRole("link", { name: "知识库" })).toHaveAttribute("aria-current", "page");
+    await visit(page, web.origin + "/experts/new");
+    await expect(bar.getByRole("link", { name: "专家平台" })).toHaveAttribute("aria-current", "page");
+    for (const path of ["/hot", "/daily"]) {
+      await visit(page, web.origin + path);
+      await expect(bar.getByRole("link", { name: "精选" })).toHaveAttribute("aria-current", "page");
+    }
+
+    const widePage = await desktop.newPage();
+    await visit(widePage, web.origin + "/");
+    await expect(widePage.getByRole("navigation", { name: "底部导航" })).toBeHidden();
+    const sidebar = widePage.getByRole("navigation", { name: "主导航" });
+    await expect(sidebar.getByRole("link", { name: "知识库" })).toHaveAttribute("href", "/knowledge");
+    await expect(sidebar.getByRole("link", { name: "专家平台" })).toHaveAttribute("href", "/experts");
+    await expect(sidebar.getByRole("link", { name: "热点榜" })).toHaveAttribute("href", "/hot");
+    await expect(sidebar.getByRole("link", { name: /日报/ })).toHaveAttribute("href", "/daily");
+  } finally { await phone.close(); await desktop.close(); }
 });

@@ -9,7 +9,7 @@ import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { expertStatusBadge } from "../experts/catalog.ts";
 
-export const handle: Screen = { tab: "me", name: "专家平台" };
+export const handle: Screen = { tab: "experts", name: "专家平台" };
 export const meta = () => pageMeta({ title: "专家平台", path: "/experts", noindex: true });
 
 type Expert = {

@@ -8,7 +8,7 @@ import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 
-export const handle: Screen = { tab: "me", name: "知识库" };
+export const handle: Screen = { tab: "knowledge", name: "知识库" };
 export const meta = () => pageMeta({ title: "知识库", path: "/knowledge", noindex: true });
 
 type Base = {

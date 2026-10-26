@@ -11,7 +11,7 @@ import type { Screen } from "@aihot/web/components/shell/screens";
 import { EXPERT_TASK_ERROR_LABELS, EXPERT_TASK_STAGE_LABELS, EXPERT_TASK_STATE_LABELS, EXPERT_TASK_STATE_VARIANTS, QUERY_EXPERT_SLUGS, SECTOR_PEER_EXPERT_SLUG } from "../experts/catalog.ts";
 import { companyRelationLabel } from "../experts/data.ts";
 
-export const handle: Screen = { tab: "me", name: "任务" };
+export const handle: Screen = { tab: "experts", name: "任务" };
 export const meta = () => pageMeta({ title: "任务详情", path: "/tasks", noindex: true });
 
 type Candidate = { id: string; name: string; status: string | null; creditCode: string | null; address: string | null; startDate: string | null; typeName?: string | null; branchOf?: string | null };

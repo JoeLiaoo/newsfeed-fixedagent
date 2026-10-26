@@ -11,7 +11,7 @@ import type { Screen } from "@aihot/web/components/shell/screens";
 import { KnowledgeDetailSkeleton } from "./knowledge-detail-skeleton.tsx";
 import { FRESHNESS_LABELS, type FreshnessTier } from "../knowledge/catalog.ts";
 
-export const handle: Screen = { tab: "me", name: "知识页" };
+export const handle: Screen = { tab: "knowledge", name: "知识页" };
 export const meta = () => pageMeta({ title: "知识页", path: "/knowledge", noindex: true });
 
 const ENDPOINT = "/api/v1/membership/knowledge/";

@@ -11,7 +11,7 @@ import type { Screen } from "@aihot/web/components/shell/screens";
 import { beijingStamp } from "@aihot/contracts/time";
 import { TASK_STAGE_TEXT, TASK_STATE_TEXT, TASK_STATE_VARIANT, TASK_STATES_RUNNING } from "../experts/task-state.ts";
 
-export const handle: Screen = { tab: "me", name: "我的任务与产物" };
+export const handle: Screen = { tab: "experts", name: "我的任务与产物" };
 export const meta = () => pageMeta({ title: "我的任务与产物", path: "/account/artifacts", noindex: true });
 
 type Material = { id: string; filename: string; byteSize: number; extractionStatus: string };
