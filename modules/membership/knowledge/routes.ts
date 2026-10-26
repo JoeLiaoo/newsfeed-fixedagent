@@ -264,8 +264,8 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       LEFT JOIN LATERAL (SELECT figure_checkpoint FROM member_wiki_tasks WHERE version_id=v.id ORDER BY created_at DESC LIMIT 1) t ON true WHERE v.id=${id}`;
     if (!version[0]) return reply.code(404).send({ error: "knowledge_document_not_found" });
     if (version[0].status !== "active") return reply.code(version[0].uploader_id === user.id || user.role === "admin" ? 410 : 404).send({ error: "knowledge_document_withdrawn" });
-    const figures = await sql<{ id: string; ordinal: number; caption: string | null; width: number; height: number }[]>`
-      SELECT id, ordinal, caption, width, height FROM member_wiki_figure_assets WHERE version_id=${id} ORDER BY ordinal LIMIT ${FIGURE_LIMITS.visualImages}`;
+    const figures = await sql<{ id: string; ordinal: number; caption: string | null; width: number; height: number; locator: { kind?: string; page?: number } | null }[]>`
+      SELECT id, ordinal, caption, width, height, locator FROM member_wiki_figure_assets WHERE version_id=${id} ORDER BY ordinal LIMIT ${FIGURE_LIMITS.visualImages}`;
     const verified = version[0].figure_checkpoint?.verifiedFindings ?? [];
     const coverage = version[0].figure_checkpoint?.coverage
       ?? (version[0].figure_manifest ? { status: "unavailable", read: false } : { status: "legacy_text_only", read: false });

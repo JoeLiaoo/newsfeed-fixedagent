@@ -267,12 +267,20 @@ export function aggregateContributions(contributions: Contribution[]): Aggregate
   });
   const latest = ordered.at(-1)!;
   const coverages = ordered.map(item => item.figureCoverage).filter((item): item is FigureCoverage => Boolean(item));
+  // The page coverage belongs to a material: a merged page of several materials keeps each one's
+  // own pages, with the material they came from.
+  const pageCoverages = ordered.flatMap(item => (item.figureCoverage?.pages ?? []).map(page => ({
+    ...page,
+    documentId: item.documentId,
+    title: item.materialTitle,
+  })));
   const figureCoverage = coverages.length ? {
     status: coverages.some(item => item.status === "partial") ? "partial" as const : coverages.some(item => item.status === "unavailable") ? "unavailable" as const : coverages.every(item => item.status === "legacy_text_only") ? "legacy_text_only" as const : "complete" as const,
     read: coverages.some(item => item.read),
     candidates: coverages.reduce((sum, item) => sum + item.candidates, 0), processed: coverages.reduce((sum, item) => sum + item.processed, 0),
     evidenced: coverages.reduce((sum, item) => sum + item.evidenced, 0), unreadable: coverages.reduce((sum, item) => sum + item.unreadable, 0),
     unprocessed: coverages.reduce((sum, item) => sum + item.unprocessed, 0), truncated: coverages.some(item => item.truncated),
+    pages: pageCoverages.length ? pageCoverages : null,
   } : null;
   return { page, sources, citations, figures, figureCoverage, versionId: latest.versionId, taskId: latest.taskId };
 }

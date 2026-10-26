@@ -19,6 +19,7 @@ type Message = { role: string; content: string | Array<{ type: string; text?: st
 const AUDIT = { verdict: "pass_with_issues", corrections: [], findings: [], notes: "" };
 const MANIFEST: FigureManifest = {
   pipelineVersion: 1,
+  kind: "html",
   htmlSha256: "html-sha",
   candidatesTruncated: false,
   candidates: [

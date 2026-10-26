@@ -3,9 +3,12 @@
 # Use NPM_REGISTRY to select the npm mirror reachable from the build host.
 FROM node:24-trixie-slim AS base
 WORKDIR /app
+# The fonts are for the page renderer: a page of a PDF is drawn as a picture, and without any font
+# on the machine the letters of that page are not drawn at all (the vector drawings still are).
+# fontconfig finds them, Liberation covers the standard PDF fonts and WenQuanYi the Chinese ones.
 RUN sed -i 's#http://deb.debian.org#http://mirrors.aliyun.com#g' /etc/apt/sources.list.d/debian.sources \
  && apt-get update \
- && apt-get install -y --no-install-recommends postgresql-client ca-certificates \
+ && apt-get install -y --no-install-recommends postgresql-client ca-certificates fontconfig fonts-liberation fonts-wqy-microhei \
  && rm -rf /var/lib/apt/lists/*
 
 FROM base AS build

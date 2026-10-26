@@ -4,8 +4,11 @@
 FROM node:24-trixie-slim AS base
 WORKDIR /app
 # pg_dump for the optional database backups (Debian's client matches the PostgreSQL 17 server in compose).
+# The fonts are for the page renderer: a page of a PDF is drawn as a picture, and without any font
+# on the machine the letters of that page are not drawn at all (the vector drawings still are).
+# fontconfig finds them, Liberation covers the standard PDF fonts and WenQuanYi the Chinese ones.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends postgresql-client ca-certificates \
+ && apt-get install -y --no-install-recommends postgresql-client ca-certificates fontconfig fonts-liberation fonts-wqy-microhei \
  && rm -rf /var/lib/apt/lists/*
 
 FROM base AS build
