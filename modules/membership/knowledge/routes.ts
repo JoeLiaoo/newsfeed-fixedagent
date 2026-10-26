@@ -274,13 +274,13 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const sha256 = checksum(Buffer.from(`url:${sourceUrl}`));
     const admitted = await sql.begin(async tx => {
       await tx`SELECT id FROM member_users WHERE id=${user.id} FOR NO KEY UPDATE`;
-      if (await admissionLimited(tx, user.id)) return { limited: true as const };
       await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`${base.id}|${sourceUrl}`}, 0))`;
       const existing = await tx<{ document_id: string; version_id: string; version_no: number }[]>`
         SELECT v.document_id, v.id AS version_id, v.version_no FROM member_wiki_document_versions v
         JOIN member_wiki_documents d ON d.id=v.document_id
-        WHERE d.base_id=${base.id} AND d.status='active' AND v.source_url=${sourceUrl} LIMIT 1`;
+        WHERE d.base_id=${base.id} AND d.status='active' AND v.source_url=${sourceUrl} LIMIT 1 FOR UPDATE OF d`;
       if (existing[0]) return { duplicate: true as const, ...existing[0] };
+      if (await admissionLimited(tx, user.id)) return { limited: true as const };
       const documentId = randomUUID();
       const versionId = randomUUID();
       const taskId = randomUUID();
@@ -332,23 +332,23 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
 
     const admitted = await sql.begin(async tx => {
       await tx`SELECT id FROM member_users WHERE id=${user.id} FOR NO KEY UPDATE`;
-      if (await admissionLimited(tx, user.id)) return { limited: true as const };
 
       let documentId = requestedDocument;
       if (documentId) {
-        const owned = await tx<{ id: string }[]>`SELECT id FROM member_wiki_documents WHERE id=${documentId} AND status='active' AND base_id=${base.id} AND (uploader_id=${user.id} OR ${user.role === "admin"})`;
+        const owned = await tx<{ id: string }[]>`SELECT id FROM member_wiki_documents WHERE id=${documentId} AND status='active' AND base_id=${base.id} AND (uploader_id=${user.id} OR ${user.role === "admin"}) FOR UPDATE`;
         if (!owned[0]) return { forbidden: true as const };
       } else {
-        const same = await tx<{ document_id: string }[]>`SELECT v.document_id FROM member_wiki_document_versions v JOIN member_wiki_documents d ON d.id=v.document_id WHERE v.sha256=${sha256} AND d.uploader_id=${user.id} AND d.base_id=${base.id} AND d.status='active' LIMIT 1`;
+        const same = await tx<{ document_id: string; id: string; version_no: number }[]>`SELECT v.document_id, v.id, v.version_no FROM member_wiki_document_versions v JOIN member_wiki_documents d ON d.id=v.document_id WHERE v.sha256=${sha256} AND d.uploader_id=${user.id} AND d.base_id=${base.id} AND d.status='active' LIMIT 1 FOR UPDATE OF d`;
         if (same[0]) {
-          const version = await tx<{ id: string; version_no: number }[]>`SELECT id, version_no FROM member_wiki_document_versions WHERE document_id=${same[0].document_id} AND sha256=${sha256} LIMIT 1`;
-          return { duplicate: true as const, documentId: same[0].document_id, versionId: version[0]!.id, versionNo: version[0]!.version_no };
+          return { duplicate: true as const, documentId: same[0].document_id, versionId: same[0].id, versionNo: same[0].version_no };
         }
+        if (await admissionLimited(tx, user.id)) return { limited: true as const };
         documentId = randomUUID();
         await tx`INSERT INTO member_wiki_documents(id, uploader_id, title, base_id) VALUES (${documentId}, ${user.id}, ${title}, ${base.id})`;
       }
       const duplicate = await tx<{ id: string; version_no: number }[]>`SELECT id, version_no FROM member_wiki_document_versions WHERE document_id=${documentId} AND sha256=${sha256} LIMIT 1`;
       if (duplicate[0]) return { duplicate: true as const, documentId, versionId: duplicate[0].id, versionNo: duplicate[0].version_no };
+      if (requestedDocument && await admissionLimited(tx, user.id)) return { limited: true as const };
       const latest = await tx<{ version_no: number }[]>`SELECT max(version_no) AS version_no FROM member_wiki_document_versions WHERE document_id=${documentId}`;
       const versionNo = (latest[0]?.version_no ?? 0) + 1;
       const versionId = randomUUID();

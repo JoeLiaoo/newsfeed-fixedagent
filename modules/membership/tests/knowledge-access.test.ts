@@ -9,7 +9,7 @@ import { stopBossNow } from "@aihot/backend/jobs/queue";
 import { buildApp } from "../../../apps/api/src/app.ts";
 import { SERVER_MODULES } from "../../../site/modules/server.ts";
 import { stub, tag } from "../../../tests/setup.ts";
-import { runWikiTask, recoverWikiTasks } from "../knowledge/worker.ts";
+import { checksum, runWikiTask, recoverWikiTasks } from "../knowledge/worker.ts";
 import { TASK_ERRORS } from "../knowledge/catalog.ts";
 
 const DRAFT = {
@@ -603,7 +603,30 @@ test("the shared library is open to approved employees and closed to everyone el
   const retry = (taskId: string) => app.inject({ method: "POST", url: `/api/v1/membership/knowledge/tasks/${taskId}/retry`, headers: { cookie: cookies[0]!, ...common } });
   assert.equal((await retry(candidateIds[0]!)).statusCode, 202);
   assert.equal((await retry(candidateIds[1]!)).statusCode, 202);
-  assert.equal((await retry(candidateIds[2]!)).statusCode, 429, "a third active build is refused");
+  const queueBeforeFullRetry = await sql`SELECT count(*)::int AS n FROM pgboss.job WHERE name='membership.knowledge'`;
+  const checkpointBeforeFullRetry = await sql`SELECT state, attempt_count, draft, audit FROM member_wiki_tasks WHERE id=${candidateIds[2]!}`;
+  const fullRetry = await retry(candidateIds[2]!);
+  assert.equal(fullRetry.statusCode, 429, "a third active build is refused");
+  assert.equal(fullRetry.json().error, "knowledge_upload_rate_limited");
+  assert.match(fullRetry.json().message, /2.*10/);
+  assert.deepEqual(await sql`SELECT count(*)::int AS n FROM pgboss.job WHERE name='membership.knowledge'`, queueBeforeFullRetry);
+  assert.deepEqual(await sql`SELECT state, attempt_count, draft, audit FROM member_wiki_tasks WHERE id=${candidateIds[2]!}`, checkpointBeforeFullRetry);
+  const duplicateBytes = Buffer.from(`# Existing ${randomUUID()}`);
+  await sql`UPDATE member_wiki_document_versions SET body=${duplicateBytes}, byte_size=${duplicateBytes.length}, sha256=${checksum(duplicateBytes)} WHERE id=${retryCandidates[0]!.versionId}`;
+  const beforeFullDuplicate = await sql`SELECT count(*)::int AS n FROM member_wiki_tasks WHERE uploader_id=${owner!.id}`;
+  const fullDuplicate = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[0]!, ...common },
+    payload: { fileName: "existing.md", base64: duplicateBytes.toString("base64") } });
+  assert.equal(fullDuplicate.statusCode, 200, "an existing active material does not consume admission capacity");
+  assert.equal(fullDuplicate.json().duplicate, true);
+  assert.equal(fullDuplicate.json().documentId, retryCandidates[0]!.documentId);
+  const fullVersionDuplicate = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[0]!, ...common },
+    payload: { fileName: "existing.md", base64: duplicateBytes.toString("base64"), documentId: retryCandidates[0]!.documentId } });
+  assert.equal(fullVersionDuplicate.statusCode, 200);
+  assert.equal(fullVersionDuplicate.json().versionId, retryCandidates[0]!.versionId);
+  assert.deepEqual(await sql`SELECT count(*)::int AS n FROM member_wiki_tasks WHERE uploader_id=${owner!.id}`, beforeFullDuplicate);
+  const differentMaterial = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[0]!, ...common },
+    payload: { fileName: "new.md", base64: Buffer.from(`# New ${randomUUID()}`).toString("base64") } });
+  assert.equal(differentMaterial.statusCode, 429, "new work still needs admission capacity");
   await sql`UPDATE member_wiki_tasks SET state='failed' WHERE id IN (${candidateIds[0]!},${candidateIds[1]!})`;
   for (const taskId of candidateIds.slice(2, 10)) {
     assert.equal((await retry(taskId)).statusCode, 202);
