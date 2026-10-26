@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { sql } from "@aihot/backend/db";
+import { sql, type Db } from "@aihot/backend/db";
 import { enqueueOn } from "@aihot/backend/jobs/queue";
 import type { MemberSession } from "../server.ts";
 import { EXPERT_QUEUE } from "./queue.ts";
@@ -30,6 +30,10 @@ function body(req: FastifyRequest): Record<string, unknown> {
 }
 
 function taskId() { return randomBytes(16).toString("hex"); }
+async function activeTaskCount(tx: Db, userId: string) {
+  const rows = await tx<{ count: number }[]>`SELECT count(*)::int AS count FROM member_expert_tasks WHERE user_id=${userId} AND state IN ('queued','running','waiting_input') AND expires_at > now()`;
+  return rows[0]?.count ?? 0;
+}
 
 /** The list preview is enough to recognise a task without returning the full private brief. */
 const NOTES_PREVIEW = 200;
@@ -80,7 +84,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const stateFilter = states.length ? sql`AND t.state = ANY(${sql.array(states)}::text[])` : sql``;
     const rows = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage,
         json_build_object('companyName', t.input->>'companyName', 'query', t.input->>'query', 'region', t.input->>'region', 'startDate', t.input->>'startDate', 'endDate', t.input->>'endDate', 'notes', left(coalesce(t.input->>'notes',''), ${NOTES_PREVIEW}), 'notesTruncated', length(coalesce(t.input->>'notes','')) > ${NOTES_PREVIEW}) AS input,
-        t.selected_entity AS "selectedEntity", t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
+        t.selected_entity AS "selectedEntity", t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.confirmed_attempts AS "confirmedAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
         ${taskVisibleUntil} AS "expiresAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
         COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
@@ -96,7 +100,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     if (!user) return reply.code(401).send({ error: "login_required" });
     const { id } = req.params as { id: string };
     const tasks = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage, t.input,
-        t.selected_entity AS "selectedEntity", t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt", ${taskVisibleUntil} AS "expiresAt",
+        t.selected_entity AS "selectedEntity", t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.confirmed_attempts AS "confirmedAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt", ${taskVisibleUntil} AS "expiresAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
         COALESCE((SELECT json_agg(json_build_object('id',m.id,'filename',m.filename,'byteSize',m.byte_size,'sha256',m.sha256,'extractionStatus',m.extraction_status,'extractionNote',m.extraction_note) ORDER BY m.created_at) FROM member_expert_task_materials m WHERE m.task_id=t.id AND m.user_id=${user.id} AND m.expires_at > now()), '[]'::json) AS materials
       FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug
@@ -155,8 +159,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
         const existing = await tx<{ id: string; state: string }[]>`SELECT id,state FROM member_expert_tasks WHERE user_id=${user.id} AND idempotency_key=${idempotencyKey}`;
         if (existing[0]) return existing[0];
       }
-      const active = await tx<{ count: number }[]>`SELECT count(*)::int AS count FROM member_expert_tasks WHERE user_id=${user.id} AND state IN ('queued','running','waiting_input') AND expires_at > now()`;
-      if ((active[0]?.count ?? 0) >= 2) return null;
+      if (await activeTaskCount(tx, user.id) >= 2) return null;
       const recent = await tx<{ count: number }[]>`SELECT count(*)::int AS count FROM member_expert_tasks WHERE user_id=${user.id} AND created_at > now() - interval '1 hour'`;
       if ((recent[0]?.count ?? 0) >= 10) return null;
       await tx`INSERT INTO member_expert_tasks(id,user_id,expert_slug,state,input,idempotency_key) VALUES (${id},${user.id},${slug as string},'queued',${tx.json(input)},${idempotencyKey})`;
@@ -180,15 +183,20 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const companyId = body(req).companyId;
     if (typeof companyId !== "string" || companyId.length > 120) return reply.code(400).send({ error: "invalid_entity" });
     const changed = await sql.begin(async tx => {
-      const rows = await tx<{ id: string; result: { candidates?: Array<Record<string, unknown>> } | null }[]>`SELECT t.id, t.result FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug WHERE t.id=${id} AND t.user_id=${user.id} AND t.state='waiting_input' AND (t.expert_slug=${EXPERT_SLUG} OR t.expert_slug=${PANORAMA_EXPERT_SLUG} OR e.manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb) FOR UPDATE OF t`;
+      const rows = await tx<{ id: string; result: { candidates?: Array<Record<string, unknown>> } | null; confirmed_attempts: number }[]>`SELECT t.id, t.result, t.confirmed_attempts FROM member_expert_tasks t JOIN member_experts e ON e.slug=t.expert_slug WHERE t.id=${id} AND t.user_id=${user.id} AND t.state='waiting_input' AND (t.expert_slug=${EXPERT_SLUG} OR t.expert_slug=${PANORAMA_EXPERT_SLUG} OR e.manifest->'tools' @> ${sql.json(["fuzzy_search_company_list", "get_company_profile", "get_direct_investment"])}::jsonb) FOR UPDATE OF t`;
       const candidates = rows[0]?.result?.candidates ?? [];
       const entity = candidates.find(candidate => candidate.id === companyId);
       if (!rows[0] || !entity) return false;
+      if (rows[0].confirmed_attempts >= 3) {
+        await tx`UPDATE member_expert_tasks SET state='failed',stage='failed',error_code='expert_retry_exhausted',error_message='确认后的执行次数已用尽，请重新提交。',finished_at=now(),updated_at=now() WHERE id=${id}`;
+        return "exhausted";
+      }
       await tx`UPDATE member_expert_tasks SET selected_entity=${tx.json(entity as never)}, state='queued', stage='queued', result=NULL, updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${id}`;
       await enqueueOn(EXPERT_QUEUE, { taskId: id }, { singletonKey: id }, tx);
       return true;
     });
     if (!changed) return reply.code(404).send({ error: "task_or_entity_not_found" });
+    if (changed === "exhausted") return reply.code(409).send({ error: "expert_retry_exhausted", message: "确认后的执行次数已用尽，请重新提交。" });
     return reply.code(202).send({ id, state: "queued" });
   });
 
@@ -200,15 +208,19 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const id = (req.params as { id: string }).id;
     const changed = await sql.begin(async tx => {
       await tx`SELECT id FROM member_users WHERE id=${user.id} FOR UPDATE`;
+      const retryable = await tx`SELECT id FROM member_expert_tasks WHERE id=${id} AND user_id=${user.id} AND state='failed' AND expires_at>now() AND (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END)<3 FOR UPDATE`;
+      if (!retryable.length) return "not_retryable";
+      if (await activeTaskCount(tx, user.id) >= 2) return "at_capacity";
       const currentAttempts = await tx<{ count: number }[]>`SELECT COALESCE(sum(execution_attempts),0)::int AS count FROM member_expert_tasks WHERE user_id=${user.id} AND last_attempt_at > now() - interval '1 hour'`;
-      if ((currentAttempts[0]?.count ?? 0) >= 6) return false;
+      if ((currentAttempts[0]?.count ?? 0) >= 6) return "not_retryable";
       const rows = await tx`UPDATE member_expert_tasks SET state='queued', stage='queued', error_code=NULL, error_message=NULL, updated_at=now(), finished_at=NULL
-        WHERE id=${id} AND user_id=${user.id} AND state='failed' AND execution_attempts < 3 AND expires_at > now() RETURNING id`;
-      if (!rows.length) return false;
+        WHERE id=${id} AND user_id=${user.id} AND state='failed' AND expires_at > now() RETURNING id`;
+      if (!rows.length) return "not_retryable";
       await enqueueOn(EXPERT_QUEUE, { taskId: id }, { singletonKey: `${id}-${Date.now()}` }, tx);
-      return true;
+      return "queued";
     });
-    if (!changed) return reply.code(404).send({ error: "task_not_retryable" });
+    if (changed === "at_capacity") return reply.code(429).send({ error: "expert_task_rate_limited", message: "任务并发上限已达到，请稍后重试。" });
+    if (changed !== "queued") return reply.code(404).send({ error: "task_not_retryable" });
     return reply.code(202).send({ id, state: "queued" });
   });
 

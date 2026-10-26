@@ -18,7 +18,7 @@ type Candidate = { id: string; name: string; status: string | null; creditCode: 
 type Task = {
   id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string; query?: string; region?: string; startDate?: string; endDate?: string; stockCodes?: string[]; notes?: string };
   result: { candidates?: Candidate[]; preview?: string; html?: string; format?: string; approximate?: boolean; query?: string; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null;
-  errorCode: string | null; errorMessage: string | null; executionAttempts: number;
+  errorCode: string | null; errorMessage: string | null; executionAttempts: number; confirmedAttempts: number; selectedEntity: { id?: string; name?: string } | null;
   createdAt: string; updatedAt: string; expiresAt: string; hasArtifact: boolean;
   materials: Array<{ id: string; filename: string; byteSize: number; sha256: string; extractionStatus: string; extractionNote: string | null }>;
 };
@@ -132,7 +132,7 @@ export default function TaskDetailPage() {
         <Badge variant={EXPERT_TASK_STATE_VARIANTS[task.state] ?? "secondary"}>{EXPERT_TASK_STATE_LABELS[task.state] ?? task.state}</Badge>
       </div>
       <p className="mt-2 text-xs text-ink-3">
-        步骤：{EXPERT_TASK_STAGE_LABELS[task.stage] ?? task.stage} · 创建 {when(task.createdAt)} · 更新 {when(task.updatedAt)} · 到期清理 {when(task.expiresAt)} · 执行尝试 {task.executionAttempts}/3
+        步骤：{EXPERT_TASK_STAGE_LABELS[task.stage] ?? task.stage} · 创建 {when(task.createdAt)} · 更新 {when(task.updatedAt)} · 到期清理 {when(task.expiresAt)} · {task.selectedEntity ? `检索尝试 ${task.executionAttempts - task.confirmedAttempts}/3 · 执行尝试 ${task.confirmedAttempts}/3` : task.state === "waiting_input" ? `检索尝试 ${task.executionAttempts}/3` : `执行尝试 ${task.executionAttempts}/3`}
       </p>
     </header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
@@ -195,7 +195,7 @@ export default function TaskDetailPage() {
       </Card>
 
       <div className="flex flex-wrap gap-2">
-        {isFailed && task.executionAttempts < 3 && <Button type="button" variant="outline" disabled={busy} onClick={() => void act("retry")}><RotateCcw size={14} aria-hidden="true" />重试</Button>}
+        {isFailed && (task.selectedEntity ? task.confirmedAttempts : task.executionAttempts) < 3 && <Button type="button" variant="outline" disabled={busy} onClick={() => void act("retry")}><RotateCcw size={14} aria-hidden="true" />重试</Button>}
         {active && <Button type="button" variant="ghost" disabled={busy} onClick={() => void act("cancel")}><XCircle size={14} aria-hidden="true" />取消任务</Button>}
       </div>
     </div>
