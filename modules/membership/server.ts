@@ -11,7 +11,7 @@ import { getDailyDigest } from "./notifications/digest.ts";
 import { beijingDate } from "@aihot/contracts/time";
 import { listedCondition } from "@aihot/backend/publication/scope";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
-import { SourceCheckTimeout, sourceCheckFailure, sourceCheckTimeoutMs, throwIfCheckAborted } from "./sources.ts";
+import { SourceCheckTimeout, sourceCheckFailure, sourceCheckTimeoutMs, sourceCheckMayStart, throwIfCheckAborted } from "./sources.ts";
 import * as cheerio from "cheerio";
 import { PRESET_TAGS } from "./catalog.ts";
 
@@ -19,7 +19,7 @@ const scrypt = promisify(scryptCallback);
 const COOKIE = "citic_member_session";
 const maxAge = 14 * 24 * 60 * 60;
 const attempts = new Map<string, { count: number; until: number }>();
-const sourcePreviews = new Map<string, number[]>();
+/** The employee source checks running right now: one per employee, at most SOURCE_CHECK_CONCURRENCY across the site. */
 const activeSourcePreviews = new Set<string>();
 /** Article pages one employee check reads; the stored source keeps its own budget for its own runs. */
 const SOURCE_PREVIEW_DETAIL_BUDGET = 3;
@@ -266,10 +266,9 @@ export function registerMembership(app: FastifyInstance) {
     const alreadyAdded = await sql<{ id: string }[]>`SELECT id FROM sources WHERE id = ${id}`;
     if (alreadyAdded.length) return reply.code(409).send({ error: "duplicate_source" });
     const key = user.id;
-    const nowMs = Date.now();
-    const attemptsForUser = (sourcePreviews.get(key) ?? []).filter((stamp) => nowMs - stamp < 60 * 60_000);
-    if (activeSourcePreviews.has(key) || activeSourcePreviews.size >= 4 || attemptsForUser.length >= 3) return reply.code(429).send({ error: "source_preview_rate_limited", retryAfterSeconds: 3600 });
-    sourcePreviews.set(key, [...attemptsForUser, nowMs]);
+    // One check per employee at a time and at most SOURCE_CHECK_CONCURRENCY across the site; there is no
+    // hourly quota, so an employee may keep checking as long as a slot is free.
+    if (!sourceCheckMayStart(activeSourcePreviews, key)) return reply.code(429).send({ error: "source_preview_rate_limited", retryAfterSeconds: 30 });
     activeSourcePreviews.add(key);
     // One budget for the whole check (site discovery, listing, article pages): a check that runs out
     // of time stops the reads it started instead of leaving them running.
@@ -326,10 +325,6 @@ export function registerMembership(app: FastifyInstance) {
       // A check that ended (accepted, refused or out of time) stops the reads it started.
       controller.abort();
       if (!previewRunning) activeSourcePreviews.delete(key);
-      if (sourcePreviews.size > 5000) for (const [entryKey, stamps] of sourcePreviews) {
-        const recent = stamps.filter((stamp) => nowMs - stamp < 60 * 60_000);
-        if (recent.length) sourcePreviews.set(entryKey, recent); else sourcePreviews.delete(entryKey);
-      }
     }
   });
 
