@@ -8,7 +8,7 @@ import type { MemberSession } from "../server.ts";
 import { WIKI_QUEUE } from "./queue.ts";
 import { answerQuestion } from "./answer.ts";
 import { routePages, type RoutableCitation, type RoutablePage } from "./routing.ts";
-import { FORMAT_MEDIA_TYPES, freshnessTier, FRESHNESS_LABELS, MAX_WIKI_ATTEMPTS, TASK_ERRORS, maxFileBytes } from "./catalog.ts";
+import { FORMAT_MEDIA_TYPES, freshnessTier, FRESHNESS_LABELS, FIGURE_LIMITS, MAX_WIKI_ATTEMPTS, TASK_ERRORS, maxFileBytes } from "./catalog.ts";
 import { enrichAllCitations, enrichCitations, readCitations, readCoverage, readFreshness, readPages, toAnswerCitation, type AnswerRecord } from "./history.ts";
 import { DEFAULT_BASE_ID, MAX_BASES, baseSlugOf, ensureDefaultBase, newBaseId, resolveBase } from "./bases.ts";
 import { checksum, versionBody } from "./worker.ts";
@@ -242,6 +242,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const versions = await sql`
       SELECT v.id, v.version_no AS "versionNo", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.source_url AS "sourceUrl", v.source_title AS "sourceTitle", v.source_author AS "sourceAuthor",
         v.source_org AS "sourceOrg", v.source_date AS "sourceDate", v.source_kind AS "sourceKind", v.extraction_status AS "extractionStatus", v.extraction_note AS "extractionNote",
+        t.figure_checkpoint->'coverage' AS "figureCoverage", t.figure_checkpoint->>'phase' AS "figurePhase", (v.figure_manifest IS NOT NULL) AS "hasFigureManifest",
         CASE WHEN v.format = 'markdown' AND v.extraction_status = 'available' THEN convert_from(v.body, 'UTF8') ELSE NULL END AS "bodyMd",
         v.created_at AS "createdAt", u.real_name AS "uploaderName",
         t.id AS "taskId", t.state AS "taskState", t.stage AS "taskStage", t.error_code AS "errorCode", t.error_message AS "errorMessage", t.attempt_count AS "attemptCount", t.updated_at AS "updatedAt"
@@ -249,6 +250,43 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       LEFT JOIN LATERAL (SELECT * FROM member_wiki_tasks t WHERE t.version_id = v.id ORDER BY t.created_at DESC LIMIT 1) t ON true
       WHERE v.document_id = ${id} ORDER BY v.version_no DESC`;
     return { document: documents[0], versions };
+  });
+
+  /** Bounded figure metadata for a version in the shared library. */
+  app.get("/api/v1/membership/knowledge/versions/:id/figures", async (req, reply) => {
+    noStore(reply);
+    const user = await authenticate(req);
+    if (!user) return reply.code(401).send({ error: "login_required" });
+    const id = (req.params as { id: string }).id;
+    const version = await sql<{ status: string; uploader_id: string; figure_manifest: unknown; figure_checkpoint: { coverage?: unknown; verifiedFindings?: Array<{ figureId: string; id: string; statement: string }> } | null }[]>`
+      SELECT d.status, d.uploader_id, v.figure_manifest, t.figure_checkpoint FROM member_wiki_document_versions v
+      JOIN member_wiki_documents d ON d.id=v.document_id
+      LEFT JOIN LATERAL (SELECT figure_checkpoint FROM member_wiki_tasks WHERE version_id=v.id ORDER BY created_at DESC LIMIT 1) t ON true WHERE v.id=${id}`;
+    if (!version[0]) return reply.code(404).send({ error: "knowledge_document_not_found" });
+    if (version[0].status !== "active") return reply.code(version[0].uploader_id === user.id || user.role === "admin" ? 410 : 404).send({ error: "knowledge_document_withdrawn" });
+    const figures = await sql<{ id: string; ordinal: number; caption: string | null; width: number; height: number }[]>`
+      SELECT id, ordinal, caption, width, height FROM member_wiki_figure_assets WHERE version_id=${id} ORDER BY ordinal LIMIT ${FIGURE_LIMITS.visualImages}`;
+    const verified = version[0].figure_checkpoint?.verifiedFindings ?? [];
+    const coverage = version[0].figure_checkpoint?.coverage
+      ?? (version[0].figure_manifest ? { status: "unavailable", read: false } : { status: "legacy_text_only", read: false });
+    return { coverage,
+      figures: figures.map(figure => ({ ...figure, anchor: `figure-${figure.id}`, findings: verified.filter(item => item.figureId === figure.id).map(item => ({ id: item.id, statement: item.statement })) })) };
+  });
+
+  /** Only the normalized, snapshotted bytes are served, after version membership and document status checks. */
+  app.get("/api/v1/membership/knowledge/versions/:id/figures/:figureId/content", async (req, reply) => {
+    noStore(reply);
+    reply.header("X-Content-Type-Options", "nosniff");
+    const user = await authenticate(req);
+    if (!user) return reply.code(401).send({ error: "login_required" });
+    const { id, figureId } = req.params as { id: string; figureId: string };
+    const rows = await sql<{ normalized_body: Buffer; media_type: string; status: string; uploader_id: string }[]>`
+      SELECT f.normalized_body, f.media_type, d.status, d.uploader_id FROM member_wiki_figure_assets f
+      JOIN member_wiki_document_versions v ON v.id=f.version_id JOIN member_wiki_documents d ON d.id=v.document_id
+      WHERE f.id=${figureId} AND f.version_id=${id}`;
+    if (!rows[0]) return reply.code(404).send({ error: "knowledge_figure_not_found" });
+    if (rows[0].status !== "active") return reply.code(rows[0].uploader_id === user.id || user.role === "admin" ? 410 : 404).send({ error: "knowledge_document_withdrawn" });
+    return reply.header("Content-Type", rows[0].media_type).send(rows[0].normalized_body);
   });
 
   /** A public page enters the same build queue as an uploaded file; fetching happens in the worker. */

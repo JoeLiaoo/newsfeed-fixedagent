@@ -281,6 +281,10 @@ function normalizePage(item: unknown): Record<string, unknown> {
     anchors: asStringArray(page.anchors, 12, 240),
     metrics,
     related: asStringArray(page.related, 16, 80),
+    figureRefs: Array.isArray(page.figureRefs) ? page.figureRefs.filter(ref => ref && typeof ref === "object").slice(0, 8).map(ref => {
+      const item = ref as Record<string, unknown>;
+      return { figureId: asString(item.figureId).slice(0, 80), findingIds: asStringArray(item.findingIds, 6, 80) };
+    }) : [],
   };
 }
 

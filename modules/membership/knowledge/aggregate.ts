@@ -4,6 +4,8 @@
 // away leaves the other materials' viewpoints standing.
 import { isKnownDate } from "./render.ts";
 import type { PageDraft, SourceRecord } from "./schema.ts";
+import type { FigureFinding } from "./figure-model.ts";
+import type { FigureCoverage } from "./figures.ts";
 
 /** One material's structured contribution to a target's page. */
 export type Contribution = {
@@ -27,7 +29,11 @@ export type Contribution = {
   attribution: string | null;
   /** The material's title, the name a citation falls back to when the source names no institution. */
   materialTitle: string | null;
+  figureFindings?: FigureFinding[];
+  figureCoverage?: FigureCoverage | null;
 };
+
+export type MergedFigure = { figureId: string; documentId: string; versionId: string; label: string; finding: FigureFinding };
 
 /** One citation on the merged page: what it points at, and who said it. */
 export type MergedCitation = {
@@ -48,6 +54,8 @@ export type Aggregate = {
   sources: SourceRecord[];
   /** The citations of the page, each with the attribution the library recorded. */
   citations: MergedCitation[];
+  figures: MergedFigure[];
+  figureCoverage: FigureCoverage | null;
   /** The material the page was last written from. */
   versionId: string | null;
   taskId: string | null;
@@ -164,6 +172,15 @@ export function citationsOf(contribution: Contribution): MergedCitation[] {
       });
     }
   }
+  const selected = new Set((contribution.page.figureRefs ?? []).flatMap(ref => ref.findingIds));
+  let figureNo = 0;
+  for (const finding of contribution.figureFindings ?? []) {
+    if (!selected.has(finding.id)) continue;
+    figureNo++;
+    citations.set(`figure:${finding.id}`, { label: `F${figureNo}`, analyst: null, organization: null,
+      publishedOn: null, versionId: contribution.versionId, documentId: contribution.documentId,
+      anchor: `figure-${finding.figureId}`, sourceTitle: contribution.materialTitle });
+  }
   // A page that quotes no viewpoint still rests on the material it was compiled from.
   if (!citations.size) {
     for (const found of byRef.values()) {
@@ -221,9 +238,12 @@ export function aggregateContributions(contributions: Contribution[]): Aggregate
     anchors: mergeLists(pages.map(entry => entry.anchors)),
     metrics: mergeLists(pages.map(entry => entry.metrics)),
     related: mergeLists(pages.map(entry => entry.related)),
+    figureRefs: mergeLists(pages.map(entry => entry.figureRefs ?? [])),
   };
   const sources: SourceRecord[] = [];
   const citations: MergedCitation[] = [];
+  const figures: MergedFigure[] = [];
+  let figureNo = 0;
   ordered.forEach((contribution, index) => {
     const map = maps[index]!;
     for (const source of contribution.sources) {
@@ -235,9 +255,24 @@ export function aggregateContributions(contributions: Contribution[]): Aggregate
       });
     }
     for (const citation of citationsOf(contribution)) {
-      citations.push({ ...citation, label: map.get(citation.label) ?? citation.label });
+      citations.push({ ...citation, label: citation.anchor?.startsWith("figure-") ? `F${++figureNo}` : map.get(citation.label) ?? citation.label });
+    }
+    const selected = new Set((contribution.page.figureRefs ?? []).flatMap(ref => ref.findingIds));
+    for (const finding of contribution.figureFindings ?? []) {
+      if (!selected.has(finding.id)) continue;
+      const ownIndex = (contribution.figureFindings ?? []).filter(item => selected.has(item.id)).findIndex(item => item.id === finding.id);
+      const preceding = ordered.slice(0, index).reduce((sum, item) => sum + (item.figureFindings ?? []).filter(one => (item.page.figureRefs ?? []).some(ref => ref.findingIds.includes(one.id))).length, 0);
+      figures.push({ figureId: finding.figureId, documentId: contribution.documentId, versionId: contribution.versionId, label: `F${preceding + ownIndex + 1}`, finding });
     }
   });
   const latest = ordered.at(-1)!;
-  return { page, sources, citations, versionId: latest.versionId, taskId: latest.taskId };
+  const coverages = ordered.map(item => item.figureCoverage).filter((item): item is FigureCoverage => Boolean(item));
+  const figureCoverage = coverages.length ? {
+    status: coverages.some(item => item.status === "partial") ? "partial" as const : coverages.some(item => item.status === "unavailable") ? "unavailable" as const : coverages.every(item => item.status === "legacy_text_only") ? "legacy_text_only" as const : "complete" as const,
+    read: coverages.some(item => item.read),
+    candidates: coverages.reduce((sum, item) => sum + item.candidates, 0), processed: coverages.reduce((sum, item) => sum + item.processed, 0),
+    evidenced: coverages.reduce((sum, item) => sum + item.evidenced, 0), unreadable: coverages.reduce((sum, item) => sum + item.unreadable, 0),
+    unprocessed: coverages.reduce((sum, item) => sum + item.unprocessed, 0), truncated: coverages.some(item => item.truncated),
+  } : null;
+  return { page, sources, citations, figures, figureCoverage, versionId: latest.versionId, taskId: latest.taskId };
 }

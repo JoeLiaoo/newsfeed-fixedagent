@@ -15,6 +15,8 @@ import { compiledDraftSchema, auditResultSchema, type AuditResult, type Compiled
 import { MAX_EXTRACTED_CHARS, MAX_WIKI_ATTEMPTS, TASK_ERRORS, type WikiFormat } from "./catalog.ts";
 import { fetchPublicArticle } from "./fetch-url.ts";
 import { extractSourceMetadata } from "./metadata.ts";
+import { processFigures, snapshotFigures, type FigureCheckpoint, type FigureCoverage, type FigureManifest } from "./figures.ts";
+import type { FigureFinding } from "./figure-model.ts";
 
 type TaskRow = {
   id: string;
@@ -27,6 +29,7 @@ type TaskRow = {
   attempt_count: number;
   draft: CompiledDraft | null;
   audit: unknown;
+  figure_checkpoint: FigureCheckpoint | null;
 };
 
 type VersionRow = {
@@ -44,6 +47,7 @@ type VersionRow = {
   extracted_text: string | null;
   extraction_status: string;
   source_url: string | null;
+  figure_manifest: FigureManifest | null;
 };
 
 function failureCode(error: unknown): { code: string; message: string } {
@@ -53,6 +57,8 @@ function failureCode(error: unknown): { code: string; message: string } {
   if (code === "knowledge_file_type_unsupported") return { code, message: TASK_ERRORS.knowledge_file_type_unsupported };
   if (code === "knowledge_text_unavailable" || code === "knowledge_file_unreadable") return { code, message: "未能读取材料内容，未生成知识页。" };
   if (code === "knowledge_text_empty") return { code, message: TASK_ERRORS.knowledge_text_empty };
+  if (code === "knowledge_content_empty") return { code, message: TASK_ERRORS.knowledge_content_empty };
+  if (code === "knowledge_figure_evidence_changed") return { code, message: TASK_ERRORS.knowledge_figure_evidence_changed };
   if (code.startsWith("knowledge_url_")) {
     const message = code === "knowledge_url_extract_empty" ? "网页已打开，但没有提取到足够的正文。" :
       code === "knowledge_url_not_html" ? "该链接不是可读取的网页正文。" :
@@ -77,13 +83,13 @@ function dateText(value: unknown): string | null {
 }
 
 async function loadTask(taskId: string): Promise<TaskRow | null> {
-  const rows = await sql<TaskRow[]>`SELECT t.id, t.document_id, t.version_id, t.uploader_id, t.stage, t.attempt_count, t.draft, t.audit, d.base_id
+  const rows = await sql<TaskRow[]>`SELECT t.id, t.document_id, t.version_id, t.uploader_id, t.stage, t.attempt_count, t.draft, t.audit, t.figure_checkpoint, d.base_id
     FROM member_wiki_tasks t JOIN member_wiki_documents d ON d.id = t.document_id WHERE t.id = ${taskId}`;
   return rows[0] ?? null;
 }
 
 async function loadVersion(versionId: string): Promise<VersionRow | null> {
-  const rows = await sql<VersionRow[]>`SELECT id, document_id, version_no, format, file_name, body, source_title, source_author, source_org, source_date, source_kind, extracted_text, extraction_status, source_url FROM member_wiki_document_versions WHERE id = ${versionId}`;
+  const rows = await sql<VersionRow[]>`SELECT id, document_id, version_no, format, file_name, body, source_title, source_author, source_org, source_date, source_kind, extracted_text, extraction_status, source_url, figure_manifest FROM member_wiki_document_versions WHERE id = ${versionId}`;
   return rows[0] ?? null;
 }
 
@@ -91,17 +97,18 @@ async function loadVersion(versionId: string): Promise<VersionRow | null> {
 async function fetchUrlVersion(version: VersionRow): Promise<VersionRow> {
   if (!version.source_url || version.body.length) return version;
   const article = await fetchPublicArticle(version.source_url);
-  const body = Buffer.from(article.text, "utf8");
+  const body = Buffer.from(article.text || article.title || "图表材料", "utf8");
+  const figureManifest: FigureManifest = { pipelineVersion: 1, htmlSha256: article.htmlSha256, candidates: article.figures, candidatesTruncated: article.candidatesTruncated };
   const fileName = `${(article.title || version.file_name).replace(/\.md$/i, "").slice(0, 195)}.md`;
   await sql`UPDATE member_wiki_document_versions SET body=${body}, byte_size=${body.length}, sha256=${checksum(body)},
       file_name=${fileName},
       source_title=COALESCE(${article.title}, source_title), source_author=COALESCE(${article.author}, source_author),
       source_org=COALESCE(${article.organization}, source_org), source_date=COALESCE(${article.date}::date, source_date),
-      extraction_status='pending', extraction_note=NULL WHERE id=${version.id}`;
+      figure_manifest=${sql.json(figureManifest as never)}, extraction_status='pending', extraction_note=NULL WHERE id=${version.id}`;
   if (article.title) await sql`UPDATE member_wiki_documents SET title=${article.title.slice(0, 200)}, updated_at=now() WHERE id=${version.document_id}`;
   return { ...version, file_name: fileName, body, source_title: article.title ?? version.source_title,
     source_author: article.author ?? version.source_author, source_org: article.organization ?? version.source_org,
-    source_date: article.date ?? version.source_date, extraction_status: "pending" };
+    source_date: article.date ?? version.source_date, extraction_status: "pending", figure_manifest: figureManifest };
 }
 
 /**
@@ -109,15 +116,16 @@ async function fetchUrlVersion(version: VersionRow): Promise<VersionRow> {
  * a build whose material was withdrawn, or whose lease went to another worker, stops here.
  */
 async function advanceStage(taskId: string, leaseToken: string, stage: string): Promise<void> {
-  const rows = await sql<{ id: string }[]>`UPDATE member_wiki_tasks SET stage=${stage}, updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`;
+  const rows = await sql<{ id: string }[]>`UPDATE member_wiki_tasks t SET stage=${stage}, updated_at=now() FROM member_wiki_documents d
+    WHERE t.id=${taskId} AND d.id=t.document_id AND d.status='active' AND t.state='running' AND t.lease_token=${leaseToken} AND t.lease_expires_at > now() RETURNING t.id`;
   if (!rows.length) throw new Error("knowledge_lease_lost");
 }
 
 /** Keeps a checkpoint of the build. A checkpoint that cannot be written means the build is not ours. */
 async function saveCheckpoint(taskId: string, leaseToken: string, field: "draft" | "audit", value: unknown): Promise<void> {
   const rows = field === "draft"
-    ? await sql<{ id: string }[]>`UPDATE member_wiki_tasks SET draft=${sql.json(value as never)}, updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`
-    : await sql<{ id: string }[]>`UPDATE member_wiki_tasks SET audit=${sql.json(value as never)}, updated_at=now() WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`;
+    ? await sql<{ id: string }[]>`UPDATE member_wiki_tasks t SET draft=${sql.json(value as never)}, updated_at=now() FROM member_wiki_documents d WHERE t.id=${taskId} AND d.id=t.document_id AND d.status='active' AND t.state='running' AND t.lease_token=${leaseToken} AND t.lease_expires_at > now() RETURNING t.id`
+    : await sql<{ id: string }[]>`UPDATE member_wiki_tasks t SET audit=${sql.json(value as never)}, updated_at=now() FROM member_wiki_documents d WHERE t.id=${taskId} AND d.id=t.document_id AND d.status='active' AND t.state='running' AND t.lease_token=${leaseToken} AND t.lease_expires_at > now() RETURNING t.id`;
   if (!rows.length) throw new Error("knowledge_lease_lost");
 }
 
@@ -159,7 +167,7 @@ async function extractVersion(version: VersionRow): Promise<string> {
   return capped.text;
 }
 
-function materialInput(task: TaskRow, version: VersionRow, text: string): MaterialInput {
+function materialInput(task: TaskRow, version: VersionRow, text: string, figures: FigureFinding[] = [], evidenceDigest?: string): MaterialInput {
   return {
     versionId: version.id,
     title: version.source_title ?? version.file_name,
@@ -171,6 +179,8 @@ function materialInput(task: TaskRow, version: VersionRow, text: string): Materi
       kind: version.source_kind,
     },
     text,
+    verifiedFigures: figures,
+    evidenceDigest,
   };
 }
 
@@ -200,7 +210,7 @@ async function knownSlugs(baseId: string, exclude: string[] = []): Promise<Set<s
  * still be in the library, the task must still be running with this worker's lease, and no newer
  * version of the same material may have been published already.
  */
-async function publish(task: TaskRow, version: VersionRow, draft: CompiledDraft, findings: Finding[], leaseToken: string): Promise<Array<{ pageId: string; slug: string }>> {
+async function publish(task: TaskRow, version: VersionRow, draft: CompiledDraft, findings: Finding[], leaseToken: string, figures: FigureFinding[], figureCoverage: FigureCoverage | null): Promise<Array<{ pageId: string; slug: string }>> {
   const pages: Array<{ pageId: string; slug: string }> = [];
   await sql.begin(async tx => {
     // The locks are taken in one order everywhere: the material first, then the task.
@@ -229,6 +239,8 @@ async function publish(task: TaskRow, version: VersionRow, draft: CompiledDraft,
       findings,
       attribution: [version.source_org, dateText(version.source_date)].filter(Boolean).join(" ") || null,
       materialTitle: version.source_title ?? version.file_name,
+      verifiedFigures: figures,
+      figureCoverage,
     });
     for (const page of written) pages.push({ pageId: page.pageId, slug: page.slug });
     const finished = await tx<{ id: string }[]>`UPDATE member_wiki_tasks SET state='succeeded', stage='published', updated_at=now(), finished_at=now(), error_code=NULL, error_message=NULL, lease_token=NULL, lease_expires_at=NULL WHERE id=${task.id} AND state='running' AND lease_token=${leaseToken} RETURNING id`;
@@ -250,7 +262,7 @@ export async function runWikiTask(taskId: string): Promise<void> {
   const started = await sql<TaskRow[]>`UPDATE member_wiki_tasks t SET state='running', stage='extracting', updated_at=now(), lease_token=${leaseToken}, lease_expires_at=now() + interval '5 minutes', attempt_count=attempt_count+1, last_attempt_at=now(), error_code=NULL, error_message=NULL
     FROM member_wiki_documents d
     WHERE t.id=${taskId} AND d.id=t.document_id AND d.status='active' AND t.state='queued' AND t.attempt_count < ${MAX_WIKI_ATTEMPTS}
-    RETURNING t.id, t.document_id, t.version_id, t.uploader_id, t.stage, t.attempt_count, t.draft, t.audit, d.base_id`;
+    RETURNING t.id, t.document_id, t.version_id, t.uploader_id, t.stage, t.attempt_count, t.draft, t.audit, t.figure_checkpoint, d.base_id`;
   const task = started[0];
   if (!task) return;
   let leaseLost = false;
@@ -273,28 +285,40 @@ export async function runWikiTask(taskId: string): Promise<void> {
       }
     }
     const text = await extractVersion(version);
+    let figureCheckpoint: FigureCheckpoint | null = null;
+    if (version.source_url && version.figure_manifest) {
+      const snapshotted = await snapshotFigures(taskId, leaseToken, version.id, version.figure_manifest, task.figure_checkpoint);
+      figureCheckpoint = await processFigures(taskId, leaseToken, version.id, version.figure_manifest, snapshotted);
+      // A page with little text may still be a report whose content is in the pictures; a page with
+      // neither enough text nor one verified picture has nothing to build from.
+      if (text.trim().length < 80 && !figureCheckpoint.verifiedFindings.length) throw new Error("knowledge_content_empty");
+    }
+    const figureFindings = figureCheckpoint?.verifiedFindings ?? [];
+    const evidenceDigest = figureCheckpoint?.evidenceDigest;
     await advanceStage(taskId, leaseToken, "compiling");
 
+    if (task.draft && evidenceDigest && (task.draft as unknown as { evidenceDigest?: string }).evidenceDigest !== evidenceDigest) throw new Error("knowledge_figure_evidence_changed");
     let draft = task.draft ? compiledDraftSchema.parse(task.draft) : null;
     if (!draft) {
-      draft = await compileMaterial(materialInput(task, version, text));
-      await saveCheckpoint(taskId, leaseToken, "draft", draft);
+      draft = await compileMaterial(materialInput(task, version, text, figureFindings, evidenceDigest));
+      await saveCheckpoint(taskId, leaseToken, "draft", { ...draft, evidenceDigest });
     }
     await advanceStage(taskId, leaseToken, "auditing");
 
-    const audit = task.audit ? readAuditCheckpoint(task.audit) : await auditMaterial(materialInput(task, version, text), draft);
-    await saveCheckpoint(taskId, leaseToken, "audit", audit);
+    if (task.audit && evidenceDigest && (task.audit as { evidenceDigest?: string }).evidenceDigest !== evidenceDigest) throw new Error("knowledge_figure_evidence_changed");
+    const audit = task.audit ? readAuditCheckpoint(task.audit) : await auditMaterial(materialInput(task, version, text, figureFindings, evidenceDigest), draft);
+    await saveCheckpoint(taskId, leaseToken, "audit", { ...audit, evidenceDigest });
 
     const corrected = applyCorrections(draft, audit.corrections);
     await advanceStage(taskId, leaseToken, "linting");
 
     const slugs = await knownSlugs(task.base_id || DEFAULT_BASE_ID, corrected.draft.pages.map(page => page.slug));
-    const findings = [...audit.findings, ...corrected.findings, ...lintDraft(corrected.draft, slugs)];
+    const findings = [...audit.findings, ...corrected.findings, ...lintDraft(corrected.draft, slugs, figureFindings)];
     if (audit.verdict === "fail") throw new Error("knowledge_audit_failed");
     if (blockingFindings(findings).length) throw new Error("knowledge_lint_blocked");
 
     await advanceStage(taskId, leaseToken, "publishing");
-    const pages = await publish(task, version, corrected.draft, findings, leaseToken);
+    const pages = await publish(task, version, corrected.draft, findings, leaseToken, figureFindings, figureCheckpoint?.coverage ?? null);
     await recordEvent({
       actorId: task.uploader_id,
       eventType: "knowledge.build.published",

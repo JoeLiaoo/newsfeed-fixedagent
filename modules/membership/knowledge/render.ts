@@ -3,6 +3,8 @@
 // library reads the same way and can be checked by machine.
 import type { CompiledDraft, Correction, Finding, PageDraft, SourceRecord } from "./schema.ts";
 import { FRESHNESS_TIERS, isRealDay, today } from "./catalog.ts";
+import type { MergedFigure } from "./aggregate.ts";
+import type { FigureCoverage } from "./figures.ts";
 
 export type Coverage = {
   analysts: number;
@@ -10,6 +12,7 @@ export type Coverage = {
   reports: number;
   first_report: string | null;
   last_report: string | null;
+  figureCoverage?: FigureCoverage | null;
 };
 
 const UNKNOWN = "未知";
@@ -221,8 +224,8 @@ function frontmatter(page: PageDraft, coverage: Coverage): string {
  * framework and a monitoring scale keep their own sections. Everything a page shows, it shows with the
  * attribution it was given.
  */
-export function renderPage(page: PageDraft, sources: SourceRecord[], documentId: string): { bodyMd: string; coverage: Coverage } {
-  const coverage = coverageOf(page);
+export function renderPage(page: PageDraft, sources: SourceRecord[], documentId: string, figures: MergedFigure[] = [], figureCoverage: FigureCoverage | null = null): { bodyMd: string; coverage: Coverage } {
+  const coverage = { ...coverageOf(page), ...(figureCoverage ? { figureCoverage } : {}) };
   const byRef = new Map(sources.map(source => [source.ref, source]));
   const head = frontmatter(page, coverage);
   // A page may hold several materials; each source points at the material it may be read in.
@@ -231,6 +234,20 @@ export function renderPage(page: PageDraft, sources: SourceRecord[], documentId:
   const statement = (value: string | null | undefined) => {
     const parts = paragraphs(value);
     return parts.length ? parts.flatMap(part => [part, ""]) : [UNKNOWN, ""];
+  };
+  const finish = (body: string[]) => {
+    if (figureCoverage && figureCoverage.status !== "legacy_text_only" && (figureCoverage.read || figureCoverage.candidates > 0)) {
+      const scope = figureCoverage.read
+        ? `处理范围：发现${figureCoverage.truncated ? "至少" : ""} ${figureCoverage.candidates} 张候选图；处理 ${figureCoverage.processed} 张，${figureCoverage.evidenced} 张有可用证据；${figureCoverage.unreadable} 张无可用证据，${figureCoverage.unprocessed} 张未处理。${figureCoverage.status === "complete" ? "" : "部分图片未处理或未能辨认。"}`
+        : "本次未读取图片：材料正文照常构建，图表证据不可用。";
+      body.push("", "## 图表证据", "", scope, "");
+      for (const item of figures) {
+        const finding = item.finding;
+        body.push(`- [${item.label}](/knowledge/documents/${encodeURIComponent(item.documentId)}#figure-${encodeURIComponent(item.figureId)}) ${line(finding.statement)}（可见依据：${line(finding.visibleEvidence)}${finding.period ? `；期间：${line(finding.period)}` : ""}${finding.unit ? `；单位：${line(finding.unit)}` : ""}${finding.dataSource ? `；图示来源：${line(finding.dataSource)}` : ""}${finding.limitations.length ? `；限制：${finding.limitations.map(line).join("、")}` : ""}）`);
+      }
+      if (!figures.length) body.push("- 当前页没有引用通过复核的图表事实。");
+    }
+    return { bodyMd: body.join("\n"), coverage };
   };
 
   if (page.pageType === "query") {
@@ -248,7 +265,7 @@ export function renderPage(page: PageDraft, sources: SourceRecord[], documentId:
       "",
       related(page.related),
     ];
-    return { bodyMd: body.join("\n"), coverage };
+    return finish(body);
   }
 
   if (page.pageType === "concept") {
@@ -284,7 +301,7 @@ export function renderPage(page: PageDraft, sources: SourceRecord[], documentId:
       "",
       related(page.related),
     ];
-    return { bodyMd: body.join("\n"), coverage };
+    return finish(body);
   }
 
   if (page.pageType === "monitor") {
@@ -305,7 +322,7 @@ export function renderPage(page: PageDraft, sources: SourceRecord[], documentId:
       "",
       related(page.related),
     ];
-    return { bodyMd: body.join("\n"), coverage };
+    return finish(body);
   }
 
   const stanceRows = page.stances.map(stance => `| ${cell(stance.analyst)} | ${cell(stance.institution)} | ${cell(stance.stance)} | ${isKnownDate(stance.date) ? stance.date : UNKNOWN} | ${cell(stance.argument)} | ${stance.sourceRef ? link(stance.sourceRef) : UNKNOWN} |`);
@@ -348,5 +365,5 @@ export function renderPage(page: PageDraft, sources: SourceRecord[], documentId:
     "",
     related(page.related),
   ];
-  return { bodyMd: body.join("\n"), coverage };
+  return finish(body);
 }

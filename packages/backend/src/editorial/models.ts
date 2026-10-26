@@ -75,10 +75,10 @@ export function invalidateModelCache() {
   cache = null;
 }
 
-/** Whether a registered model explicitly declares image input support. Unspecified means text-only. */
-export function modelSupportsVision(model: string): boolean {
-  return MODELS[model]?.vision === true;
-}
+/** Whether a registered model explicitly declares image input support. Unspecified means text-only.
+ *  The check itself lives with the provider, so callers that do not need the editorial model
+ *  registry do not have to load it; this export keeps the older path working. */
+export { modelSupportsVision } from "../providers/llm.ts";
 
 /** Whether a step can use a registered model. A model that reads images writes text as well. */
 export function capabilityAcceptsModel(capability: Capability, model: { vision?: boolean }): boolean {

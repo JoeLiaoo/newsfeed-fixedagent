@@ -80,6 +80,7 @@ const page: PageDraft = {
   anchors: [],
   metrics: [],
   related: [],
+  figureRefs: [],
 };
 
 const draft: CompiledDraft = {
