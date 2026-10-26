@@ -52,6 +52,7 @@ npm run typecheck
 「地区上市公司基金参与」已加入可运行专家目录：支持地区、报告期与代码输入，按公告候选与可选备案公示数据生成参与明细、统计摘要、缺口、HTML 预览和 Markdown 底稿。公告按发行人读取披露列表后在平台侧按标题和日期筛选；缺省地区发行人表只是有限浙江样本，备案查询地址未配置时会保留相关字段未知并在报告列出缺口。公告来源修复待 PR 评审、发布和员工真实样例复核，见[实施日志](docs/logs/2026-10-26-P2-07-listed-fund-participation.md)、[来源修复记录](docs/logs/2026-10-26-P2-07-listed-fund-announcement-source.md)及[分页与关键词跟进](docs/logs/2026-10-26-P2-07-eastmoney-pagination-keywords.md)。
 
 全景图 HTML 预览、Markdown 下载及移除员工采集台账下载的改动已随 [PR #97](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/97) 合并（`aa1323a`）；未记录生产发布，真实 MCP 全景样例和员工产物体验仍待验收。
+成功任务详情页的结果阅读区前置、任务信息后移，以及「我的任务与产物」列表按 HTML／Markdown 实际格式标注下载的 UI 维护见[工作日志](docs/logs/2026-10-27-P2-task-detail-flat-b.md)；本分支待评审，手机 iframe 双滚动仍需真机复核。
 扫码后由服务端确认绑定的修复已随 PR #18 合并（`4a8299f`），并随 [PR #19 发布](docs/logs/2026-10-23-P4-pr19-deployment.md)。二维码新标签页与互动状态框已随 [PR #22 部署](docs/logs/2026-10-23-P4-pr22-deployment.md)。
 
 按用户 2026-10-25 详细复测信息，生产现运行 `46a5b38`（含此前身份与知识库加载残余修复）；该次发布暂无仓库内独立运维日志。合并、发布与真实业务验收分别记录；发布上线不代表真实业务验收完成。材料正文、无效库页面与关联来源显示的后续维护见[工作日志](docs/logs/2026-10-25-P5-kb-detail-functional-fixes.md)，尚未合并或部署。

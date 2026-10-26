@@ -10,6 +10,7 @@ import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { beijingStamp } from "@aihot/contracts/time";
 import { TASK_STAGE_TEXT, TASK_STATE_TEXT, TASK_STATE_VARIANT, TASK_STATES_RUNNING } from "../experts/task-state.ts";
+import { artifactDownloadLabel } from "../experts/catalog.ts";
 
 export const handle: Screen = { tab: "experts", name: "我的任务与产物" };
 export const meta = () => pageMeta({ title: "我的任务与产物", path: "/account/artifacts", noindex: true });
@@ -138,7 +139,7 @@ export default function AccountArtifactsPage() {
                 <ClipboardList size={14} aria-hidden="true" />查看任务
               </IntentLink>
               {task.hasArtifact && <a className="inline-flex items-center gap-1 text-sm text-accent underline-offset-4 hover:underline" href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}>
-                <Download size={14} aria-hidden="true" />下载 Markdown 产物
+                <Download size={14} aria-hidden="true" />{artifactDownloadLabel(task.expertSlug)}
               </a>}
             </div>
           </Card>

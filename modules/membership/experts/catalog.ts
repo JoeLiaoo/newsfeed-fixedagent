@@ -104,6 +104,11 @@ export const COMING_SOON_EXPERT = {
 };
 
 export const SECTOR_PEER_EXPERT_SLUG = "sector-peer-landscape";
+
+/** Match the worker's stored artifact format (the HTML preview format can differ). */
+export function artifactDownloadLabel(expertSlug: string) {
+  return expertSlug === SECTOR_PEER_EXPERT_SLUG ? "下载 HTML 看板" : "下载 Markdown 产物";
+}
 export const SECTOR_PEER_EXPERT_SKILL = `# 赛道同业竞争看板
 
 输入一个企业或赛道名称，通过公开网页检索生成单文件 HTML 看板。中国同业、人民币融资和境内交易为主，美国同业与融资只作参考。
