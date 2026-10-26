@@ -11,7 +11,8 @@ import { getDailyDigest } from "./notifications/digest.ts";
 import { beijingDate } from "@aihot/contracts/time";
 import { listedCondition } from "@aihot/backend/publication/scope";
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
-import { SourceCheckTimeout, sourceCheckFailure, sourceCheckTimeoutMs, sourceCheckMayStart, throwIfCheckAborted } from "./sources.ts";
+import { rewriteHostAlias } from "@aihot/backend/lib/url";
+import { SourceCheckTimeout, memberSourceAddress, sourceCheckFailure, sourceCheckTimeoutMs, sourceCheckMayStart, throwIfCheckAborted } from "./sources.ts";
 import * as cheerio from "cheerio";
 import { PRESET_TAGS } from "./catalog.ts";
 
@@ -258,9 +259,10 @@ export function registerMembership(app: FastifyInstance) {
     if (!user) return reply.code(401).send({ error: "login_required" });
     const { name, sourceUrl, kind } = body(req);
     if (typeof sourceUrl !== "string" || typeof name !== "string" || name.trim().length < 2 || name.trim().length > 120 || (kind !== "rss" && kind !== "web_list" && kind !== "sitemap")) return reply.code(400).send({ error: "invalid_source" });
-    let url: URL;
-    try { url = new URL(sourceUrl); } catch { return reply.code(400).send({ error: "invalid_url" }); }
-    if (!/^https?:$/.test(url.protocol) || url.username || url.password) return reply.code(400).send({ error: "invalid_url" });
+    // The address is read on the name that serves the content, and stored the same way, so the
+    // collector keeps hitting the address that answered.
+    const url = memberSourceAddress(sourceUrl);
+    if (!url) return reply.code(400).send({ error: "invalid_url" });
     const digest = createHash("sha256").update(url.toString()).digest("hex").slice(0, 20);
     const id = `member-source-${digest}`;
     const alreadyAdded = await sql<{ id: string }[]>`SELECT id FROM sources WHERE id = ${id}`;
@@ -352,22 +354,22 @@ async function discoverSiteFeeds(home: URL, signal?: AbortSignal): Promise<{ rss
     const $ = cheerio.load(page.text());
     $("link[rel~='alternate'][type*='rss'], link[rel~='alternate'][type*='atom']").each((_i, el) => {
       const href = $(el).attr("href");
-      if (href) try { rssSet.add(new URL(href, page.url).toString()); } catch {}
+      if (href) try { rssSet.add(rewriteHostAlias(new URL(href, page.url)).toString()); } catch {}
     });
     $("a[href*='sitemap'][href$='.xml']").each((_i, el) => {
       const href = $(el).attr("href");
-      if (href && !sitemap) try { sitemap = new URL(href, page.url).toString(); sitemapMethod = "homepage_link"; } catch {}
+      if (href && !sitemap) try { sitemap = rewriteHostAlias(new URL(href, page.url)).toString(); sitemapMethod = "homepage_link"; } catch {}
     });
     const robots = await guardedFetch(new URL("/robots.txt", page.url).toString(), { timeoutMs: 5_000, maxBytes: 64_000, maxRedirects: 2, headers: { accept: "text/plain" }, signal });
     const line = robots.text().split(/\r?\n/).find((row) => /^\s*sitemap\s*:/i.test(row));
-    if (!sitemap && line) try { sitemap = new URL(line.split(":").slice(1).join(":").trim(), page.url).toString(); sitemapMethod = "robots_txt"; } catch {}
+    if (!sitemap && line) try { sitemap = rewriteHostAlias(new URL(line.split(":").slice(1).join(":").trim(), page.url)).toString(); sitemapMethod = "robots_txt"; } catch {}
   } catch {
     // The normal preview below reports the concrete source validation failure.
   }
   if (!sitemap) {
     for (const path of ["/sitemap.xml", "/sitemap_index.xml"]) {
       try {
-        const candidate = new URL(path, home).toString();
+        const candidate = rewriteHostAlias(new URL(path, home)).toString();
         const response = await guardedFetch(candidate, { timeoutMs: 5_000, maxBytes: 32_000, maxRedirects: 2, headers: { accept: "application/xml,text/xml,*/*;q=0.8" }, signal });
         if (response.status === 200 && /<(?:\w+:)?(?:sitemapindex|urlset)\b/i.test(response.text())) { sitemap = response.url; sitemapMethod = "well_known"; break; }
       } catch { /* Try the next well-known sitemap location. */ }

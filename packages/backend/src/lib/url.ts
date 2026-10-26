@@ -1,4 +1,4 @@
-// URL normalisation for material identity, and the fetcher's network guard.
+// URL normalisation for material identity, the addresses a source is read from, and the fetcher's network guard.
 import { lookup } from "node:dns/promises";
 import net from "node:net";
 
@@ -33,6 +33,27 @@ export function normalizeUrl(input: string): string | null {
   let s = u.toString();
   if (s.endsWith("/") && u.pathname !== "/") s = s.slice(0, -1);
   return s;
+}
+
+/**
+ * Hosts that answer on one name and serve the content on another: a site may show a bot wall on its
+ * apex name while its feed is on the `www` name. The table is explicit, so a host joins it on purpose,
+ * and every address of that host is read on the name that serves the content.
+ */
+const HOST_ALIASES: Record<string, string> = {
+  "36kr.com": "www.36kr.com",
+};
+
+/**
+ * The address a source is read from and stored with: a host with a known alias is read on its alias.
+ * The path, the query and the port stay as they were given.
+ */
+export function rewriteHostAlias(url: URL): URL {
+  const alias = HOST_ALIASES[url.hostname.toLowerCase()];
+  if (!alias) return url;
+  const rewritten = new URL(url.toString());
+  rewritten.hostname = alias;
+  return rewritten;
 }
 
 /** Tweet id from an x.com / twitter.com status URL. */

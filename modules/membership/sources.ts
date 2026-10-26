@@ -1,6 +1,7 @@
 // Why an employee source check failed. One stable code per stage, so the page can say what happened
 // instead of one message for every failure, and so a vendor outage is not reported as a bad address.
 import { HttpStatusError } from "@aihot/backend/lib/http-fetch";
+import { rewriteHostAlias } from "@aihot/backend/lib/url";
 import { FetchError } from "@aihot/backend/sources/types";
 
 /** The check ran out of time: the site's own timeout, or the deadline the check gives itself. */
@@ -39,6 +40,19 @@ export function sourceCheckMayStart(active: ReadonlySet<string>, userId: string)
 export function throwIfCheckAborted(signal: AbortSignal): void {
   if (!signal.aborted) return;
   throw signal.reason ?? new SourceCheckTimeout();
+}
+
+/**
+ * The address an employee's source is read from and stored with: the host is read on the name that
+ * serves the content (a site may answer on its apex name with a bot wall and serve its feed on the
+ * `www` name), while the path, the query and the port stay as they were given. Null when the address
+ * is not a usable http(s) address.
+ */
+export function memberSourceAddress(sourceUrl: string): URL | null {
+  let url: URL;
+  try { url = new URL(sourceUrl.trim()); } catch { return null; }
+  if (!/^https?:$/.test(url.protocol) || url.username || url.password) return null;
+  return rewriteHostAlias(url);
 }
 
 export type SourceCheckCode =
