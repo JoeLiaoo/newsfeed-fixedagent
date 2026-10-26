@@ -20,7 +20,7 @@ const ERROR_TEXT: Record<string, string> = {
   invalid_origin: "请求来源无效，请刷新页面后重试。",
   login_required: "请先登录后再添加信源。",
   duplicate_source: "这个信源已经添加。",
-  source_preview_rate_limited: "来源检查次数或并发已达上限，请稍后再试。",
+  source_preview_rate_limited: "同时进行的来源检查已达上限，请稍后再试。",
   source_unreachable: "无法访问该地址，请确认地址公开可访问。",
   source_timeout: "来源检查超时，请换一个响应更快的地址或稍后再试。",
   source_not_parseable: "该地址不是可解析的 RSS、文章列表或 sitemap。",
@@ -85,7 +85,7 @@ export default function SourcesPage() {
   }
 
   return <main className="mx-auto w-full max-w-6xl px-5 py-8">
-    <header className="mb-6"><h1 className="text-2xl font-semibold tracking-tight">资讯信源</h1><p className="mt-2 max-w-5xl text-sm leading-relaxed text-ink-3">RSS/Atom、sitemap 或文章列表页先经过公开地址、内容和重复检查。提交网站首页时会探测页面 RSS、robots.txt 和常见 sitemap 地址；若未发现，则只采集你提交的列表页。每位员工每小时最多检查 3 次，全站同时最多 4 次检查。系统只采集公开内容；下表持续显示实际采用的范围、首次预览数量和近 7 天收录量，不能据此保证覆盖全站。</p></header>
+    <header className="mb-6"><h1 className="text-2xl font-semibold tracking-tight">资讯信源</h1><p className="mt-2 max-w-5xl text-sm leading-relaxed text-ink-3">RSS/Atom、sitemap 或文章列表页先经过公开地址、内容和重复检查。提交网站首页时会探测页面 RSS、robots.txt 和常见 sitemap 地址；若未发现，则只采集你提交的列表页。全站同时最多 4 次检查。系统只采集公开内容；下表持续显示实际采用的范围、首次预览数量和近 7 天收录量，不能据此保证覆盖全站。</p></header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
     {loaded && !sources.length && aboutSnapshotSources !== null && aboutSnapshotSources > 0 && <Alert className="mb-5" role="alert">实时信源列表为空，但「关于」页最近快照显示 {aboutSnapshotSources} 个启用信源。两处数据不一致，请管理员核对 API 与数据库状态。</Alert>}
     <Card className="mb-6">

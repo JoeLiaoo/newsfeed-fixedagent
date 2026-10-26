@@ -48,6 +48,16 @@ const server = http.createServer((req, res) => {
     res.end(`<ul><li><a href="/article-refused/1">An article whose page is refused</a></li></ul>`);
     return;
   }
+  if (path.startsWith("/listing-plain/")) {
+    res.setHeader("content-type", "text/html");
+    res.end(`<ul><li><a href="/article-plain/${path.split("/").pop()}">An article whose page reads</a></li></ul>`);
+    return;
+  }
+  if (path.startsWith("/article-plain/")) {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(`<html><head><title>An article</title></head><body><h1>An article</h1><p>${"The article page reads fine. ".repeat(20)}</p></body></html>`);
+    return;
+  }
   res.writeHead(404);
   res.end("not found");
 });
@@ -113,4 +123,12 @@ test("a check that runs out of time reports the timeout and saves nothing; a ref
   assert.equal((refused.json() as { source: { detailFailures: number } }).source.detailFailures, 1);
   const kept = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM sources WHERE id = ${sourceId(`${base}/listing-refused`)}`;
   assert.equal(kept[0]!.n, 1, "a listing whose article page is refused is still saved");
+
+  // There is no hourly quota: the checks above already used three, and these two are still checked
+  // instead of answered with a rate limit.
+  for (const n of [1, 2]) {
+    const again = await submit(`Another source ${n}`, `${base}/listing-plain/${n}`);
+    assert.equal(again.statusCode, 201, `the ${n}th check after three was not rate-limited`);
+    assert.equal((again.json() as { source: { detailFailures: number } }).source.detailFailures, 0);
+  }
 });

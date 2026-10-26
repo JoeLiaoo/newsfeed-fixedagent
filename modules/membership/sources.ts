@@ -20,6 +20,18 @@ export function sourceCheckTimeoutMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : SOURCE_CHECK_TIMEOUT_MS;
 }
 
+/** How many employee source checks may run at the same time across the whole site. */
+export const SOURCE_CHECK_CONCURRENCY = 4;
+
+/**
+ * Whether a new employee source check may start: one employee runs one check at a time, and the site
+ * runs at most SOURCE_CHECK_CONCURRENCY checks at a time. There is no hourly quota — the only limits
+ * are these two, so an employee may keep checking as long as a slot is free.
+ */
+export function sourceCheckMayStart(active: ReadonlySet<string>, userId: string): boolean {
+  return !active.has(userId) && active.size < SOURCE_CHECK_CONCURRENCY;
+}
+
 /**
  * A check that ran out of time saves nothing: the reason it stopped travels on, so the page says the
  * check timed out instead of that the site refused.
