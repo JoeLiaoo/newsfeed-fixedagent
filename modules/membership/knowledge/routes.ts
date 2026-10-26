@@ -2,7 +2,7 @@
 // may see the library, and the library decides what it holds.
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { sql } from "@aihot/backend/db";
+import { sql, type Db } from "@aihot/backend/db";
 import { enqueueOn } from "@aihot/backend/jobs/queue";
 import type { MemberSession } from "../server.ts";
 import { WIKI_QUEUE } from "./queue.ts";
@@ -16,6 +16,7 @@ import { withdrawDocumentPages } from "./publish.ts";
 import { detectFormat } from "./extract.ts";
 
 type Authenticate = (request: FastifyRequest, allowPending?: boolean) => Promise<MemberSession | null>;
+const ADMISSION_MESSAGE = "每人同时最多处理 2 个构建，每小时最多上传或手动重试 10 次。请稍后再试。";
 
 function noStore(reply: { header: (name: string, value: string) => unknown }) {
   reply.header("Cache-Control", "private, no-store");
@@ -42,6 +43,17 @@ function isDate(value: string | null): value is string {
   if (!value || !/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/** Uploads and manual retries share the same employee admission budget. Call under the user lock. */
+async function admissionLimited(tx: Db, userId: string): Promise<boolean> {
+  const active = await tx<{ count: number }[]>`SELECT count(*)::int AS count FROM member_wiki_tasks WHERE uploader_id=${userId} AND state IN ('queued','running')`;
+  if ((active[0]?.count ?? 0) >= 2) return true;
+  const recent = await tx<{ count: number }[]>`SELECT (
+    (SELECT count(*) FROM member_wiki_tasks WHERE uploader_id=${userId} AND created_at > now() - interval '1 hour') +
+    (SELECT count(*) FROM member_wiki_audit_events WHERE actor_id=${userId} AND event_type='knowledge.build.retried' AND created_at > now() - interval '1 hour')
+  )::int AS count`;
+  return (recent[0]?.count ?? 0) >= 10;
 }
 
 /**
@@ -271,18 +283,15 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const sha256 = checksum(bytes);
 
     const admitted = await sql.begin(async tx => {
-      await tx`SELECT id FROM member_users WHERE id=${user.id} FOR UPDATE`;
-      const active = await tx<{ count: number }[]>`SELECT count(*)::int AS count FROM member_wiki_tasks WHERE uploader_id=${user.id} AND state IN ('queued','running')`;
-      if ((active[0]?.count ?? 0) >= 2) return { limited: true as const };
-      const recent = await tx<{ count: number }[]>`SELECT count(*)::int AS count FROM member_wiki_tasks WHERE uploader_id=${user.id} AND created_at > now() - interval '1 hour'`;
-      if ((recent[0]?.count ?? 0) >= 10) return { limited: true as const };
+      await tx`SELECT id FROM member_users WHERE id=${user.id} FOR NO KEY UPDATE`;
+      if (await admissionLimited(tx, user.id)) return { limited: true as const };
 
       let documentId = requestedDocument;
       if (documentId) {
         const owned = await tx<{ id: string }[]>`SELECT id FROM member_wiki_documents WHERE id=${documentId} AND status='active' AND base_id=${base.id} AND (uploader_id=${user.id} OR ${user.role === "admin"})`;
         if (!owned[0]) return { forbidden: true as const };
       } else {
-        const same = await tx<{ document_id: string }[]>`SELECT v.document_id FROM member_wiki_document_versions v WHERE v.sha256=${sha256} AND v.document_id IN (SELECT id FROM member_wiki_documents WHERE uploader_id=${user.id} AND base_id=${base.id}) LIMIT 1`;
+        const same = await tx<{ document_id: string }[]>`SELECT v.document_id FROM member_wiki_document_versions v JOIN member_wiki_documents d ON d.id=v.document_id WHERE v.sha256=${sha256} AND d.uploader_id=${user.id} AND d.base_id=${base.id} AND d.status='active' LIMIT 1`;
         if (same[0]) {
           const version = await tx<{ id: string; version_no: number }[]>`SELECT id, version_no FROM member_wiki_document_versions WHERE document_id=${same[0].document_id} AND sha256=${sha256} LIMIT 1`;
           return { duplicate: true as const, documentId: same[0].document_id, versionId: version[0]!.id, versionNo: version[0]!.version_no };
@@ -307,7 +316,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
 
     if ("limited" in admitted) {
       console.warn(JSON.stringify({ event: "knowledge_upload_rate_limited", userId: user.id }));
-      return reply.code(429).send({ error: "knowledge_upload_rate_limited", message: "同时处理的构建过多，请稍后再试。" });
+      return reply.code(429).send({ error: "knowledge_upload_rate_limited", message: ADMISSION_MESSAGE });
     }
     if ("forbidden" in admitted) return reply.code(403).send({ error: "knowledge_not_permitted", message: TASK_ERRORS.knowledge_not_permitted });
     if ("duplicate" in admitted) {
@@ -367,16 +376,24 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
     const id = (req.params as { id: string }).id;
-    const changed = await sql.begin(async tx => {
-      await tx`SELECT id FROM member_users WHERE id=${user.id} FOR UPDATE`;
+    const result = await sql.begin(async tx => {
+      await tx`SELECT id FROM member_users WHERE id=${user.id} FOR NO KEY UPDATE`;
+      // Withdrawal locks the document before changing its tasks. Use the same order so a
+      // failed task cannot be queued after its material has left the library.
+      const documents = await tx<{ id: string }[]>`SELECT d.id FROM member_wiki_documents d JOIN member_wiki_tasks t ON t.document_id=d.id WHERE t.id=${id} AND t.uploader_id=${user.id} AND d.status='active' FOR UPDATE OF d`;
+      if (!documents.length) return "unavailable" as const;
+      const retryable = await tx<{ id: string }[]>`SELECT id FROM member_wiki_tasks WHERE id=${id} AND uploader_id=${user.id} AND state='failed' AND attempt_count < ${MAX_WIKI_ATTEMPTS}`;
+      if (!retryable.length) return "unavailable" as const;
+      if (await admissionLimited(tx, user.id)) return "limited" as const;
       const rows = await tx`UPDATE member_wiki_tasks SET state='queued', stage='queued', error_code=NULL, error_message=NULL, updated_at=now(), finished_at=NULL, lease_token=NULL, lease_expires_at=NULL
         WHERE id=${id} AND uploader_id=${user.id} AND state='failed' AND attempt_count < ${MAX_WIKI_ATTEMPTS} RETURNING id`;
-      if (!rows.length) return false;
+      if (!rows.length) return "unavailable" as const;
       await enqueueOn(WIKI_QUEUE, { taskId: id }, { singletonKey: `${id}-${Date.now()}` }, tx);
       await tx`INSERT INTO member_wiki_audit_events(id, actor_id, event_type, task_id, detail) VALUES (${randomUUID()}, ${user.id}, 'knowledge.build.retried', ${id}, ${tx.json({})})`;
-      return true;
+      return "queued" as const;
     });
-    if (!changed) return reply.code(404).send({ error: "knowledge_task_not_retryable" });
+    if (result === "unavailable") return reply.code(404).send({ error: "knowledge_task_not_retryable" });
+    if (result === "limited") return reply.code(429).send({ error: "knowledge_upload_rate_limited", message: ADMISSION_MESSAGE });
     return reply.code(202).send({ id, state: "queued" });
   });
 

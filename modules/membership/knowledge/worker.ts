@@ -208,7 +208,7 @@ export async function runWikiTask(taskId: string): Promise<void> {
   const leaseToken = randomUUID();
   const started = await sql<TaskRow[]>`UPDATE member_wiki_tasks t SET state='running', stage='extracting', updated_at=now(), lease_token=${leaseToken}, lease_expires_at=now() + interval '5 minutes', attempt_count=attempt_count+1, last_attempt_at=now(), error_code=NULL, error_message=NULL
     FROM member_wiki_documents d
-    WHERE t.id=${taskId} AND d.id=t.document_id AND t.state='queued' AND t.attempt_count < ${MAX_WIKI_ATTEMPTS}
+    WHERE t.id=${taskId} AND d.id=t.document_id AND d.status='active' AND t.state='queued' AND t.attempt_count < ${MAX_WIKI_ATTEMPTS}
     RETURNING t.id, t.document_id, t.version_id, t.uploader_id, t.stage, t.attempt_count, t.draft, t.audit, d.base_id`;
   const task = started[0];
   if (!task) return;
@@ -269,14 +269,17 @@ export async function runWikiTask(taskId: string): Promise<void> {
 /** Puts a build whose worker stopped back on the queue, at the stage it had reached. */
 export async function recoverWikiTasks(enqueue: (taskId: string, tx: Db) => Promise<unknown>): Promise<{ recovered: number }> {
   return sql.begin(async tx => {
-    const stale = await tx<{ id: string; state: string }[]>`UPDATE member_wiki_tasks SET
+    const stale = await tx<{ id: string; state: string }[]>`UPDATE member_wiki_tasks t SET
       state=CASE WHEN attempt_count < ${MAX_WIKI_ATTEMPTS} THEN 'queued' ELSE 'failed' END,
       stage=CASE WHEN attempt_count < ${MAX_WIKI_ATTEMPTS} THEN 'queued' ELSE 'failed' END,
       error_code=CASE WHEN attempt_count < ${MAX_WIKI_ATTEMPTS} THEN NULL ELSE 'knowledge_retry_exhausted' END,
       error_message=CASE WHEN attempt_count < ${MAX_WIKI_ATTEMPTS} THEN NULL ELSE ${TASK_ERRORS.knowledge_retry_exhausted} END,
       updated_at=now(), finished_at=CASE WHEN attempt_count < ${MAX_WIKI_ATTEMPTS} THEN NULL ELSE now() END,
       lease_token=NULL, lease_expires_at=NULL
-      WHERE state='running' AND lease_expires_at < now() RETURNING id,state`;
+      FROM member_wiki_documents d
+      WHERE d.id=t.document_id AND d.status='active' AND t.state='running' AND t.lease_expires_at < now() RETURNING t.id,t.state`;
+    await tx`UPDATE member_wiki_tasks t SET state='cancelled', stage='failed', error_code='knowledge_document_withdrawn', error_message=${TASK_ERRORS.knowledge_document_withdrawn}, updated_at=now(), finished_at=now(), lease_token=NULL, lease_expires_at=NULL
+      FROM member_wiki_documents d WHERE d.id=t.document_id AND d.status='withdrawn' AND t.state IN ('queued','running')`;
     const queued = stale.filter(row => row.state === "queued");
     for (const row of queued) await enqueue(row.id, tx);
     return { recovered: queued.length };
