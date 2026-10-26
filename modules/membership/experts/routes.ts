@@ -5,11 +5,12 @@ import { enqueueOn } from "@aihot/backend/jobs/queue";
 import type { MemberSession } from "../server.ts";
 import { EXPERT_QUEUE } from "./queue.ts";
 import { parseSkillUpload, expertSlug, executionMode } from "./import.ts";
-import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, QUERY_EXPERT_SLUGS, SECTOR_PEER_EXPERT_SLUG, XINHUA_ALLOWED_TOOLS, XINHUA_BASE_TOOLS } from "./catalog.ts";
+import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG, HIDDEN_BUILTIN_SLUGS, HIDDEN_EXPERT_STATUS, LISTED_FUND_PARTICIPATION_EXPERT_SLUG, PANORAMA_EXPERT_SLUG, QUERY_EXPERT_SLUGS, SECTOR_PEER_EXPERT_SLUG, XINHUA_ALLOWED_TOOLS, XINHUA_BASE_TOOLS } from "./catalog.ts";
 import { seedBuiltinExperts } from "./seed.ts";
 import { parseTaskMaterials, MAX_TOTAL_MATERIAL_BYTES } from "./materials.ts";
 import { getTaskArtifact } from "./worker.ts";
 import { parseTaskPage, taskPagination, type TaskPageQuery } from "./task-query.ts";
+import { parseListedFundInput } from "./listed-fund-participation.ts";
 
 type Authenticate = (request: FastifyRequest, allowPending?: boolean) => Promise<MemberSession | null>;
 
@@ -41,7 +42,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     if (!user) return reply.code(401).send({ error: "login_required" });
     await seedBuiltinExperts();
     const experts = await sql<{ slug: string; name: string; description: string; version: string; status: string; missing_dependencies: string[]; execution_mode: string; created_at: Date }[]>`
-      SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${PANORAMA_EXPERT_SLUG} OR manifest->'tools' @> ${sql.json([...XINHUA_ALLOWED_TOOLS])}::jsonb THEN 'xinhua_panorama' WHEN slug=${FRONTIER_PODCAST_EXPERT_SLUG} THEN 'podcast_search' WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json([...XINHUA_BASE_TOOLS])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
+      SELECT slug, name, description, version, status, missing_dependencies, CASE WHEN slug=${PANORAMA_EXPERT_SLUG} OR manifest->'tools' @> ${sql.json([...XINHUA_ALLOWED_TOOLS])}::jsonb THEN 'xinhua_panorama' WHEN slug=${FRONTIER_PODCAST_EXPERT_SLUG} THEN 'podcast_search' WHEN slug=${LISTED_FUND_PARTICIPATION_EXPERT_SLUG} THEN 'listed_fund_participation' WHEN slug=${EXPERT_SLUG} OR manifest->'tools' @> ${sql.json([...XINHUA_BASE_TOOLS])}::jsonb THEN 'xinhua_trial' ELSE 'text_only' END AS execution_mode, created_at FROM member_experts
       WHERE status <> ${HIDDEN_EXPERT_STATUS} AND (status IN ('available', ${COMING_SOON_EXPERT_STATUS}) OR owner_id = ${user.id} OR ${user.role === "admin"})
       ORDER BY (status = 'available') DESC, (slug = ${PANORAMA_EXPERT_SLUG}) DESC, (slug = ${SECTOR_PEER_EXPERT_SLUG}) DESC, (slug = ${FRONTIER_PODCAST_EXPERT_SLUG}) DESC, created_at DESC`;
     return { experts };
@@ -78,7 +79,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const slugFilter = expertSlug ? sql`AND t.expert_slug = ${expertSlug}` : sql``;
     const stateFilter = states.length ? sql`AND t.state = ANY(${sql.array(states)}::text[])` : sql``;
     const rows = await sql`SELECT t.id, t.expert_slug AS "expertSlug", e.name AS "expertName", t.state, t.stage,
-        json_build_object('companyName', t.input->>'companyName', 'query', t.input->>'query', 'notes', left(coalesce(t.input->>'notes',''), ${NOTES_PREVIEW}), 'notesTruncated', length(coalesce(t.input->>'notes','')) > ${NOTES_PREVIEW}) AS input,
+        json_build_object('companyName', t.input->>'companyName', 'query', t.input->>'query', 'region', t.input->>'region', 'startDate', t.input->>'startDate', 'endDate', t.input->>'endDate', 'notes', left(coalesce(t.input->>'notes',''), ${NOTES_PREVIEW}), 'notesTruncated', length(coalesce(t.input->>'notes','')) > ${NOTES_PREVIEW}) AS input,
         t.selected_entity AS "selectedEntity", t.result, t.error_code AS "errorCode", t.error_message AS "errorMessage", t.execution_attempts AS "executionAttempts", t.created_at AS "createdAt", t.updated_at AS "updatedAt",
         ${taskVisibleUntil} AS "expiresAt",
         EXISTS(SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.user_id=${user.id} AND a.expires_at > now()) AS "hasArtifact",
@@ -113,7 +114,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     const notes = typeof body(req).notes === "string" ? (body(req).notes as string).trim() : "";
     const companyName = typeof body(req).companyName === "string" ? (body(req).companyName as string).trim() : "";
     const query = typeof body(req).query === "string" ? body(req).query as string : "";
-    if (notes.length > 20_000 || companyName.length > 200 || query.length > 200) return reply.code(413).send({ error: "task_input_too_large" });
+    if (notes.length > 20_000 || companyName.length > 200 || query.length > 200 || String(body(req).region ?? "").length > 100 || String(body(req).stockCodes ?? "").length > 2_000) return reply.code(413).send({ error: "task_input_too_large" });
     let materials;
     try { materials = parseTaskMaterials(body(req).materials); }
     catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "expert_material_invalid" }); }
@@ -125,7 +126,7 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     // A hidden builtin is not offered as a catalog entry, so it reads as absent: it starts no task.
     const hidden = (typeof slug === "string" && HIDDEN_BUILTIN_SLUGS.has(slug)) || expert?.status === HIDDEN_EXPERT_STATUS;
     if (hidden || !expert || expert.status !== "available") return reply.code(404).send({ error: hidden || !expert ? "expert_not_found" : "expert_dependencies_missing" });
-    const mode = slug === EXPERT_SLUG ? "xinhua_trial" : slug === PANORAMA_EXPERT_SLUG ? "xinhua_panorama" : slug === FRONTIER_PODCAST_EXPERT_SLUG ? "podcast_search" : executionMode(expert.manifest);
+    const mode = slug === EXPERT_SLUG ? "xinhua_trial" : slug === PANORAMA_EXPERT_SLUG ? "xinhua_panorama" : slug === FRONTIER_PODCAST_EXPERT_SLUG ? "podcast_search" : slug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG ? "listed_fund_participation" : executionMode(expert.manifest);
     if (mode === "xinhua_trial" && companyName.length < 2) return reply.code(400).send({ error: "company_name_required" });
     if (mode === "xinhua_panorama" && companyName.length < 2) return reply.code(400).send({ error: "company_name_required" });
     if (slug === SECTOR_PEER_EXPERT_SLUG && [...query.trim()].filter(char => /[\p{Script=Han}\p{Script=Latin}]/u.test(char)).length < 2) return reply.code(400).send({ error: "sector_query_required" });
@@ -138,9 +139,14 @@ export function registerExpertRoutes(app: FastifyInstance, authenticate: Authent
     // A written brief is what a custom expert runs on. The shipped experts read an entity or a topic
     // instead, so they start without one.
     const slugText = typeof slug === "string" ? slug : "";
+    let listedFundInput: ReturnType<typeof parseListedFundInput> | null = null;
+    if (slugText === LISTED_FUND_PARTICIPATION_EXPERT_SLUG) {
+      try { listedFundInput = parseListedFundInput(body(req)); }
+      catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : "listed_fund_input_invalid" }); }
+    }
     if (!BUILTIN_SLUGS.has(slugText) && !QUERY_EXPERT_SLUGS.has(slugText) && notes.length < 2) return reply.code(400).send({ error: "task_text_required" });
     const id = taskId();
-    const input = { ...(QUERY_EXPERT_SLUGS.has(slugText) ? { query } : mode === "text_only" ? {} : { companyName }), notes };
+    const input = { ...(QUERY_EXPERT_SLUGS.has(slugText) ? { query } : mode === "text_only" ? {} : { companyName }), ...(listedFundInput ?? {}), notes };
     const rawKey = req.headers["idempotency-key"];
     const idempotencyKey = typeof rawKey === "string" && /^[a-zA-Z0-9._:-]{8,128}$/.test(rawKey) ? rawKey : null;
     const accepted = await sql.begin(async tx => {

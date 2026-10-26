@@ -13,7 +13,7 @@ import { Textarea } from "@aihot/web/components/member-ui/textarea";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_STAGE_LABELS, FRONTIER_PODCAST_EXPERT_SLUG, HTML_PREVIEW_EXPERT_SLUGS, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, SECTOR_PEER_EXPERT_SLUG, modeNeedsEntity, expertStatusBadge } from "../experts/catalog.ts";
+import { COMING_SOON_EXPERT_STATUS, BUILTIN_SLUGS, EXPERT_STAGE_LABELS, FRONTIER_PODCAST_EXPERT_SLUG, HTML_PREVIEW_EXPERT_SLUGS, LISTED_FUND_PARTICIPATION_EXPERT_SLUG, PANORAMA_EXPERT_SLUG, SAMPLE_COMPANIES, SECTOR_PEER_EXPERT_SLUG, modeNeedsEntity, expertStatusBadge } from "../experts/catalog.ts";
 import { companyRelationLabel, isBranchType } from "../experts/data.ts";
 import { EXPERT_TASK_PAGE_SIZE } from "../experts/task-page.ts";
 import { TASK_STATE_TEXT, TASK_STATE_VARIANT } from "../experts/task-state.ts";
@@ -23,13 +23,13 @@ export const meta = () => pageMeta({ title: "专家详情", path: "/experts", no
 
 type Expert = {
   slug: string; name: string; description: string; version: string; status: string;
-  execution_mode: "xinhua_trial" | "xinhua_panorama" | "text_only" | "podcast_search"; missing_dependencies: string[];
+  execution_mode: "xinhua_trial" | "xinhua_panorama" | "text_only" | "podcast_search" | "listed_fund_participation"; missing_dependencies: string[];
 };
 type Candidate = { id: string; name: string; status: string | null; creditCode: string | null; address: string | null; startDate: string | null; typeName?: string | null; branchOf?: string | null };
 type Task = {
-  id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string | null; query?: string | null; notes?: string; notesTruncated?: boolean };
+  id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string | null; query?: string | null; region?: string; startDate?: string; endDate?: string; notes?: string; notesTruncated?: boolean };
   selectedEntity: { id?: string; name?: string; creditCode?: string | null } | null;
-  result: { candidates?: Candidate[]; preview?: string; html?: string; format?: string; approximate?: boolean; query?: string; podcast?: { episodes: number; partial: boolean }; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null; errorCode: string | null; errorMessage: string | null;
+  result: { candidates?: Candidate[]; preview?: string; html?: string; format?: string; approximate?: boolean; query?: string; podcast?: { episodes: number; partial: boolean }; panorama?: { incomplete: boolean; gapCount: number; limits: string[] }; listedFund?: { incomplete: boolean; gaps: number; issuers: number; announcements: number } } | null; errorCode: string | null; errorMessage: string | null;
   createdAt: string; hasArtifact: boolean; executionAttempts: number;
   materials: Array<{ id: string; filename: string; byteSize: number; sha256: string; extractionStatus: string; extractionNote: string | null }>;
 };
@@ -40,7 +40,7 @@ const ERROR_TEXT: Record<string, string> = {
 
 /** What the employee typed, so a task in the list says which subject it is about. */
 function taskSubject(task: Task) {
-  return (task.result?.query ?? task.input.companyName ?? task.input.query ?? "").trim();
+  return (task.result?.query ?? task.input.companyName ?? task.input.query ?? task.input.region ?? "").trim();
 }
 
 /** The reason a candidate is not the subject the employee had in mind, when the platform can tell. */
@@ -59,6 +59,10 @@ function submitErrorText(data: { error?: string; message?: string }, status: num
   if (data.error === "expert_task_rate_limited") return "任务并发或每小时提交上限已达到，请稍后重试。";
   if (data.error?.startsWith("expert_material_")) return "任务材料不符合要求，请使用有文字层的 PDF、DOCX、PPTX 或 UTF-8 Markdown，并检查大小。";
   if (data.error === "company_name_required") return "请填写至少 2 个字的目标企业名称。";
+  if (data.error === "listed_fund_region_invalid") return "请填写省或市级行政区名称。";
+  if (data.error === "listed_fund_year_invalid") return "年份须为 1990 年至今年之间的四位数字。";
+  if (data.error === "listed_fund_date_range_invalid") return "请检查报告期的日期格式和先后顺序。";
+  if (data.error === "listed_fund_stock_code_invalid" || data.error === "listed_fund_stock_code_duplicate") return "证券代码须为不重复的 6 位数字。";
   if (data.error === "api_unavailable") return "服务暂时不可用，请稍后重试；重试不会重复创建任务。";
   if (data.message) return data.message;
   return `任务提交失败（HTTP ${status}），请稍后重试；重试不会重复创建任务。`;
@@ -74,6 +78,13 @@ export default function ExpertDetailPage() {
   const [paging, setPaging] = useState(false);
   const [companyName, setCompanyName] = useState("");
   const [query, setQuery] = useState("");
+  const [listedRegion, setListedRegion] = useState("浙江省");
+  const [listedYear, setListedYear] = useState("");
+  const [listedCodes, setListedCodes] = useState("");
+  const [listedInputError, setListedInputError] = useState("");
+  const listedRegionInput = useRef<HTMLInputElement>(null);
+  const listedYearInput = useRef<HTMLInputElement>(null);
+  const listedCodesInput = useRef<HTMLTextAreaElement>(null);
   const [queryError, setQueryError] = useState("");
   const queryInput = useRef<HTMLInputElement>(null);
   const [companyError, setCompanyError] = useState("");
@@ -124,6 +135,25 @@ export default function ExpertDetailPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (slug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG) {
+      if (listedRegion.trim().length < 2) {
+        setListedInputError("请填写省或市级行政区名称。");
+        listedRegionInput.current?.focus();
+        return;
+      }
+      const codes = listedCodes.trim() ? listedCodes.trim().split(/[\s,，;；]+/).filter(Boolean) : [];
+      if (codes.some(code => !/^\d{6}$/.test(code)) || new Set(codes).size !== codes.length) {
+        setListedInputError("证券代码须为不重复的 6 位数字。");
+        listedCodesInput.current?.focus();
+        return;
+      }
+      if (listedYear && (!/^\d{4}$/.test(listedYear) || Number(listedYear) < 1990 || Number(listedYear) > new Date().getFullYear())) {
+        setListedInputError("年份须为 1990 年至今年之间的四位数字。");
+        listedYearInput.current?.focus();
+        return;
+      }
+    }
+    setListedInputError("");
     if (slug === SECTOR_PEER_EXPERT_SLUG && [...query.trim()].filter(char => /[\p{Script=Han}\p{Script=Latin}]/u.test(char)).length < 2) {
       setQueryError("请输入至少 2 个汉字或英文字母的企业或赛道名称。");
       queryInput.current?.focus();
@@ -150,15 +180,15 @@ export default function ExpertDetailPage() {
         for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
         return { fileName: file.name, base64: btoa(binary) };
       }));
-      const signature = JSON.stringify({ slug, companyName, query, notes, materials: materials.map(material => material.fileName) });
+      const signature = JSON.stringify({ slug, companyName, query, listedRegion, listedYear, listedCodes, notes, materials: materials.map(material => material.fileName) });
       if (submitKey.current?.signature !== signature) submitKey.current = { signature, key: crypto.randomUUID() };
-      const response = await fetch("/api/v1/membership/expert-tasks", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": submitKey.current.key }, body: JSON.stringify({ slug, companyName, query, notes, materials }) });
+      const response = await fetch("/api/v1/membership/expert-tasks", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": submitKey.current.key }, body: JSON.stringify({ slug, companyName, query, ...(slug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG ? { region: listedRegion, year: listedYear || undefined, stockCodes: listedCodes } : {}), notes, materials }) });
       const raw = await response.text();
       let data: { error?: string; message?: string } = {};
       try { data = JSON.parse(raw) as { error?: string; message?: string }; } catch { data = {}; }
       if (!response.ok) { setMessage(submitErrorText(data, response.status)); return; }
       submitKey.current = null;
-      setCompanyName(""); setQuery(""); setNotes(""); setFiles([]); setMessage("任务已进入队列。离开此页不会中断任务。"); await load(0);
+      setCompanyName(""); setQuery(""); setListedYear(""); setListedCodes(""); setNotes(""); setFiles([]); setMessage("任务已进入队列。离开此页不会中断任务。"); await load(0);
     } catch { setMessage("任务提交请求失败，请检查网络后重试；重试不会重复创建任务。"); }
     finally { setBusy(false); }
   }
@@ -230,6 +260,13 @@ export default function ExpertDetailPage() {
               <div className="grid gap-2"><Label htmlFor="podcast-query">话题</Label><Input ref={queryInput} id="podcast-query" name="query" required maxLength={100} value={query} aria-invalid={!!queryError} aria-describedby={queryError ? "podcast-query-error" : "podcast-query-hint"} onInvalid={() => setQueryError("请输入至少 2 个汉字、英文字母或数字的话题。")} onChange={event => { setQuery(event.target.value); if (queryError) setQueryError(""); }} placeholder="例如：具身智能、半导体…" />{queryError && <p id="podcast-query-error" className="text-sm text-hot" role="alert">{queryError}</p>}</div>
               <p id="podcast-query-hint" className="text-xs leading-relaxed text-ink-3">输入一个话题（2 到 100 字）。系统检索公开播客文字库，读取匹配节目的中文要点与摘要，结果以网页摘要呈现，并可下载 Markdown 产物。</p>
             </>}
+            {slug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG && <>
+              <div className="grid gap-2"><Label htmlFor="listed-region">省或市</Label><Input ref={listedRegionInput} id="listed-region" name="region" autoComplete="off" required maxLength={40} value={listedRegion} aria-invalid={!!listedInputError && listedRegion.trim().length < 2} aria-describedby={listedInputError ? "listed-input-error" : undefined} onChange={event => { setListedRegion(event.target.value); if (listedInputError) setListedInputError(""); }} placeholder="例如：浙江省、杭州市…" /></div>
+              <div className="grid gap-2"><Label htmlFor="listed-year">年份（可选）</Label><Input ref={listedYearInput} id="listed-year" name="year" type="number" inputMode="numeric" autoComplete="off" min="1990" max={new Date().getFullYear()} value={listedYear} aria-invalid={!!listedInputError && !!listedYear} aria-describedby={listedInputError && listedYear ? "listed-input-error" : undefined} onChange={event => { setListedYear(event.target.value); if (listedInputError) setListedInputError(""); }} placeholder="默认近三个自然年…" /></div>
+              <div className="grid gap-2"><Label htmlFor="listed-codes">证券代码（可选）</Label><Textarea ref={listedCodesInput} id="listed-codes" name="stockCodes" spellCheck={false} value={listedCodes} aria-invalid={!!listedInputError && !!listedCodes.trim()} aria-describedby={listedInputError ? "listed-input-error" : undefined} onChange={event => { setListedCodes(event.target.value); if (listedInputError) setListedInputError(""); }} rows={2} placeholder="多个代码用空格或逗号分隔，例如 600120 600126…" /></div>
+              {listedInputError && <p id="listed-input-error" className="text-sm text-hot" role="alert">{listedInputError}</p>}
+              <p className="text-xs leading-relaxed text-ink-3">不填代码时使用平台有限的地区样本，不代表当地全部上市公司。结果仅整理公开披露可得记录，并列出未核实和预算截断范围；不是全市场 LP 排名或完整工商穿透。</p>
+            </>}
             {modeNeedsEntity(expert.execution_mode) ? <>
               <div className="grid gap-2"><Label htmlFor="company-name">目标企业名称</Label><Input ref={companyInput} id="company-name" required minLength={2} maxLength={200} value={companyName} aria-invalid={!!companyError} aria-describedby={companyError ? "company-name-error" : undefined} onInvalid={() => setCompanyError("请填写至少 2 个字的目标企业名称。")} onChange={event => { setCompanyName(event.target.value); if (companyError) setCompanyError(""); }} placeholder="输入待核查主体" />{companyError && <p id="company-name-error" className="text-sm text-hot" role="alert">{companyError}</p>}</div>
               <p className="text-xs leading-relaxed text-ink-3">示例：{SAMPLE_COMPANIES.join("；")}。系统先检索同名候选，须由你确认主体后才查询。{expert.execution_mode === "xinhua_panorama" ? "确认后逐层核查。默认预算为最多 4 层、25 个主体、90 次查询，每个主体最多处理 20 条关系；达到上限或遇到无法核实的数据时，报告会标明不完整并列出缺口。" : "当前仅生成一层直接投资底稿，不代表完整穿透。"}</p>
@@ -254,7 +291,8 @@ export default function ExpertDetailPage() {
             {task.expertSlug === PANORAMA_EXPERT_SLUG && task.state === "succeeded" && task.result?.panorama?.incomplete && <Alert className="mt-3">结果不完整：{task.result.panorama.gapCount} 项核实缺口{task.result.panorama.limits.length ? `；达到上限：${task.result.panorama.limits.join("、")}` : ""}。请先查看报告中的缺口与未覆盖关系。</Alert>}
             {task.state === "waiting_input" && <div className="mt-4 grid gap-2"><p className="text-sm">请选择正确的工商主体，确认后系统才会继续：</p>{task.result?.approximate && <p className="text-xs text-ink-3">未找到名称包含「{taskSubject(task)}」的登记主体，以下为近似候选。</p>}{task.result?.candidates?.map(candidate => <Button key={candidate.id} type="button" variant="outline" disabled={busy} className="h-auto justify-start whitespace-normal px-3 py-3 text-left" onClick={() => void selectEntity(task.id, candidate.id)}><span><span className="flex flex-wrap items-center gap-2 font-medium">{candidate.name}{companyRelationLabel(candidate, task.result?.candidates ?? [], taskSubject(task), task.result?.approximate) && <Badge variant="secondary">{companyRelationLabel(candidate, task.result?.candidates ?? [], taskSubject(task), task.result?.approximate)}</Badge>}</span><span className="mt-1 block text-xs font-normal text-ink-3">{candidate.status ?? "状态未知"} · {candidate.address ?? "地址未提供"} · {candidate.creditCode ?? "统一代码未提供"}</span>{branchNote(candidate) && <span className="mt-1 block text-xs font-normal text-ink-3">{branchNote(candidate)}</span>}</span></Button>)}</div>}
             {task.result?.preview && <pre className="mt-4 max-h-72 overflow-auto whitespace-pre-wrap rounded-control bg-bg-sunk p-3 text-xs text-ink-2">{task.result.preview}</pre>}
-            {HTML_PREVIEW_EXPERT_SLUGS.has(task.expertSlug) && task.result?.format === "html" && task.result.html && <div className="mt-4"><p className="mb-2 break-words text-sm font-medium">{task.expertSlug === SECTOR_PEER_EXPERT_SLUG ? "网页看板" : task.expertSlug === PANORAMA_EXPERT_SLUG ? "全景图报告" : "播客摘要"} · {task.input.query ?? task.input.companyName}{task.result.podcast ? ` · 收录 ${task.result.podcast.episodes} 集` : ""}</p><iframe title={`${task.expertSlug === SECTOR_PEER_EXPERT_SLUG ? "赛道同业竞争看板" : task.expertSlug === PANORAMA_EXPERT_SLUG ? "对外投资全景图" : "前沿播客"}：${task.input.query ?? task.input.companyName ?? "查询"}`} srcDoc={task.result.html} sandbox="" className="h-[680px] w-full rounded-card border border-line bg-white" /></div>}
+            {task.expertSlug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG && task.result?.listedFund?.incomplete && <Alert className="mt-3">结果存在 {task.result.listedFund.gaps} 项核实缺口；请查看报告中的范围与未核事项。</Alert>}
+            {HTML_PREVIEW_EXPERT_SLUGS.has(task.expertSlug) && task.result?.format === "html" && task.result.html && <div className="mt-4"><p className="mb-2 break-words text-sm font-medium">{task.expertSlug === SECTOR_PEER_EXPERT_SLUG ? "网页看板" : task.expertSlug === PANORAMA_EXPERT_SLUG ? "全景图报告" : task.expertSlug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG ? "基金参与报告" : "播客摘要"} · {task.input.region ?? task.input.query ?? task.input.companyName}{task.result.podcast ? ` · 收录 ${task.result.podcast.episodes} 集` : ""}</p><iframe title={`${task.expertSlug === SECTOR_PEER_EXPERT_SLUG ? "赛道同业竞争看板" : task.expertSlug === PANORAMA_EXPERT_SLUG ? "对外投资全景图" : task.expertSlug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG ? "地区上市公司基金参与" : "前沿播客"}：${task.input.region ?? task.input.query ?? task.input.companyName ?? "查询"}`} srcDoc={task.result.html} sandbox="" className="h-[680px] w-full rounded-card border border-line bg-white" /></div>}
             {task.materials?.length > 0 && <div className="mt-3 text-sm">{task.materials.map(material => <div key={material.id} className="flex flex-wrap items-center gap-2">{task.state === "cancelled" ? <span>{material.filename}</span> : <a className="text-accent underline-offset-4 hover:underline" href={`/api/v1/membership/expert-tasks/${task.id}/materials/${material.id}`}>{material.filename}</a>}<span className="text-xs text-ink-3">{Math.ceil(material.byteSize / 1024)} KB · {material.extractionStatus === "available" ? "已用于任务" : material.extractionStatus === "unavailable" ? "无法提取文字" : "等待处理"}</span>{["succeeded", "failed", "cancelled"].includes(task.state) && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void deleteMaterial(task.id, material.id)}>删除</Button>}</div>)}</div>}
             <div className="mt-4 flex flex-wrap gap-2">
               <Button asChild variant="link" className="h-9 px-0"><IntentLink to={`/tasks/${task.id}`}>查看详情</IntentLink></Button>
