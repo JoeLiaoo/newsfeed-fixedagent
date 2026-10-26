@@ -493,6 +493,107 @@
       "tags": ["战略配售", "交易所"],
       "site_fulltext": false,
       "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-overseas-unicorn",
+      "name": "海外独角兽",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://feed.xyzfm.space/ym6ug8jctfp8",
+        "summaryIsBody": true,
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["国内", "投资研究", "播客"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "web-shixiang-reports",
+      "name": "拾象科技",
+      "kind": "web_list",
+      "config": {
+        "url": "https://shixiang.com/reports",
+        "allowUrlPrefixes": ["https://shixiang.com/reports/"],
+        "itemSelector": "a[href^='/reports/']",
+        "titleSelector": "h2, h3",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": ["国内", "投资研究", "人工智能"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-latepost-talk",
+      "name": "晚点 LatePost（晚点聊）",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://podcast.latepost.com/rss",
+        "summaryIsBody": true,
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": ["国内", "媒体", "播客"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-geekpark",
+      "name": "极客公园",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.geekpark.net/rss",
+        "itemUrlPrefixRewrite": {
+          "from": "http://www.geekpark.net/",
+          "to": "https://www.geekpark.net/"
+        },
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["国内", "科技媒体"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "json-jiqizhixin",
+      "name": "机器之心",
+      "kind": "json_list",
+      "config": {
+        "url": "https://www.jiqizhixin.com/api/article_library/articles.json?sort=time&page=1&per=40",
+        "headers": {
+          "Referer": "https://www.jiqizhixin.com/articles",
+          "Accept": "application/json, text/plain, */*"
+        },
+        "itemsPath": "articles",
+        "titlePaths": ["title"],
+        "urlTemplate": "https://www.jiqizhixin.com/articles/{slug}",
+        "authorPaths": ["author"],
+        "publishedAtPath": "publishedAt",
+        "summaryPaths": ["content"],
+        "externalIdPath": "id",
+        "allowUrlPrefixes": ["https://www.jiqizhixin.com/articles/"],
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 90,
+      "tags": ["国内", "人工智能", "研究"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
     }
   ]
 }

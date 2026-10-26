@@ -21,7 +21,7 @@ docker compose exec api npm run member:bootstrap-admin
 
 管理员账号可审核员工注册。员工密码至少 12 位；账号审核通过后才能登录。配置好 DeepSeek 后，后台模型调用仍由 `MODEL_CALLS_ENABLED` 控制。
 
-首次启动通过 `industry/sources.json` 导入示范信源；除人工智能外，新能源、新材料、先进制造和战略配售各有公开 RSS 来源。重新执行 `scripts/seed.ts` 只插入缺少的信源，不覆盖管理员在后台的修改。来源标签说明采集入口，文章所属赛道仍按文章内容分类。
+首次启动通过 `industry/sources.json` 导入示范信源；除人工智能外，新能源、新材料、先进制造和战略配售各有公开 RSS 来源。国内首批信源含海外独角兽（公开播客 RSS）、拾象科技（官网报告列表）、晚点 LatePost（官网晚点聊 RSS）、极客公园（官网 RSS）和机器之心（官网文章库 JSON 列表）。重新执行 `scripts/seed.ts` 只插入缺少的信源，不覆盖管理员在后台的修改。来源标签说明采集入口，文章所属赛道仍按文章内容分类。
 
 本地代码检查：
 
