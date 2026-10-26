@@ -127,6 +127,9 @@ test("expert tasks enforce per-user isolation, idempotency, cancellation, retry 
   const concurrency = await sql<{ execution_attempts: number; state: string }[]>`SELECT execution_attempts,state FROM member_expert_tasks WHERE id=${concurrentId}`;
   assert.equal(concurrency[0]?.execution_attempts, 1);
   assert.equal(concurrency[0]?.state, "succeeded");
+  const finishedExpiry=await sql<{task_expires_at:Date;artifact_expires_at:Date}[]>`SELECT t.expires_at AS task_expires_at,a.expires_at AS artifact_expires_at
+    FROM member_expert_tasks t JOIN member_expert_artifacts a ON a.task_id=t.id WHERE t.id=${concurrentId}`;
+  assert.equal(finishedExpiry[0]?.task_expires_at.toISOString(),finishedExpiry[0]?.artifact_expires_at.toISOString(),"a completed task stays readable for the artifact's full seven days");
   assert.equal(model.hits(), 1);
   assert.equal((await sql`SELECT extraction_status FROM member_expert_task_materials WHERE id=${materialRow!.id}`)[0]?.extraction_status, "available");
   assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/expert-tasks/${sharedTaskId}/artifact`, headers: { cookie: cookies[0]!, ...common } })).statusCode, 404);
@@ -146,7 +149,7 @@ test("expert tasks enforce per-user isolation, idempotency, cancellation, retry 
   const unrelatedReceipt="expert-unrelated:"+taskId;
   await sql`INSERT INTO receipts(logical_key,service,purpose,subject,status,response)
     VALUES(${unrelatedReceipt},'deepseek','expert','expert:test','received',${sql.json({report:"retain-audit-response"})})`;
-  await sql`UPDATE member_expert_tasks SET expires_at=now()-interval '1 second' WHERE id=${taskId}`;
+  await sql`UPDATE member_expert_tasks SET created_at=now()-interval '8 days',expires_at=now()-interval '1 second' WHERE id=${taskId}`;
   await sql`UPDATE member_expert_artifacts SET expires_at=now()-interval '1 second' WHERE task_id=${taskId}`;
   const expiredList = await app.inject({ method: "GET", url: "/api/v1/membership/expert-tasks", headers: { cookie: cookies[0]! } });
   assert(!((await expiredList.json() as { tasks: Array<{ id: string }> }).tasks).some(task => task.id === taskId));
@@ -160,4 +163,17 @@ test("expert tasks enforce per-user isolation, idempotency, cancellation, retry 
   assert.equal(Number(redacted[0]?.cost),0.25);
   const unrelated=await sql<{response:{report:string}}[]>`SELECT response FROM receipts WHERE logical_key=${unrelatedReceipt}`;
   assert.equal(unrelated[0]?.response.report,"retain-audit-response");
+
+  const lateTaskId=randomUUID();
+  await sql`INSERT INTO member_expert_tasks(id,user_id,expert_slug,state,input,created_at,expires_at)
+    VALUES(${lateTaskId},${userIds[0]},${builtin!.slug},'succeeded','{}'::jsonb,now()-interval '8 days',now()-interval '1 day')`;
+  await sql`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256,expires_at)
+    VALUES(${lateTaskId},${userIds[0]},'late.md','text/markdown',${Buffer.from('late')},'late',now()+interval '1 day')`;
+  await cleanupExpertData();
+  const lateArtifact=await sql`SELECT id FROM member_expert_artifacts WHERE task_id=${lateTaskId}`;
+  assert.equal(lateArtifact.length,1,"cleanup must not cascade-delete an artifact before its own expiry");
+  const lateDetail=await app.inject({method:"GET",url:`/api/v1/membership/expert-tasks/${lateTaskId}`,headers:{cookie:cookies[0]!, ...common}});
+  assert.equal(lateDetail.statusCode,200,"an existing late artifact keeps its task detail visible");
+  const lateExpiry=(await lateDetail.json() as {task:{expiresAt:string}}).task.expiresAt;
+  assert(new Date(lateExpiry).getTime()>Date.now());
 });

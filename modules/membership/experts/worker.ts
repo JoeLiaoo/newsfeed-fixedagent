@@ -539,7 +539,7 @@ export async function runExpertTask(taskId: string) {
       const active = await tx`SELECT id FROM member_expert_tasks WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} AND lease_expires_at > now() FOR UPDATE`;
       if (!active.length) return;
       await tx`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256) VALUES (${taskId},${task.user_id},${`expert-${taskId}.${isSectorPeer ? "html" : "md"}`},${isSectorPeer ? "text/html; charset=utf-8" : "text/markdown; charset=utf-8"},${body},${digest}) ON CONFLICT(task_id) DO NOTHING`;
-      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json(isSectorPeer ? { html: report, format: "html" } : isFrontierPodcast ? { html: previewHtml, format: "html", podcast: podcastStatus } : task.expert_slug === PANORAMA_EXPERT_SLUG ? { html: panoramaHtml, format: "html", panorama: panoramaStatus } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
+      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json(isSectorPeer ? { html: report, format: "html" } : isFrontierPodcast ? { html: previewHtml, format: "html", podcast: podcastStatus } : task.expert_slug === PANORAMA_EXPERT_SLUG ? { html: panoramaHtml, format: "html", panorama: panoramaStatus } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),expires_at=GREATEST(expires_at,(SELECT expires_at FROM member_expert_artifacts WHERE task_id=${taskId})),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
     });
   } catch (error) {
     const detail = errorText(error);
@@ -568,11 +568,12 @@ export async function recoverExpertTasks(enqueue: (taskId: string, tx: Db) => Pr
 
 export async function cleanupExpertData(now = new Date()) {
   return sql.begin(async tx => {
-    const expiredTasks=await tx<{id:string}[]>`SELECT id FROM member_expert_tasks WHERE expires_at<=${now}`;
-    const redacted=await redactMembershipTaskResponses(tx,expiredTasks.map(row=>row.id),now);
+    // Model responses age from task creation even when a finished task stays visible for its artifact.
+    const privateResponseTasks=await tx<{id:string}[]>`SELECT id FROM member_expert_tasks WHERE created_at<=${now}::timestamptz-interval '7 days'`;
+    const redacted=await redactMembershipTaskResponses(tx,privateResponseTasks.map(row=>row.id),now);
     const artifacts = await tx<{ count: number }[]>`WITH removed AS (DELETE FROM member_expert_artifacts WHERE expires_at <= ${now} RETURNING 1) SELECT count(*)::int AS count FROM removed`;
     const materials = await tx<{ count: number }[]>`WITH removed AS (DELETE FROM member_expert_task_materials WHERE expires_at <= ${now} RETURNING 1) SELECT count(*)::int AS count FROM removed`;
-    const tasks = await tx<{ count: number }[]>`WITH removed AS (DELETE FROM member_expert_tasks WHERE expires_at <= ${now} RETURNING 1) SELECT count(*)::int AS count FROM removed`;
+    const tasks = await tx<{ count: number }[]>`WITH removed AS (DELETE FROM member_expert_tasks t WHERE t.expires_at <= ${now} AND NOT EXISTS (SELECT 1 FROM member_expert_artifacts a WHERE a.task_id=t.id AND a.expires_at>${now}) RETURNING 1) SELECT count(*)::int AS count FROM removed`;
     return { expertArtifactsDeleted: artifacts[0]?.count ?? 0, expertMaterialsDeleted: materials[0]?.count ?? 0, expertTasksDeleted: tasks[0]?.count ?? 0, expertReceiptResponsesRedacted: redacted };
   });
 }
