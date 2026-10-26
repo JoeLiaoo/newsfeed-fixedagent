@@ -12,7 +12,7 @@ import type { Screen } from "@aihot/web/components/shell/screens";
 import { TASK_ERRORS, TASK_STAGE_LABELS, TASK_STATE_LABELS } from "../knowledge/catalog.ts";
 import { KnowledgeDetailSkeleton } from "./knowledge-detail-skeleton.tsx";
 
-export const handle: Screen = { tab: "me", name: "材料" };
+export const handle: Screen = { tab: "knowledge", name: "材料" };
 export const meta = () => pageMeta({ title: "材料", path: "/knowledge", noindex: true });
 
 const ENDPOINT = "/api/v1/membership/knowledge/";

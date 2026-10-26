@@ -13,7 +13,7 @@ import { pageMeta, siteUrl } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { FRESHNESS_LABELS, TASK_ERRORS, TASK_STAGE_LABELS, TASK_STATE_LABELS, type FreshnessTier } from "../knowledge/catalog.ts";
 
-export const handle: Screen = { tab: "me", name: "知识库" };
+export const handle: Screen = { tab: "knowledge", name: "知识库" };
 export const meta = () => pageMeta({ title: "知识库", path: "/knowledge", noindex: true });
 
 const ENDPOINT = "/api/v1/membership/knowledge/";

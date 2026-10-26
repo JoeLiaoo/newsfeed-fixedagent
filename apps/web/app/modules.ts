@@ -7,7 +7,7 @@
 // renders them like any import.
 import type { ComponentType, ReactNode } from "react";
 import type { TopicSummary } from "@aihot/contracts/site";
-import type { NavItem, Tab } from "./components/shell/nav";
+import type { NavItem } from "./components/shell/nav";
 
 export interface AdminNavEntry {
   to: string;
@@ -126,8 +126,6 @@ export interface WebModule {
     items?: NavItem[];
     link?: { to: string };
   }>;
-  /** Phone tab bar: tabs before 我的. */
-  tabs?: Tab[];
   /** The 我的 page: rows ahead of the engine's tools. */
   tools?: Array<{ to: string; label: string; icon: ReactNode }>;
   admin?: {

@@ -18,7 +18,7 @@ import { companyRelationLabel, isBranchType } from "../experts/data.ts";
 import { EXPERT_TASK_PAGE_SIZE } from "../experts/task-page.ts";
 import { TASK_STATE_TEXT, TASK_STATE_VARIANT } from "../experts/task-state.ts";
 
-export const handle: Screen = { tab: "me", name: "专家" };
+export const handle: Screen = { tab: "experts", name: "专家" };
 export const meta = () => pageMeta({ title: "专家详情", path: "/experts", noindex: true });
 
 type Expert = {

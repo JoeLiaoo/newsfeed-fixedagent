@@ -9,7 +9,7 @@ import { Label } from "@aihot/web/components/member-ui/label";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 
-export const handle: Screen = { tab: "me", name: "新增专家" };
+export const handle: Screen = { tab: "experts", name: "新增专家" };
 export const meta = () => pageMeta({ title: "新增专家", path: "/experts/new", noindex: true });
 
 function fileAsBase64(file: File) {

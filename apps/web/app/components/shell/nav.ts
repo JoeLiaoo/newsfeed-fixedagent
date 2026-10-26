@@ -1,5 +1,4 @@
-// Site navigation in one place: the desktop sidebar's groups and the phone tab bar's tabs, the engine's
-// and the site's modules'.
+// Site navigation in one place: the desktop sidebar's engine and module groups, and the phone's four tabs.
 import type { ReactNode } from "react";
 import { NAV, subjectAfter, withSubject } from "@aihot/site";
 import { BriefcaseBusiness, Building2, FolderKanban, FolderTree, Landmark, Library, Newspaper } from "lucide-react";
@@ -59,7 +58,7 @@ const GROUPS: NavGroup[] = [
 export const inNav = (to: string) => !(NAV.hidden as readonly string[]).includes(to);
 
 const UP = {
-  "/hot": { name: "热点榜", back: "热点", tab: "hot" },
+  "/hot": { name: "热点榜", back: "热点", tab: "featured" },
   "/topics": { name: "主题", back: "全部主题", tab: "me" },
 } as const;
 
@@ -98,17 +97,15 @@ export function sidebar(): NavGroup[] {
 export { sidebarIsActive } from "./nav-state";
 
 /**
- * The phone tab bar: 全部 lives beside 精选 as a switch, 热点 and 日报 are tabs, and "我的" at /more holds
- * 收藏, 外观, the tools and the site's own pages. Which tab a page sits under is declared by the page
- * itself (components/shell/screens.ts).
+ * The phone tab bar has four fixed destinations. 全部, 热点 and 日报 remain available under 资讯;
+ * "我的" at /more holds account pages and the other navigation entries. Each page declares its tab
+ * in its route handle (components/shell/screens.ts).
  */
 export type TabKey =
   | "featured"
-  | "hot"
-  | "daily"
-  | "me"
-  // A module's tab.
-  | (string & {});
+  | "knowledge"
+  | "experts"
+  | "me";
 
 export interface Tab {
   key: TabKey;
@@ -120,12 +117,12 @@ export interface Tab {
 
 const ENGINE_TABS: Tab[] = [
   { key: "featured", to: "/", label: "精选", icon: IconBolt },
-  { key: "hot", to: "/hot", label: "热点", icon: IconFlame },
-  { key: "daily", to: "/daily", label: "日报", icon: IconDoc },
+  { key: "knowledge", to: "/knowledge", label: "知识库", icon: Library },
+  { key: "experts", to: "/experts", label: "专家平台", icon: BriefcaseBusiness },
   { key: "me", to: "/more", label: "我的", icon: IconUser, changelog: true },
 ];
 
-/** The tab bar: the engine's, the modules' before 我的. */
+/** The phone tab bar's four destinations. */
 export function tabs(): Tab[] {
-  return [...ENGINE_TABS.slice(0, -1).filter((t) => inNav(t.to)), ...webModules().flatMap((m) => m.tabs ?? []), ENGINE_TABS.at(-1)!];
+  return ENGINE_TABS;
 }

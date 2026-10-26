@@ -10,7 +10,7 @@ import { Textarea } from "@aihot/web/components/member-ui/textarea";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 
-export const handle: Screen = { tab: "me", name: "新增知识库" };
+export const handle: Screen = { tab: "knowledge", name: "新增知识库" };
 export const meta = () => pageMeta({ title: "新增知识库", path: "/knowledge/bases/new", noindex: true });
 
 /** A new knowledge base: a name and, if it helps, what it is for. */
