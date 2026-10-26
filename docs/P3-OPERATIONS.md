@@ -14,6 +14,8 @@ P3 基础管线经 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/
 
 员工清单 `GET /api/v1/membership/gp-projects` 和单项详情 `GET /api/v1/membership/gp-projects/:id` 使用同一会话鉴权与可见范围：仅有效 GP 的 `verified` 投资；无会话返回 401，未知、未核实或 GP 已暂停的项目详情返回 404。详情仅返回项目名称、GP 名称、审核赛道、日期、状态与可展示来源；内部原始证据和审核人字段不下发。演示域名来源仍标作占位。发布后可用已审核项目及隐藏状态项目各核对一次，不能凭列表存在推断真实投资事实已验收。
 
+员工「中信股权联盟」及「市场头部机构」清单与详情分别使用同一接口的 `group=citic-alliance`、`group=market-leaders` 参数。`member_gp_watchlist.project_groups` 默认为空，原候选导入与站点 seed 均不自动认定分类。管理员在 `/settings/admin-gps` 核实 GP 身份后，可选择一个或两个分类并填写至少 8 字的分类依据；无依据的分类被拒绝。员工仅看到分类内有效 GP 的已核实投资，未核实、暂停、未分类及跨分类详情均不可见。分类只表示机构所属清单，不为投资事实背书；仍须分别核对每条投资的日期和证据。分类依据保留在后台，不进入员工 API。
+
 GP 通知生成和发送前重验复用员工清单的来源地址检查：`example.org`／`example.com`／`example.net` 及子域名只显示“演示/导入占位 · 无可核对来源”，不会把占位 URL 送到微信；有效 HTTPS 来源仍显示原链接。通知匹配只纳入有效 GP，且“战略配售”不参与兴趣匹配。此代码行为仍须在真实 GP 事实和手机端通知中验收。
 
 ## 员工扫码绑定与聊天

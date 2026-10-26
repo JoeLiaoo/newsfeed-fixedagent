@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { NavGroup } from "../app/components/shell/nav.ts";
-import { groupOpen, groupToggled } from "../app/components/shell/nav-state.ts";
+import { groupOpen, groupToggled, sidebarIsActive } from "../app/components/shell/nav-state.ts";
 
 const icon = () => null;
 const group = (id: string, items: Array<{ to: string; end?: boolean }>): NavGroup => ({
@@ -15,7 +15,15 @@ const group = (id: string, items: Array<{ to: string; end?: boolean }>): NavGrou
   items: items.map((item) => ({ ...item, label: item.to, icon })),
 });
 const news = group("news", [{ to: "/", end: true }, { to: "/all" }, { to: "/hot" }]);
-const projects = group("projects", [{ to: "/projects/invested-gp" }, { to: "/projects/citic-alliance" }]);
+const projects = group("projects", [{ to: "/projects/invested-gp" }, { to: "/projects/citic-alliance" }, { to: "/projects/market-leaders" }]);
+
+test("both project detail routes retain their collection entry in navigation", () => {
+  for (const slug of ["citic-alliance", "market-leaders"]) {
+    const path = `/projects/${slug}/project-1`;
+    assert.equal(groupOpen({}, projects, path), true);
+    assert.equal(sidebarIsActive({ to: `/projects/${slug}` }, path), true);
+  }
+});
 
 test("a group that opened itself closes with the first press and opens again with the next", () => {
   assert.equal(groupOpen({}, news, "/"), true, "the group holds the page the reader is on, so it opens by itself");

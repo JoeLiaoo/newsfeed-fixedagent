@@ -19,9 +19,9 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     reply.header("Cache-Control","private, no-store").header("Vary","Cookie");
     const user=await authenticate(req);
     if(!user) return reply.code(401).send({error:"login_required"});
-    const query=req.query as {limit?:unknown;offset?:unknown;matched?:unknown};
+    const query=req.query as {limit?:unknown;offset?:unknown;matched?:unknown;group?:unknown};
     const validInteger=(value:unknown)=>value===undefined || (typeof value==="string" && /^\d+$/.test(value) && Number.isSafeInteger(Number(value)));
-    if(!validInteger(query.limit)||!validInteger(query.offset)||!(query.matched===undefined||query.matched==="0"||query.matched==="1"))
+    if(!validInteger(query.limit)||!validInteger(query.offset)||!(query.matched===undefined||query.matched==="0"||query.matched==="1")||!validProjectGroup(query.group))
       return reply.code(400).send({error:"invalid_query"});
     const matched=query.matched==="1";
     const requestedLimit=Number(query.limit??50),requestedOffset=Number(query.offset??0);
@@ -33,6 +33,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       i.approved_event_date::text AS event_date,'verified'::text AS status,i.approved_source_url AS source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       WHERE i.status='verified' AND g.status='active' AND g.entity_role='gp'
+        AND (${query.group??null}::text IS NULL OR ${query.group??null}::text=ANY(g.project_groups))
         AND (NOT ${matched} OR (
           EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id}
             AND t.tag=ANY(i.sector_tags) AND t.tag<>'战略配售')
@@ -50,11 +51,14 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     reply.header("Cache-Control","private, no-store").header("Vary","Cookie");
     const user=await authenticate(req);
     if(!user) return reply.code(401).send({error:"login_required"});
+    const group=(req.query as {group?:unknown}).group;
+    if(!validProjectGroup(group)) return reply.code(400).send({error:"invalid_query"});
     const id=(req.params as {id:string}).id;
     const [row]=await sql<Array<{id:string;gp_name:string;investee_name:string;sector_tags:string[];event_date:string|null;status:string;source_url:string|null}>>`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.sector_tags,
       i.approved_event_date::text AS event_date,'verified'::text AS status,i.approved_source_url AS source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
-      WHERE i.id=${id} AND i.status='verified' AND g.status='active' AND g.entity_role='gp'`;
+      WHERE i.id=${id} AND i.status='verified' AND g.status='active' AND g.entity_role='gp'
+        AND (${group??null}::text IS NULL OR ${group??null}::text=ANY(g.project_groups))`;
     if(!row) return reply.code(404).send({error:"not_found"});
     const source=employeeSource(row.source_url);
     return {investment:{...row,source_url:source.url,source_placeholder:source.placeholder}};
@@ -73,7 +77,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const {limit,offset}=pageParams(query);
     const status=query.status;
     if(status!==undefined&&!['candidate','active','paused'].includes(status)) return reply.code(400).send({error:'invalid_status'});
-    const rows=await sql`SELECT id,canonical_name,aliases,entity_id,credit_code,entity_role,status,source_ref,reviewed_at,last_synced_at,last_error FROM member_gp_watchlist
+    const rows=await sql`SELECT id,canonical_name,aliases,entity_id,credit_code,entity_role,status,source_ref,project_groups,project_group_basis,reviewed_at,last_synced_at,last_error FROM member_gp_watchlist
       WHERE (${status??null}::text IS NULL OR status=${status??null}) ORDER BY created_at,id LIMIT ${limit+1} OFFSET ${offset}`;
     return {gps:rows.slice(0,limit),pagination:pagination(limit,offset,rows.length)};
   });
@@ -96,6 +100,12 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const creditCode=typeof input.creditCode==="string"?input.creditCode.trim():"";
     const source=typeof input.sourceRef==="string"?input.sourceRef.trim():"";
     const aliases=normalizeAliases(input.aliases);
+    const groups=input.projectGroups===undefined?undefined:validProjectGroups(input.projectGroups);
+    const groupBasis=input.projectGroupBasis===undefined?undefined:typeof input.projectGroupBasis==="string"?input.projectGroupBasis.trim():null;
+    if(groups===null||groupBasis===null||groupBasis!==undefined&&groupBasis.length>1000)
+      return reply.code(400).send({error:"invalid_project_groups"});
+    if(groups?.length && (!groupBasis || groupBasis.length<8))
+      return reply.code(400).send({error:"project_group_basis_required"});
     if(!aliases) return reply.code(400).send({error:"invalid_aliases"});
     if(!["candidate","active","paused"].includes(String(status))||!["manager","gp","fund"].includes(String(role))||
        entityId.length>128||creditCode.length>32||source.length<8||source.length>1000||
@@ -103,13 +113,17 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       return reply.code(400).send({error:"gp_identity_verification_required"});
     const id=(req.params as {id:string}).id;
     const changed=await sql`UPDATE member_gp_watchlist SET status=${status as string},entity_role=${role as string},entity_id=${entityId||null},credit_code=${creditCode||null},aliases=${aliases},
-      source_ref=${source},reviewed_by=${user.id},reviewed_at=now() WHERE id=${id}
+      source_ref=${source},project_groups=COALESCE(${groups??null}::text[],project_groups),
+      project_group_basis=COALESCE(${groupBasis??null}::text,project_group_basis),
+      reviewed_by=${user.id},reviewed_at=now() WHERE id=${id}
+      AND (cardinality(COALESCE(${groups??null}::text[],project_groups))=0
+        OR length(btrim(COALESCE(${groupBasis??null}::text,project_group_basis,'')))>=8)
       AND (NOT EXISTS(SELECT 1 FROM member_gp_snapshots WHERE gp_id=${id})
            OR (entity_id IS NOT DISTINCT FROM ${entityId||null} AND entity_role=${role as string}))
       RETURNING id`;
     if(changed.length) return {ok:true};
     const [existing]=await sql`SELECT id FROM member_gp_watchlist WHERE id=${id}`;
-    return reply.code(existing?409:404).send({error:existing?"gp_identity_locked_after_baseline":"not_found"});
+    return reply.code(existing?409:404).send({error:existing?"gp_identity_or_group_basis_required":"not_found"});
   });
   app.post("/api/v1/membership/admin/gps/:id/sync",async(req,reply)=>{
     if(!await admin(req,reply)) return;
@@ -174,6 +188,14 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     });
     return outcome==="ok"?{ok:true}:reply.code(outcome==="not_found"?404:409).send({error:outcome});
   });
+}
+
+function validProjectGroup(value:unknown):value is undefined|"citic-alliance"|"market-leaders" {
+  return value===undefined||value==="citic-alliance"||value==="market-leaders";
+}
+function validProjectGroups(value:unknown):string[]|null {
+  if(!Array.isArray(value)||value.length>2||!value.every(item=>item==="citic-alliance"||item==="market-leaders")||new Set(value).size!==value.length) return null;
+  return value as string[];
 }
 
 function pageParams(query:{limit?:string;offset?:string}) {
