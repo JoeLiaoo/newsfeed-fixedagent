@@ -558,4 +558,90 @@ test("the shared library is open to approved employees and closed to everyone el
   }
   assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_contributions WHERE version_id=${failClosed.versionId} AND status='active'`)[0]?.n, 1, "the published version is untouched by the failed builds");
 
+  // A failed task stays failed after withdrawal, and even a stale queue wakeup cannot call the model.
+  const withdrawnFailure = await seed([], { draft: false, text: `FAILME ${randomUUID()}` });
+  await runWikiTask(withdrawnFailure.taskId);
+  assert.equal((await sql`SELECT state FROM member_wiki_tasks WHERE id=${withdrawnFailure.taskId}`)[0]?.state, "failed");
+  assert.equal((await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/documents/${withdrawnFailure.documentId}/withdraw`, headers: { cookie: cookies[0]!, ...common } })).statusCode, 200);
+  const beforeRejectedRetry = await sql`SELECT count(*)::int AS n FROM member_wiki_audit_events WHERE task_id=${withdrawnFailure.taskId} AND event_type='knowledge.build.retried'`;
+  const beforeRejectedQueue = await sql`SELECT count(*)::int AS n FROM pgboss.job WHERE name='membership.knowledge'`;
+  assert.equal((await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/tasks/${withdrawnFailure.taskId}/retry`, headers: { cookie: cookies[0]!, ...common } })).statusCode, 404);
+  assert.deepEqual(await sql`SELECT count(*)::int AS n FROM member_wiki_audit_events WHERE task_id=${withdrawnFailure.taskId} AND event_type='knowledge.build.retried'`, beforeRejectedRetry);
+  assert.deepEqual(await sql`SELECT count(*)::int AS n FROM pgboss.job WHERE name='membership.knowledge'`, beforeRejectedQueue);
+  await sql`UPDATE member_wiki_tasks SET state='queued' WHERE id=${withdrawnFailure.taskId}`;
+  const hitsBeforeWithdrawnWakeup = provider.hits();
+  await runWikiTask(withdrawnFailure.taskId);
+  assert.equal(provider.hits(), hitsBeforeWithdrawnWakeup, "a queued task for withdrawn material cannot reach the model");
+  assert.equal((await sql`SELECT state FROM member_wiki_tasks WHERE id=${withdrawnFailure.taskId}`)[0]?.state, "queued");
+  await sql`UPDATE member_wiki_tasks SET state='running', lease_expires_at=now()-interval '1 minute' WHERE id=${withdrawnFailure.taskId}`;
+  assert.deepEqual(await recoverWikiTasks(async () => { assert.fail("withdrawn material must not be requeued"); }), { recovered: 0 });
+  assert.equal((await sql`SELECT state FROM member_wiki_tasks WHERE id=${withdrawnFailure.taskId}`)[0]?.state, "cancelled");
+
+  // The old SHA remains in the audit trail, but an identical upload creates a visible new material.
+  await sql`UPDATE member_wiki_tasks SET state='failed', created_at=now()-interval '2 hours' WHERE uploader_id=${owner!.id} AND state IN ('queued','running')`;
+  await sql`UPDATE member_wiki_tasks SET created_at=now()-interval '2 hours' WHERE uploader_id=${owner!.id}`;
+  await sql`UPDATE member_wiki_audit_events SET created_at=now()-interval '2 hours' WHERE actor_id=${owner!.id} AND event_type='knowledge.build.retried'`;
+  const reupload = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[0]!, ...common },
+    payload: { fileName: "某公司深度报告.md", base64: material, title: "重新上传的材料" } });
+  assert.equal(reupload.statusCode, 202);
+  const reuploaded = reupload.json() as { documentId: string; taskId: string; duplicate: boolean };
+  assert.equal(reuploaded.duplicate, false);
+  assert.notEqual(reuploaded.documentId, uploaded.documentId);
+  assert.ok(reuploaded.taskId);
+  const visibleReupload = await app.inject({ method: "GET", url: "/api/v1/membership/knowledge/documents?limit=100", headers: { cookie: cookies[0]!, ...common } });
+  const listed = (visibleReupload.json() as { documents: Array<{ id: string }> }).documents;
+  assert.ok(listed.some(document => document.id === reuploaded.documentId));
+  assert.ok(!listed.some(document => document.id === uploaded.documentId));
+  assert.equal((await sql`SELECT status FROM member_wiki_documents WHERE id=${uploaded.documentId}`)[0]?.status, "withdrawn");
+  await app.inject({ method: "POST", url: `/api/v1/membership/knowledge/documents/${reuploaded.documentId}/withdraw`, headers: { cookie: cookies[0]!, ...common } });
+  await sql`UPDATE member_wiki_tasks SET created_at=now()-interval '2 hours' WHERE id=${reuploaded.taskId}`;
+
+  // Retry admissions share the upload limits: two active builds, then ten total admissions/hour.
+  const retryCandidates = await Promise.all(Array.from({ length: 11 }, () => seed([basePage])));
+  const candidateIds = retryCandidates.map(candidate => candidate.taskId);
+  await sql`UPDATE member_wiki_tasks SET state='failed', created_at=now()-interval '2 hours' WHERE id IN ${sql(candidateIds)}`;
+  const retry = (taskId: string) => app.inject({ method: "POST", url: `/api/v1/membership/knowledge/tasks/${taskId}/retry`, headers: { cookie: cookies[0]!, ...common } });
+  assert.equal((await retry(candidateIds[0]!)).statusCode, 202);
+  assert.equal((await retry(candidateIds[1]!)).statusCode, 202);
+  assert.equal((await retry(candidateIds[2]!)).statusCode, 429, "a third active build is refused");
+  await sql`UPDATE member_wiki_tasks SET state='failed' WHERE id IN (${candidateIds[0]!},${candidateIds[1]!})`;
+  for (const taskId of candidateIds.slice(2, 10)) {
+    assert.equal((await retry(taskId)).statusCode, 202);
+    await sql`UPDATE member_wiki_tasks SET state='failed' WHERE id=${taskId}`;
+  }
+  const beforeHourlyLimit = await sql`SELECT state, attempt_count, draft, audit FROM member_wiki_tasks WHERE id=${candidateIds[10]!}`;
+  assert.equal((await retry(candidateIds[10]!)).statusCode, 429, "an eleventh retry in an hour is refused");
+  assert.deepEqual(await sql`SELECT state, attempt_count, draft, audit FROM member_wiki_tasks WHERE id=${candidateIds[10]!}`, beforeHourlyLimit);
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_audit_events WHERE actor_id=${owner!.id} AND event_type='knowledge.build.retried' AND created_at > now()-interval '1 hour'`)[0]?.n, 10);
+  const limitedUpload = await app.inject({ method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[0]!, ...common },
+    payload: { fileName: "quota.md", base64: Buffer.from(`# New material ${randomUUID()}`).toString("base64") } });
+  assert.equal(limitedUpload.statusCode, 429, "recent retries also use the upload admission budget");
+  await sql`UPDATE member_wiki_audit_events SET created_at=now()-interval '2 hours' WHERE actor_id=${owner!.id} AND event_type='knowledge.build.retried'`;
+  assert.equal((await retry(candidateIds[10]!)).statusCode, 202, "an expired hourly window permits another retry");
+  await sql`UPDATE member_wiki_tasks SET state='failed' WHERE id=${candidateIds[10]!}`;
+
+  const concurrentCandidates = await Promise.all([seed([basePage]), seed([basePage])]);
+  await sql`UPDATE member_wiki_tasks SET state='failed', created_at=now()-interval '2 hours' WHERE id IN (${concurrentCandidates[0]!.taskId},${concurrentCandidates[1]!.taskId})`;
+  const concurrentAdmissions = await Promise.all([
+    retry(concurrentCandidates[0]!.taskId), retry(concurrentCandidates[1]!.taskId),
+    app.inject({ method: "POST", url: "/api/v1/membership/knowledge/documents", headers: { cookie: cookies[0]!, ...common },
+      payload: { fileName: "concurrent.md", base64: Buffer.from(`# Concurrent ${randomUUID()}`).toString("base64") } }),
+  ]);
+  assert.deepEqual(concurrentAdmissions.map(response => response.statusCode).sort(), [202, 202, 429]);
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_tasks WHERE uploader_id=${owner!.id} AND state IN ('queued','running')`)[0]?.n, 2);
+
+  const racing = await seed([basePage]);
+  await sql`UPDATE member_wiki_tasks SET state='failed', created_at=now()-interval '2 hours' WHERE id=${racing.taskId}`;
+  await sql`UPDATE member_wiki_tasks SET state='failed' WHERE uploader_id=${owner!.id} AND state='queued'`;
+  const [raceRetry, raceWithdraw] = await Promise.all([
+    retry(racing.taskId),
+    app.inject({ method: "POST", url: `/api/v1/membership/knowledge/documents/${racing.documentId}/withdraw`, headers: { cookie: cookies[0]!, ...common } }),
+  ]);
+  assert.ok([202, 404].includes(raceRetry.statusCode));
+  assert.equal(raceWithdraw.statusCode, 200);
+  const hitsBeforeRaceWakeup = provider.hits();
+  await runWikiTask(racing.taskId);
+  assert.equal(provider.hits(), hitsBeforeRaceWakeup);
+  assert.ok(!["queued", "running"].includes((await sql`SELECT state FROM member_wiki_tasks WHERE id=${racing.taskId}`)[0]?.state));
+
 });

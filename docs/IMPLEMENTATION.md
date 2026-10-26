@@ -177,6 +177,8 @@ P4 出口：新平台可用，旧组件退役范围明确且有记录，新平�
 
 2026-10-24 针对 [Issue #43](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/43) 将知识库自动恢复与手动重试统一限定为 5 次，耗尽后保留失败原因；针对 [#44](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/44) 将材料日期校验改为真实日历日期。真实员工材料验收仍待执行，见[工作日志](logs/2026-10-24-P2-P5-backend-hardening.md)。
 
+2026-10-26 针对 [Issue #66](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/66)、[#67](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/67) 与 [#68](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/68)，收紧撤回后的重试、恢复与 worker 领取；撤回材料的 SHA 不再阻挡重新上传；上传与手动重试共用每人并发及每小时准入额度。代码与本地数据库回归见[工作日志](logs/2026-10-26-P5-i66-i67-i68.md)。本项为维护任务，P5-02～P5-04 的真实员工验收仍未完成，勾选不变。
+
 P5-01 的产物是代码与文档：材料、版本、构建任务、知识页、材料贡献、页面修订、引用、质量问题、审计及问答共十张表，构建／复核／lint／发布四段可恢复流程，以及带脚注引用的问答。PR #34 已合并，最终 CI 与临时 PostgreSQL 场景检查通过，见[复审日志](logs/2026-10-24-P5-pr34-review.md)；生产迁移与部署已随 2026-10-24 的 `4a91199` 完成，见[发布记录](logs/2026-10-24-P4-pr32-34-deployment.md)。P5-02～P5-04 需要真实账号和真实材料，按仓库约定保持未勾选。
 
 2026-10-24 按 [Issue #36](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/36) 把知识库改为**按库组织**（新增 `member_wiki_bases`，材料与知识页各加 `base_id`），并把专家平台与知识库的入口改为对称的卡片列表 → 详情。默认保留一个「知识库示例」，上线前的材料与页面自动归入该库；问答只依据所问之库的页面。该改动是维护任务，P5-01～P5-04 的验收标准与勾选状态不变，真实材料验收仍待执行，见[工作日志](logs/2026-10-24-i36-expert-knowledge-cards.md)。
