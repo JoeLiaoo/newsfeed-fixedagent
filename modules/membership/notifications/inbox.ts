@@ -5,12 +5,39 @@ import {sql,type Tx} from "@aihot/backend/db";
 import {decryptSecret,encryptSecret,ilinkConfigured,ilinkErrorKind,pollIlinkInbox,sendIlinkText} from "./ilink.ts";
 
 const GREETING_TEXT="已连接，之后会在这里推送。";
+const KEEPALIVE_TEXT="【News Feed】推送通道即将失效。请随便回一句（例如「在」），否则可能收不到之后的资讯/GP。";
 type AccountRow={
   user_id:string;recipient_id:string;channel_account_id:string;token_ciphertext:string;
   api_url:string;cursor_ciphertext:string|null;greeted_at:Date|null;
 };
 /** One confirmation per account; the same key makes a retry after a failed send the same message. */
 const greetingId=(userId:string)=>"ilink-greet-"+createHash("sha256").update(userId).digest("hex").slice(0,32);
+/** Postgres hands a timestamptz over as a Date; a text column or a JSON round-trip may bring a string. */
+function toDate(value:Date|string|number|null|undefined):Date|null{
+  if(value===null||value===undefined)return null;
+  const date=value instanceof Date?value:new Date(value);
+  return Number.isNaN(date.getTime())?null:date;
+}
+/** Whole hours between 1 and 23; anything else keeps the 20-hour default. */
+export function ilinkKeepaliveThresholdHours(value=process.env.P3_ILINK_KEEPALIVE_AFTER_HOURS):number{
+  const parsed=Number(value);
+  return Number.isInteger(parsed)&&parsed>=1&&parsed<=23?parsed:20;
+}
+export function keepaliveNudgeEligible(input:{channelState:string;hasContext:boolean;lastInboundAt:Date|string|null;nudgedAt:Date|string|null;now?:Date;thresholdHours?:number;deliveryEnabled?:boolean}):boolean{
+  if(input.deliveryEnabled===false||input.channelState!=="active"||!input.hasContext)return false;
+  const inboundAt=toDate(input.lastInboundAt);
+  if(!inboundAt)return false;
+  const nudgedAt=toDate(input.nudgedAt);
+  if(nudgedAt&&nudgedAt.getTime()>inboundAt.getTime())return false;
+  return (toDate(input.now)??new Date()).getTime()-inboundAt.getTime()>=
+    (input.thresholdHours??ilinkKeepaliveThresholdHours())*60*60*1000;
+}
+/** The same inbound window always produces the same send id, so a retry is the same message. */
+export function keepaliveNudgeId(userId:string,lastInboundAt:Date|string):string{
+  const inboundAt=toDate(lastInboundAt);
+  if(!inboundAt)throw new Error("invalid_keepalive_inbound_at");
+  return "ilink-keepalive-"+createHash("sha256").update(userId+"\0"+inboundAt.toISOString()).digest("hex").slice(0,40);
+}
 
 /**
  * Answers the first inbound message of an account: the employee learns that the connection works
@@ -72,5 +99,58 @@ export async function pollMemberIlinkInboxes() {
       }
     })));
   }
-  return {checked,recovered,greeted};
+  // A failing reminder must not stop the inbound poll; the next minute tries again.
+  let nudged=0;
+  try{nudged=(await nudgeNearExpiryIlinkChannels()).nudged;}
+  catch{
+    // The reminder is retried with the next run; the inbound messages above are already recorded.
+  }
+  return {checked,recovered,greeted,nudged};
+}
+
+/** Send one idempotent reminder per inbound window, while the context is still usable. */
+export async function nudgeNearExpiryIlinkChannels(now=new Date()):Promise<{nudged:number;disabled?:boolean}>{
+  if(process.env.P3_DELIVERY_ENABLED!=="true"||!ilinkConfigured())return {nudged:0,disabled:true};
+  const thresholdHours=ilinkKeepaliveThresholdHours();
+  // The cutoff is computed here, so the query and the eligibility rule below share one instant.
+  const cutoff=new Date(now.getTime()-thresholdHours*60*60*1000);
+  const due=await sql<{user_id:string}[]>`SELECT a.user_id FROM member_ilink_accounts a
+    JOIN member_weixin_bindings b ON b.user_id=a.user_id AND b.status='active'
+    JOIN member_users u ON u.id=a.user_id AND u.status='active'
+    WHERE a.channel_state='active' AND a.context_ciphertext IS NOT NULL AND a.last_inbound_at IS NOT NULL
+      AND a.last_inbound_at<=${cutoff}
+      AND (a.keepalive_nudged_at IS NULL OR a.keepalive_nudged_at<=a.last_inbound_at)
+    ORDER BY a.last_inbound_at LIMIT 100`;
+  let nudged=0;
+  for(const account of due){
+    const sent=await sql.begin(async tx=>{
+      const [row]=await tx<{user_id:string;recipient_id:string;channel_account_id:string;token_ciphertext:string;api_url:string;context_ciphertext:string;channel_state:string;last_inbound_at:Date;keepalive_nudged_at:Date|null}[]>`SELECT a.user_id,a.recipient_id,a.channel_account_id,a.token_ciphertext,a.api_url,
+          a.context_ciphertext,a.channel_state,a.last_inbound_at,a.keepalive_nudged_at
+        FROM member_ilink_accounts a JOIN member_weixin_bindings b ON b.user_id=a.user_id AND b.status='active'
+          JOIN member_users u ON u.id=a.user_id AND u.status='active'
+        WHERE a.user_id=${account.user_id} FOR UPDATE OF a SKIP LOCKED`;
+      if(!row||!keepaliveNudgeEligible({channelState:row.channel_state,hasContext:!!row.context_ciphertext,
+        lastInboundAt:row.last_inbound_at,nudgedAt:row.keepalive_nudged_at,now,thresholdHours,
+        deliveryEnabled:process.env.P3_DELIVERY_ENABLED==="true"}))return false;
+      try{
+        await sendIlinkText({botId:row.channel_account_id,recipientId:row.recipient_id,token:decryptSecret(row.token_ciphertext),
+          base:row.api_url,contextToken:decryptSecret(row.context_ciphertext)},KEEPALIVE_TEXT,
+          keepaliveNudgeId(row.user_id,row.last_inbound_at));
+      }catch(error){
+        // A dead session must not be retried every minute: the state keeps it out of the next query.
+        const kind=ilinkErrorKind(error);
+        if(kind==="requires_rebind"||kind==="needs_interaction")
+          await tx`UPDATE member_ilink_accounts SET channel_state=${kind},updated_at=now() WHERE user_id=${row.user_id}`;
+        return false;
+      }
+      // The row lock holds this window still while the message is sent. The timestamp is not
+      // compared again: Postgres keeps microseconds and a Date does not, so equality never matches.
+      const updated=await tx`UPDATE member_ilink_accounts SET keepalive_nudged_at=now(),updated_at=now()
+        WHERE user_id=${row.user_id} AND channel_state='active'
+          AND (keepalive_nudged_at IS NULL OR keepalive_nudged_at<=last_inbound_at) RETURNING user_id`;
+      return updated.length>0;
+    });
+    if(sent)nudged++;
+  }
+  return {nudged};
 }
