@@ -11,9 +11,11 @@ npm run changelog:apply
 git diff -- site/changelog.json site/changelog/pending
 git add site/changelog.json site/changelog/pending
 git commit -m "docs: apply employee changelog for release"
+npm run changelog:check
+git diff --quiet HEAD -- site/changelog.json site/changelog/pending
 ```
 
-无待发布文件时命令输出 `no pending changelog`，无需提交。提交后从包含新 `site/changelog.json` 的固定提交制作发布包和构建镜像；不能先归档或构建旧 tip 再在另一棵工作树运行命令。后端在启动后从镜像内 `REPO_ROOT/site/changelog.json` 读取并缓存，故运行中的容器不会因主机文件更新而改变。发布后核对 `/api/site/meta` 的 `changelogVersion` 与 `/api/site/changelog` 的 `latestVersion` 均为新值；登录后红点仍由员工已读状态决定。回滚使用上一镜像所带的旧 JSON。将本次应用结果、提交和回退版本写入仓库外的本地/Mac 部署结果文件或简短聊天消息即可；生产当前 release SHA 以服务器 `/api/health` 和部署结果文件为准，不为逐次发布新建 `docs/logs/` 或仅记录状态的 Docs PR。
+Pi/Codex 发布时必须在归档或构建前完成以上步骤；`changelog:check` 遇到剩余的待发布 JSON 会失败，`git diff --quiet HEAD` 确认应用结果已提交。无待发布文件时 `changelog:apply` 输出 `no pending changelog`，跳过 `git add` 和 `git commit`，仍运行两项检查。提交后从包含新 `site/changelog.json` 的固定提交制作发布包和构建镜像；不能先归档或构建旧 tip 再在另一棵工作树运行命令。后端在启动后从镜像内 `REPO_ROOT/site/changelog.json` 读取并缓存，故运行中的容器不会因主机文件更新而改变。发布后核对 `/api/site/meta` 的 `changelogVersion` 与 `/api/site/changelog` 的 `latestVersion` 均为新值；登录后红点仍由员工已读状态决定。回滚使用上一镜像所带的旧 JSON。将本次应用结果、提交和回退版本写入仓库外的本地/Mac 部署结果文件或简短聊天消息即可；生产当前 release SHA 以服务器 `/api/health` 和部署结果文件为准，不为逐次发布新建 `docs/logs/` 或仅记录状态的 Docs PR。
 
 ## 当前前置状态
 

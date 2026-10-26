@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { applyEmployeeChangelog, parseChangelog, parsePending } from "../scripts/apply-employee-changelog.ts";
+import { applyEmployeeChangelog, assertNoPendingChangelog, parseChangelog, parsePending } from "../scripts/apply-employee-changelog.ts";
 
 const old = { date: "2026-10-25", time: "16:27", kind: "公告", title: "旧公告", body: ["旧内容"] };
 const first = { kind: "更新", title: "新功能", body: ["员工可使用新功能。"] };
@@ -67,4 +67,15 @@ test("clock regression cannot make the red-dot version older", async () => fixtu
   await writeFile(path.join(root, "site/changelog/pending/feature.json"), JSON.stringify(first));
   await assert.rejects(applyEmployeeChangelog(root, new Date("2026-10-25T00:00:00Z")), /must be newer/);
   assert.equal((await readdir(path.join(root, "site/changelog/pending"))).length, 1);
+}));
+
+test("release gate fails on pending JSON but ignores directory keepers", async () => fixture(async root => {
+  const pending = path.join(root, "site/changelog/pending");
+  await writeFile(path.join(pending, "README.md"), "instructions");
+  await writeFile(path.join(pending, ".gitkeep"), "");
+  await assertNoPendingChangelog(root);
+  await writeFile(path.join(pending, "feature.json"), JSON.stringify(first));
+  await assert.rejects(assertNoPendingChangelog(root), /feature\.json.*run npm run changelog:apply/);
+  await applyEmployeeChangelog(root, new Date("2026-10-26T00:00:00Z"));
+  await assertNoPendingChangelog(root);
 }));
