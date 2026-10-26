@@ -7,6 +7,7 @@
 ## 本次改动
 
 - 修改文件：
+  - `.env.example`（可选基金备案公示查询 URL）
   - `modules/membership/experts/catalog.ts`、`seed.ts`、`routes.ts`、`worker.ts`
   - `modules/membership/experts/listed-fund-participation.ts`
   - `modules/membership/pages/experts.tsx`、`expert-detail.tsx`、`task-detail.tsx`、`account-artifacts.tsx`
