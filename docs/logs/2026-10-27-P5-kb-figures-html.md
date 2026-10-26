@@ -36,7 +36,8 @@
 - `… --test modules/membership/tests/knowledge-access.test.ts`：1/1 通过（含图片接口的 401／200、`private, no-store`、`nosniff`、跨版本不可读、撤回后不可读）。
 - `… --test modules/membership/tests/knowledge-core.standalone.test.ts`：35/35 通过。
 - `node scripts/check-migrations.ts --base=origin/main`：通过。
-- `node scripts/check-doc-links.ts`：通过。
+- `node scripts/check-doc-links.ts`：通过（564 个本地 Markdown 链接）。
+- PR #148 的 CI：`quality`、`postgres-integration`（含新增的 `knowledge-figures.test.ts`）、`links` 三项全部通过。
 - `node --import ./tests/standalone.ts --test --test-skip-pattern='every table and column' tests/architecture.test.ts`：通过（`MEMBER_KNOWLEDGE_FIGURES_ENABLED` 已写入 `.env.example`）。
 
 ## 风险与交接
