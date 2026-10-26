@@ -2,7 +2,7 @@
 
 - Agent：Codex
 - 对应任务：P2-07 维护修复；不改变原任务勾选状态，也不代表真实来源或员工验收完成
-- 完成状态：代码与离线验证完成；PR #141 CI、发布和员工真实样例复核待完成
+- 完成状态：代码与 CI 完成；发布和员工真实样例复核待完成
 
 ## 本次改动
 
@@ -15,7 +15,8 @@
 - `node --import ./tests/standalone.ts --test modules/membership/tests/listed-fund-participation.standalone.test.ts`：11 项通过。
 - `npm run typecheck`：通过。
 - `git diff --check`：通过。
-- `node scripts/check-doc-links.ts`：在本日志文件创建前运行，因三处新增日志链接尚无目标失败；创建日志后须重跑。
+- `node scripts/check-doc-links.ts`：创建日志后通过，548 条本地 Markdown 链接目标存在。
+- PR #141 head `f15e6a9` 的 GitHub `quality`、`postgres-integration`、`links`：均通过。
 
 ## 未验证事项与风险
 
@@ -25,4 +26,4 @@
 
 ## 下一步
 
-- 推送到 PR #141 的既有分支并核对新 head 的 CI；由 coding 助手负责后续合并和部署。
+- 由 coding 助手负责 PR #141 的后续合并和部署；员工浙江公告样例仍需复核。
