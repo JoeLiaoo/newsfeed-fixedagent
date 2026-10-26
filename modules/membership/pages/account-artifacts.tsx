@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { ClipboardList, Download, FileText, ChevronRight } from "lucide-react";
+import { ArrowLeft, ClipboardList, Download, FileText, ChevronRight } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
@@ -102,6 +102,7 @@ export default function AccountArtifactsPage() {
 
   return <main className="mx-auto w-full max-w-4xl px-5 py-8">
     <header className="mb-5">
+      <Button asChild variant="outline" size="sm" className="mb-4"><IntentLink to="/experts"><ArrowLeft size={14} aria-hidden="true" />返回专家平台</IntentLink></Button>
       <h1 className="text-2xl font-semibold tracking-tight text-ink">我的任务与产物</h1>
     </header>
     <div className="mb-5 flex flex-wrap gap-2" aria-label="任务状态">

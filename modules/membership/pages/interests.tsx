@@ -58,7 +58,7 @@ export default function InterestsPage() {
 
   return <main className="mx-auto w-full max-w-4xl px-5 py-8">
     <header className="mb-6">
-      <Button asChild variant="outline" className="mb-5"><Link to="/settings/profile"><ArrowLeft aria-hidden="true" />返回个人设置</Link></Button>
+      <Button asChild variant="outline" className="mb-5"><Link to="/more"><ArrowLeft aria-hidden="true" />返回我的</Link></Button>
       <h1 className="text-2xl font-semibold tracking-tight">关注赛道</h1>
       <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-3">选择一级方向时默认勾选全部细分赛道；之后可逐项调整。新增标签会进入全员共享目录。</p>
       <Button asChild variant="outline" size="lg" className="mt-4 h-auto min-h-14 w-full justify-start whitespace-normal text-left"><Link to="/settings/sources"><Rss aria-hidden="true" />添加或查看资讯信源<ChevronRight aria-hidden="true" className="ml-auto" /></Link></Button>

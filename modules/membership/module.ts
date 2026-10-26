@@ -5,7 +5,6 @@ export const membershipModule: ModuleDeclaration = {
   pages: [
     { path: "login", file: "pages/login.tsx" },
     { path: "register", file: "pages/register.tsx" },
-    { path: "settings/profile", file: "pages/profile.tsx" },
     { path: "settings/interests", file: "pages/interests.tsx" },
     { path: "settings/sources", file: "pages/sources.tsx" },
     { path: "experts", file: "pages/experts.tsx" },
