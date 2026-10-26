@@ -20,6 +20,7 @@ const STATE_VARIANT: Record<string, "default" | "secondary" | "success" | "warni
 
 type Version = {
   id: string; versionNo: number; fileName: string; format: string; byteSize: number; sha256: string; bodyMd: string | null;
+  sourceUrl: string | null;
   sourceTitle: string | null; sourceAuthor: string | null; sourceOrg: string | null; sourceDate: string | null; sourceKind: string | null;
   extractionStatus: string; extractionNote: string | null; createdAt: string; uploaderName: string;
   taskId: string | null; taskState: string | null; taskStage: string | null; errorCode: string | null; errorMessage: string | null; attemptCount: number | null;
@@ -86,6 +87,7 @@ export default function KnowledgeDocumentPage() {
           {version.errorCode && <p className="mt-1 text-xs text-hot">{TASK_ERRORS[version.errorCode] ?? version.errorMessage ?? version.errorCode}</p>}
           <div className="mt-2 flex flex-wrap gap-3">
             <Button asChild variant="outline" size="sm"><a href={`${ENDPOINT}versions/${version.id}/original`}><Download size={14} aria-hidden="true" />下载原件</a></Button>
+            {version.sourceUrl && <a className="self-center text-sm text-accent underline-offset-4 hover:underline" href={version.sourceUrl} target="_blank" rel="noreferrer">查看来源网页</a>}
             {version.taskStage && <span className="self-center text-xs text-ink-3">{TASK_STAGE_LABELS[version.taskStage] ?? version.taskStage}</span>}
           </div>
         </li>)}</ul>}

@@ -14,6 +14,7 @@ import { DEFAULT_BASE_ID, MAX_BASES, baseSlugOf, ensureDefaultBase, newBaseId, r
 import { checksum, versionBody } from "./worker.ts";
 import { withdrawDocumentPages } from "./publish.ts";
 import { detectFormat } from "./extract.ts";
+import { assertPublicUrl } from "@aihot/backend/lib/url";
 
 type Authenticate = (request: FastifyRequest, allowPending?: boolean) => Promise<MemberSession | null>;
 const ADMISSION_MESSAGE = "每人同时最多处理 2 个构建，每小时最多上传或手动重试 10 次。请稍后再试。";
@@ -208,7 +209,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const window = pageWindow(req);
     const documents = await sql`
       SELECT d.id, d.title, d.status, d.base_id AS "baseId", d.uploader_id AS "uploaderId", u.real_name AS "uploaderName", d.created_at AS "createdAt", d.withdrawn_at AS "withdrawnAt",
-        v.id AS "versionId", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.source_title AS "sourceTitle", v.source_author AS "sourceAuthor", v.source_org AS "sourceOrg", v.source_date AS "sourceDate", v.source_kind AS "sourceKind", v.created_at AS "versionCreatedAt",
+        v.id AS "versionId", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.source_title AS "sourceTitle", v.source_author AS "sourceAuthor", v.source_org AS "sourceOrg", v.source_date AS "sourceDate", v.source_kind AS "sourceKind", v.source_url AS "sourceUrl", v.created_at AS "versionCreatedAt",
         v.extraction_status AS "extractionStatus", v.extraction_note AS "extractionNote", v.version_no AS "versionNo",
         t.state AS "taskState", t.stage AS "taskStage", t.error_code AS "errorCode", t.error_message AS "errorMessage"
       FROM member_wiki_documents d
@@ -239,7 +240,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       return reply.code(404).send({ error: "knowledge_document_not_found" });
     }
     const versions = await sql`
-      SELECT v.id, v.version_no AS "versionNo", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.source_title AS "sourceTitle", v.source_author AS "sourceAuthor",
+      SELECT v.id, v.version_no AS "versionNo", v.file_name AS "fileName", v.format, v.byte_size AS "byteSize", v.source_url AS "sourceUrl", v.source_title AS "sourceTitle", v.source_author AS "sourceAuthor",
         v.source_org AS "sourceOrg", v.source_date AS "sourceDate", v.source_kind AS "sourceKind", v.extraction_status AS "extractionStatus", v.extraction_note AS "extractionNote",
         CASE WHEN v.format = 'markdown' AND v.extraction_status = 'available' THEN convert_from(v.body, 'UTF8') ELSE NULL END AS "bodyMd",
         v.created_at AS "createdAt", u.real_name AS "uploaderName",
@@ -248,6 +249,53 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
       LEFT JOIN LATERAL (SELECT * FROM member_wiki_tasks t WHERE t.version_id = v.id ORDER BY t.created_at DESC LIMIT 1) t ON true
       WHERE v.document_id = ${id} ORDER BY v.version_no DESC`;
     return { document: documents[0], versions };
+  });
+
+  /** A public page enters the same build queue as an uploaded file; fetching happens in the worker. */
+  app.post("/api/v1/membership/knowledge/documents/url", async (req, reply) => {
+    noStore(reply);
+    if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
+    const user = await authenticate(req);
+    if (!user) return reply.code(401).send({ error: "login_required" });
+    const payload = body(req);
+    const sourceUrl = text(payload.url, 2048);
+    if (!sourceUrl) return reply.code(400).send({ error: "knowledge_url_invalid", message: "请粘贴有效的公开网页链接。" });
+    let parsed: URL;
+    try {
+      parsed = new URL(sourceUrl);
+      if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username || parsed.password) throw new Error("invalid_url");
+      await assertPublicUrl(sourceUrl);
+    } catch {
+      return reply.code(400).send({ error: "knowledge_url_invalid", message: "链接格式无效，或目标地址不是可公开访问的网页。" });
+    }
+    const base = await resolveBase(text(payload.baseId, 64));
+    if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
+    const fileName = parsed.pathname.split("/").filter(Boolean).at(-1)?.slice(0, 200) || parsed.hostname;
+    const sha256 = checksum(Buffer.from(`url:${sourceUrl}`));
+    const admitted = await sql.begin(async tx => {
+      await tx`SELECT id FROM member_users WHERE id=${user.id} FOR NO KEY UPDATE`;
+      if (await admissionLimited(tx, user.id)) return { limited: true as const };
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`${base.id}|${sourceUrl}`}, 0))`;
+      const existing = await tx<{ document_id: string; version_id: string; version_no: number }[]>`
+        SELECT v.document_id, v.id AS version_id, v.version_no FROM member_wiki_document_versions v
+        JOIN member_wiki_documents d ON d.id=v.document_id
+        WHERE d.base_id=${base.id} AND d.status='active' AND v.source_url=${sourceUrl} LIMIT 1`;
+      if (existing[0]) return { duplicate: true as const, ...existing[0] };
+      const documentId = randomUUID();
+      const versionId = randomUUID();
+      const taskId = randomUUID();
+      await tx`INSERT INTO member_wiki_documents(id,uploader_id,title,base_id) VALUES (${documentId},${user.id},${fileName},${base.id})`;
+      await tx`INSERT INTO member_wiki_document_versions(id,document_id,version_no,uploader_id,file_name,media_type,format,byte_size,sha256,body,source_url)
+        VALUES (${versionId},${documentId},1,${user.id},${fileName},'text/html','markdown',0,${sha256},${Buffer.alloc(0)},${sourceUrl})`;
+      await tx`INSERT INTO member_wiki_tasks(id,document_id,version_id,uploader_id) VALUES (${taskId},${documentId},${versionId},${user.id})`;
+      await enqueueOn(WIKI_QUEUE, { taskId }, { singletonKey: taskId }, tx);
+      await tx`INSERT INTO member_wiki_audit_events(id,actor_id,event_type,document_id,version_id,task_id,detail)
+        VALUES (${randomUUID()},${user.id},'knowledge.document.url_queued',${documentId},${versionId},${taskId},${tx.json({ host: parsed.hostname })})`;
+      return { documentId, versionId, versionNo: 1, taskId };
+    });
+    if ("limited" in admitted) return reply.code(429).send({ error: "knowledge_upload_rate_limited", message: ADMISSION_MESSAGE });
+    if ("duplicate" in admitted) return reply.code(200).send({ duplicate: true, documentId: admitted.document_id, versionId: admitted.version_id, versionNo: admitted.version_no, taskId: null, message: "这个网页已在本库中，无需重复添加。" });
+    return reply.code(202).send({ duplicate: false, documentId: admitted.documentId, versionId: admitted.versionId, versionNo: admitted.versionNo, taskId: admitted.taskId });
   });
 
   /** Uploading a material. It enters the shared library on its own; there is no per-item approval. */

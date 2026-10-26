@@ -13,6 +13,8 @@ import { publishBuildPages } from "./publish.ts";
 import { DEFAULT_BASE_ID, baseSlugOf } from "./bases.ts";
 import { compiledDraftSchema, auditResultSchema, type AuditResult, type CompiledDraft, type Finding } from "./schema.ts";
 import { MAX_EXTRACTED_CHARS, MAX_WIKI_ATTEMPTS, TASK_ERRORS, type WikiFormat } from "./catalog.ts";
+import { fetchPublicArticle } from "./fetch-url.ts";
+import { extractSourceMetadata } from "./metadata.ts";
 
 type TaskRow = {
   id: string;
@@ -41,6 +43,7 @@ type VersionRow = {
   source_kind: string | null;
   extracted_text: string | null;
   extraction_status: string;
+  source_url: string | null;
 };
 
 function failureCode(error: unknown): { code: string; message: string } {
@@ -50,6 +53,13 @@ function failureCode(error: unknown): { code: string; message: string } {
   if (code === "knowledge_file_type_unsupported") return { code, message: TASK_ERRORS.knowledge_file_type_unsupported };
   if (code === "knowledge_text_unavailable" || code === "knowledge_file_unreadable") return { code, message: "未能读取材料内容，未生成知识页。" };
   if (code === "knowledge_text_empty") return { code, message: TASK_ERRORS.knowledge_text_empty };
+  if (code.startsWith("knowledge_url_")) {
+    const message = code === "knowledge_url_extract_empty" ? "网页已打开，但没有提取到足够的正文。" :
+      code === "knowledge_url_not_html" ? "该链接不是可读取的网页正文。" :
+      code.startsWith("knowledge_url_http_") ? `网页返回 HTTP ${code.slice("knowledge_url_http_".length)}，未能读取正文。` :
+      "无法读取该网页，请确认链接可公开访问后重试。";
+    return { code, message };
+  }
   if (code === "knowledge_audit_failed") return { code, message: TASK_ERRORS.knowledge_audit_failed };
   if (code === "knowledge_audit_invalid") return { code, message: TASK_ERRORS.knowledge_audit_invalid };
   if (code === "knowledge_lint_blocked") return { code, message: TASK_ERRORS.knowledge_lint_blocked };
@@ -73,8 +83,25 @@ async function loadTask(taskId: string): Promise<TaskRow | null> {
 }
 
 async function loadVersion(versionId: string): Promise<VersionRow | null> {
-  const rows = await sql<VersionRow[]>`SELECT id, document_id, version_no, format, file_name, body, source_title, source_author, source_org, source_date, source_kind, extracted_text, extraction_status FROM member_wiki_document_versions WHERE id = ${versionId}`;
+  const rows = await sql<VersionRow[]>`SELECT id, document_id, version_no, format, file_name, body, source_title, source_author, source_org, source_date, source_kind, extracted_text, extraction_status, source_url FROM member_wiki_document_versions WHERE id = ${versionId}`;
   return rows[0] ?? null;
+}
+
+/** URL requests are queued with an empty body; the worker fetches and extracts the page. */
+async function fetchUrlVersion(version: VersionRow): Promise<VersionRow> {
+  if (!version.source_url || version.body.length) return version;
+  const article = await fetchPublicArticle(version.source_url);
+  const body = Buffer.from(article.text, "utf8");
+  const fileName = `${(article.title || version.file_name).replace(/\.md$/i, "").slice(0, 195)}.md`;
+  await sql`UPDATE member_wiki_document_versions SET body=${body}, byte_size=${body.length}, sha256=${checksum(body)},
+      file_name=${fileName},
+      source_title=COALESCE(${article.title}, source_title), source_author=COALESCE(${article.author}, source_author),
+      source_org=COALESCE(${article.organization}, source_org), source_date=COALESCE(${article.date}::date, source_date),
+      extraction_status='pending', extraction_note=NULL WHERE id=${version.id}`;
+  if (article.title) await sql`UPDATE member_wiki_documents SET title=${article.title.slice(0, 200)}, updated_at=now() WHERE id=${version.document_id}`;
+  return { ...version, file_name: fileName, body, source_title: article.title ?? version.source_title,
+    source_author: article.author ?? version.source_author, source_org: article.organization ?? version.source_org,
+    source_date: article.date ?? version.source_date, extraction_status: "pending" };
 }
 
 /**
@@ -114,7 +141,21 @@ async function extractVersion(version: VersionRow): Promise<string> {
   // an empty material.
   if (!capped.text.trim()) throw new Error("knowledge_text_empty");
   const note = [result.note, capped.truncated ? `内容超出上限，已截取前 ${capped.sections.length} 节（末节可能不完整）` : null].filter(Boolean).join("；") || null;
-  await sql`UPDATE member_wiki_document_versions SET extracted_text=${capped.text}, extraction_status='available', extraction_note=${note} WHERE id=${version.id}`;
+  const metadata = extractSourceMetadata(capped.text);
+  const fileTitle = version.file_name.replace(/\.[^.]+$/, "");
+  const title = metadata.title && (!version.source_title || version.source_title === fileTitle) ? metadata.title.slice(0, 200) : version.source_title;
+  const author = version.source_author ?? metadata.author;
+  const organization = version.source_org ?? metadata.organization;
+  const date = version.source_date ?? metadata.date;
+  const kind = version.source_kind ?? metadata.kind;
+  await sql`UPDATE member_wiki_document_versions SET extracted_text=${capped.text}, extraction_status='available', extraction_note=${note},
+      source_title=${title}, source_author=${author}, source_org=${organization}, source_date=${date}::date, source_kind=${kind} WHERE id=${version.id}`;
+  if (title && title !== version.source_title) await sql`UPDATE member_wiki_documents SET title=${title}, updated_at=now() WHERE id=${version.document_id}`;
+  version.source_title = title;
+  version.source_author = author;
+  version.source_org = organization;
+  version.source_date = date;
+  version.source_kind = kind;
   return capped.text;
 }
 
@@ -220,8 +261,17 @@ export async function runWikiTask(taskId: string): Promise<void> {
   }, 30_000);
   heartbeat.unref?.();
   try {
-    const version = await loadVersion(task.version_id);
+    let version = await loadVersion(task.version_id);
     if (!version) throw new Error("knowledge_document_not_found");
+    if (version.source_url && !version.body.length) {
+      await advanceStage(taskId, leaseToken, "extracting");
+      try { version = await fetchUrlVersion(version); }
+      catch (error) {
+        const reason = error instanceof Error ? error.message : "";
+        if (/^knowledge_url_(?:http_\d+|not_html|extract_empty)$/.test(reason)) throw error;
+        throw new Error("knowledge_url_fetch_failed");
+      }
+    }
     const text = await extractVersion(version);
     await advanceStage(taskId, leaseToken, "compiling");
 

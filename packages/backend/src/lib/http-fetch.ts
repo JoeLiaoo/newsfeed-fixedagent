@@ -45,12 +45,12 @@ function destinationPool(origin: string | URL, options: object): Pool {
   return new Pool(origin, { ...options, maxHeaderSize: limits?.[new URL(origin).hostname] });
 }
 
-function dispatcherFor(viaProxy: boolean, privateHost: boolean): Dispatcher | undefined {
+function dispatcherFor(viaProxy: boolean, privateHost: boolean, forcePublic = false): Dispatcher | undefined {
   if (viaProxy) {
     proxyAgent ??= createEgressProxy(config.egressProxyUrl!, egressResolver(), destinationPool);
     return proxyAgent;
   }
-  if (config.allowPrivateNetworkFetch) return undefined;
+  if (config.allowPrivateNetworkFetch && !forcePublic) return undefined;
   if (privateHost) {
     // The listed name may resolve to a private service; the address dialled is still checked.
     privateFeedAgent ??= new Agent({ ...OUTBOUND_HTTP_OPTIONS, factory: destinationPool, connect: {
@@ -84,6 +84,8 @@ export interface GuardedFetchOptions {
   privateFeedHost?: boolean;
   /** Stops the read when the caller gives up (a preview whose deadline passed); the timeout still applies. */
   signal?: AbortSignal;
+  /** Enforces the public address guard even in local environments that otherwise allow private fetches. */
+  publicOnly?: boolean;
 }
 
 export interface GuardedResponse {
@@ -125,7 +127,7 @@ export async function guardedFetch(input: string, opts: GuardedFetchOptions = {}
   const route = opts.route ?? "egress";
   const configuredHost = hostOf(new URL(input));
   const privateHosts = opts.privateFeedHost && config.privateFeedHosts.includes(configuredHost) ? [configuredHost] : [];
-  const check = (target: string) => withinDeadline(assertPublicUrl(target, config.allowPrivateNetworkFetch,
+  const check = (target: string) => withinDeadline(assertPublicUrl(target, opts.publicOnly ? false : config.allowPrivateNetworkFetch,
     proxied(new URL(target), route, privateHosts) ? egressResolver() : undefined, privateHosts), signal);
   let url = await check(input);
   const maxRedirects = opts.maxRedirects ?? 5;
@@ -145,7 +147,7 @@ export async function guardedFetch(input: string, opts: GuardedFetchOptions = {}
       headers: Object.fromEntries(headers),
       body: requestBody,
       redirect: "manual",
-      dispatcher: dispatcherFor(proxied(url, route, privateHosts), privateHosts.includes(hostOf(url))),
+      dispatcher: dispatcherFor(proxied(url, route, privateHosts), privateHosts.includes(hostOf(url)), opts.publicOnly),
       signal,
     });
     if ([301, 302, 303, 307, 308].includes(res.status) && res.headers.get("location")) {

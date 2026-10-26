@@ -16,7 +16,7 @@
 |---|---|
 | `member_wiki_bases` | 一个知识库：名称、说明、状态（`active`／`archived`）、创建人 |
 | `member_wiki_documents` | 一份材料（逻辑文档）：标题、上传者、所属库、状态（`active`／`withdrawn`）、撤回人与时间 |
-| `member_wiki_document_versions` | 材料的每个版本：文件字节、校验和、格式、上传者填写的原始来源（标题／作者／机构／日期／类型）、提取文本与提取状态 |
+| `member_wiki_document_versions` | 材料的每个版本：文件字节、校验和、格式、原始来源 URL、从正文或网页元数据提取的来源（标题／作者／机构／日期／类型）、提取文本与提取状态 |
 | `member_wiki_tasks` | 一次构建：阶段、状态、尝试次数、错误码、编译草稿与复核结果（检查点）、租约 |
 | `member_wiki_pages` | 一个知识页：标识、页面类型、标的、赛道、状态、标的稳定标识（`target_key`）、所属库 |
 | `member_wiki_contributions` | 每份材料版本对某个标的的结构化贡献：贡献内容（页面草稿与来源）、状态（`active`／`superseded`／`withdrawn`）、所属材料与版本 |
@@ -47,7 +47,8 @@
 | `POST /bases` | 新增知识库：名称（2–80 字）与说明（≤200 字）；已批准员工均可创建 |
 | `GET /overview` | 库内材料数、知识页数、构建中／失败数、未决质量问题、时效分布（`?baseId=` 指定库，缺省为共享库） |
 | `GET /documents`、`GET /documents/:id` | 材料列表（可检索，`?baseId=`、`?query=`）与单份材料的版本、构建状态（已撤回的材料只对上传者与管理员可见） |
-| `POST /documents` | 上传：文件名、base64 正文、标题、作者、机构、日期、类型、所属库 `baseId`、可选的 `documentId`（作为新版本）；日期须为真实有效的 `YYYY-MM-DD`，无效值返回 `knowledge_date_invalid` |
+| `POST /documents` | 上传 PDF、DOCX 或 Markdown 文件：文件名、base64 正文与所属库 `baseId`；标题与明确标注的来源元数据从内容提取，无法确认的信息保持未知。重复文件按内容校验和识别 |
+| `POST /documents/url` | 添加任意公开 HTTP(S) 网页：提交后异步排队抓取与构建；每次跳转都检查公开地址，限制 20 秒、5 次跳转与 5 MB 响应体。相同网页不会在同一库重复入库，无法抓取或提取的任务以失败状态和原因保留 |
 | `POST /documents/:id/withdraw` | 撤回材料：它的贡献退出所在库，由它生成的知识页重新聚合或下架 |
 | `GET /tasks`、`POST /tasks/:id/retry` | 库内构建状态列表（分页：`?limit=`（1–100，默认 50）、`?offset=`，返回 `hasMore` 与 `nextOffset`）；重跑失败的任务（从上次成功的检查点继续） |
 | `GET /pages`、`GET /pages/:slug` | 已发布知识页列表（可检索，`?baseId=`、`?query=`）与单页正文、引用、质量问题（下架的页面对其他员工是 404） |
@@ -63,7 +64,7 @@
 
 队列 `membership.knowledge`（pg-boss，单并发，不自动重试），每个阶段都留检查点：
 
-1. `extracting`：按字节判定格式（PDF／DOCX／Markdown），抽取文本并保留页／章节锚点；PPT/PPTX 须先转换为 PDF，已有待处理的 PPTX 版本在提取前标记为不可用。抽不出文字的原件记 `unavailable`，不生成页面。超出单次构建上限（`MAX_EXTRACTED_CHARS`，60,000 字符）时按节截取，节内过长时保留预算内的非空前缀；截取后仍无文本则构建以 `knowledge_text_empty` 失败，不调用模型。
+1. `extracting`：按字节判定格式（PDF／DOCX／Markdown），抽取文本并保留页／章节锚点；公开网页由 worker 在此阶段经 SSRF 防护抓取，读取网页标题、作者、机构与明确发布日期元数据，再把正文送入同一构建流程。文件名回退标题可被正文标题替代；作者、机构、日期与类型仅从明确标注读取，缺失时保持未知。PPT/PPTX 须先转换为 PDF，已有待处理的 PPTX 版本在提取前标记为不可用。抽不出文字的原件记 `unavailable`，不生成页面。超出单次构建上限（`MAX_EXTRACTED_CHARS`，60,000 字符）时按节截取，节内过长时保留预算内的非空前缀；截取后仍无文本则构建以 `knowledge_text_empty` 失败，不调用模型。
 2. `compiling`：编译者在独立上下文中把材料编译成结构化草稿（页面、观点分布、时间线、来源、问答、框架、监测指标）。
 3. `auditing`：复核者在另一个独立上下文中对原文核实，只能**撤回**条目或把归因降为「未知」，不能新增观点；结论为 `fail` 时整批不发布。复核给出的下标指向它读到的草稿：归因先落在原条目上，撤回再按原下标批量执行，越界与重复的修正被忽略并记为质量问题。复核没有给出平台认识的结论（缺结论、类型不对、结论不认识）时，这一轮复核不算发生：构建以 `knowledge_model_output_invalid` 失败，不发布任何页面，也不写成功事件。
 4. `linting`：机器检查（归因可识别、立场词表、时间锚、时间线倒序、覆盖度口径、Related Pages 指向）；`P0` 问题不发布。
@@ -117,7 +118,7 @@
 
 ## 9. 部署与回退
 
-1. 合并后按常规发布流程执行 `npm run db:migrate`（新增 19 条迁移），再发布 api 与 worker。
+1. 合并后按常规发布流程执行 `npm run db:migrate`（本次新增 `0191_member_wiki_source_url.sql`），再发布 api 与 worker。
 2. worker 启动后 `membership.knowledge` 队列与 `membership.knowledge-recover` 定时任务随站点模块自动注册。
 3. 回退：回退代码版本并保留新表（不影响旧功能）；如需回退数据结构，另写追加迁移删除新表（历史数据留在 `member_wiki_*` 表中）。
 
