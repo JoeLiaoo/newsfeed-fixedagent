@@ -60,7 +60,7 @@ test("query expert input is visible on the task page without changing company ta
   assert.match(page, /QUERY_EXPERT_SLUGS\.has\(task\.expertSlug\) \? task\.input\?\.query\?\.trim\(\)/);
   assert.match(page, /查询：\{query\}/);
   assert.match(page, /核查主体：\{task\.input\.companyName\}/);
-  assert.match(page, /!task\.input\?\.companyName && !query && !notes/, "有查询词或任务要求时不能显示空输入");
+  assert.match(page, /!task\.input\?\.companyName && !query && !task\.input\?\.region && !notes/, "有查询词、地区或任务要求时不能显示空输入");
   assert.match(page, /SECTOR_PEER_EXPERT_SLUG \? " HTML 看板"/, "看板产物按实际 HTML 格式命名");
 });
 

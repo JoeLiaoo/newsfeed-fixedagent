@@ -17,7 +17,7 @@ export const meta = () => pageMeta({ title: "我的任务与产物", path: "/acc
 type Material = { id: string; filename: string; byteSize: number; extractionStatus: string };
 type Task = {
   id: string; expertSlug: string; expertName: string; state: string; stage: string;
-  input: { companyName: string | null; query: string | null; notes: string; notesTruncated: boolean };
+  input: { companyName: string | null; query: string | null; region: string | null; startDate: string | null; endDate: string | null; notes: string; notesTruncated: boolean };
   createdAt: string; updatedAt: string; hasArtifact: boolean;
   materials: Material[];
 };
@@ -122,8 +122,8 @@ export default function AccountArtifactsPage() {
               <Badge variant={TASK_STATE_VARIANT[task.state] ?? "secondary"}>{TASK_STATE_TEXT[task.state] ?? task.state}</Badge>
             </div>
             <p className="text-xs text-ink-3">提交 {beijingStamp(task.createdAt)} · 更新 {beijingStamp(task.updatedAt)}{TASK_STATES_RUNNING.includes(task.state) ? ` · ${TASK_STAGE_TEXT[task.stage] ?? task.stage}` : ""}</p>
-            {(task.input.companyName || task.input.query || task.input.notes) && <p className="text-sm text-ink-2">
-              {task.input.companyName || task.input.query || task.input.notes}{task.input.notesTruncated ? "…" : ""}
+            {(task.input.companyName || task.input.query || task.input.region || task.input.notes) && <p className="text-sm text-ink-2">
+              {task.input.region ? `${task.input.region} · ${task.input.startDate ?? "未提供"} 至 ${task.input.endDate ?? "未提供"}` : task.input.companyName || task.input.query || task.input.notes}{task.input.notesTruncated ? "…" : ""}
             </p>}
             {task.materials.length > 0 && <ul className="grid gap-1 text-sm">
               {task.materials.map(material => <li key={material.id} className="flex flex-wrap items-center gap-2">

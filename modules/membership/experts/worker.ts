@@ -3,7 +3,7 @@ import { z } from "zod";
 import { chatJson } from "@aihot/backend/providers/llm";
 import { ModelOutputError, ModelUnavailableError, ProviderRejectedError, ReceiptUnknownError, redactMembershipTaskResponses } from "@aihot/backend/providers/receipts";
 import { sql, type Db } from "@aihot/backend/db";
-import { BUILTIN_EXPERT, COMING_SOON_EXPERT_SLUG, EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT_SLUG, PANORAMA_TOOL_LABELS, SECTOR_PEER_EXPERT_SLUG, XINHUA_BASE_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
+import { BUILTIN_EXPERT, COMING_SOON_EXPERT_SLUG, EXPERT_SLUG, FRONTIER_PODCAST_EXPERT_SLUG, HIDDEN_EXPERT_STATUS, LISTED_FUND_PARTICIPATION_EXPERT_SLUG, PANORAMA_EXPERT_SLUG, PANORAMA_TOOL_LABELS, SECTOR_PEER_EXPERT_SLUG, XINHUA_BASE_TOOLS, XINHUA_TOOL_LABELS } from "./catalog.ts";
 import { renderSectorPeerDashboard } from "./sector-peer-html.ts";
 import { PublicSearchRequestRejectedError, PublicSearchResponseError, PublicSearchUnavailableError, searchSectorPeerSources } from "@aihot/backend/providers/deepseek-search";
 import { buildSectorPeerBoard, sectorPeerUnusableBoard, type SectorPeerBoard } from "./sector-peer-board.ts";
@@ -21,6 +21,7 @@ import { renderPanorama } from "./panorama-markdown.ts";
 import { renderPanoramaHtml } from "./panorama-html.ts";
 import { createPanoramaCheckpoint } from "./panorama-checkpoint.ts";
 import { DEFAULT_PANORAMA_BUDGET, type PanoramaSubject } from "./panorama.ts";
+import { buildListedFundReport, candidateFundNames, extractAnnouncementText, fetchIssuerAnnouncements, lookupFundRegistrations, parseListedFundInput, renderListedFundHtml, renderListedFundMarkdown, resolveListedIssuers, type ListedAnnouncement } from "./listed-fund-participation.ts";
 import type { WikiFormat } from "../knowledge/catalog.ts";
 
 type TaskRow = { id: string; user_id: string; expert_slug: string; input: Record<string, unknown>; selected_entity: Record<string, unknown> | null; execution_attempts: number };
@@ -66,6 +67,7 @@ export function errorText(error: unknown) {
     expert_model_access_refused: "文字整理服务拒绝了访问，任务未完成；请联系管理员核对账号或额度。",
     expert_model_request_invalid: "文字整理请求未被服务接受，任务未完成；请联系管理员检查配置和任务记录。",
     expert_execution_failed: "专家执行未完成，未生成成功结果；请重试，若仍失败请联系管理员核对任务记录。",
+    listed_fund_region_seed_missing: "该地区尚无可用的发行人代码样本。请补充证券代码，或联系管理员扩充地区样本。",
   };
   return { code, message: messages[code] ?? messages.expert_execution_failed! };
 }
@@ -80,6 +82,69 @@ function modelFailureText(error: unknown) {
 }
 
 function markdownCell(value: string) { return value.replace(/[|\r\n\t]/g, " ").trim(); }
+
+async function runListedFundParticipation(task: TaskRow, leaseToken: string) {
+  const input = parseListedFundInput(task.input);
+  const resolved = resolveListedIssuers(input);
+  if (!resolved.issuers.length) throw new ExpertProviderError("listed_fund_region_seed_missing");
+  const gaps = [...resolved.gaps];
+  const announcements: ListedAnnouncement[] = [];
+  for (const issuer of resolved.issuers) {
+    await assertRunning(task.id, leaseToken);
+    const found = await fetchIssuerAnnouncements(issuer, input, { beforeRequest: () => assertRunning(task.id, leaseToken) });
+    gaps.push(...found.gaps);
+    announcements.push(...found.items);
+    if (announcements.length >= input.maxAnnouncements) {
+      gaps.push(`公告达到上限 ${input.maxAnnouncements} 条；后续发行人或页面未读取。`);
+      break;
+    }
+  }
+  const uniqueAnnouncements = [...new Map(announcements.map((item) => [`${item.issuer.code}:${item.announcementId}`, item])).values()].slice(0, input.maxAnnouncements);
+  if (!uniqueAnnouncements.length) gaps.push("公告检索未返回可用记录；这不代表报告期内没有基金参与披露。请核查检索范围和未覆盖发行人。");
+  let pdfAttempts = 0;
+  for (const announcement of uniqueAnnouncements) {
+    await assertRunning(task.id, leaseToken);
+    if (pdfAttempts >= input.maxPdfExtracts) {
+      gaps.push(`PDF 正文解析达到上限 ${input.maxPdfExtracts} 份；其余公告仅保留元数据。`);
+      break;
+    }
+    pdfAttempts += 1;
+    try { announcement.text = await extractAnnouncementText(announcement.url, { beforeRequest: () => assertRunning(task.id, leaseToken) }); }
+    catch { gaps.push(`${announcement.issuer.code}《${announcement.title}》正文未解析；仅保留公告元数据。`); }
+  }
+  const fundNames = [...new Set(uniqueAnnouncements.flatMap((item) => item.text ? candidateFundNames(item.text) : []))];
+  const registryNames = fundNames.slice(0, 80);
+  if (fundNames.length > registryNames.length) gaps.push(`基金备案名称查询达到上限 ${registryNames.length} 项；其余基金未核。`);
+  const registrations = await lookupFundRegistrations(registryNames, { endpoint: process.env.FUND_REGISTRY_SEARCH_URL, beforeRequest: () => assertRunning(task.id, leaseToken) });
+  gaps.push(...registrations.gaps);
+  const identityNames = [...new Set([...resolved.issuers.map((issuer) => issuer.name), ...registryNames, ...registrations.records.map((record) => record.managerName ?? "")].filter((name) => name && name !== "发行人名称未提供"))];
+  const namesToCheck = identityNames.slice(0, 40);
+  const verified = new Set<string>();
+  const pending = new Set(identityNames.slice(40));
+  if (identityNames.length > namesToCheck.length) gaps.push(`主体身份核验达到上限 40 项；其余主体待核。`);
+  try {
+    await withXinhua(async (call) => {
+      for (const name of namesToCheck) {
+        await assertRunning(task.id, leaseToken);
+        try {
+          const result = await searchCompanyCandidates(call, name);
+          const exact = result.candidates.find((candidate) => candidate.name.trim() === name.trim());
+          if (!exact) { pending.add(name); gaps.push(`主体「${name}」未找到名称完全一致的登记候选，身份待核。`); continue; }
+          await querySelectedCompanyProfile(call, exact);
+          verified.add(name);
+        } catch {
+          pending.add(name);
+          gaps.push(`主体「${name}」的身份查询未完成，保留待核状态。`);
+        }
+      }
+    });
+  } catch {
+    for (const name of namesToCheck) pending.add(name);
+    gaps.push("平台主体身份查询暂不可用；主体身份均保留待核。");
+  }
+  const report = buildListedFundReport(input, resolved.issuers, uniqueAnnouncements, registrations.records, gaps, new Date().toISOString(), { verified: [...verified], pending: [...pending] });
+  return { markdown: renderListedFundMarkdown(report), html: renderListedFundHtml(report), report };
+}
 
 /**
  * The answer is read by the board reader, not by the request: the shape of one claim must not decide
@@ -494,6 +559,8 @@ export async function runExpertTask(taskId: string) {
     let report: string;
     let previewHtml: string | null = null;
     let panoramaHtml: string | null = null;
+    let listedFundHtml: string | null = null;
+    let listedFundStatus: { incomplete: boolean; gaps: number; issuers: number; announcements: number } | null = null;
     let podcastStatus: { episodes: number; partial: boolean } | null = null;
     const isSectorPeer = task.expert_slug === SECTOR_PEER_EXPERT_SLUG;
     const isFrontierPodcast = task.expert_slug === FRONTIER_PODCAST_EXPERT_SLUG;
@@ -519,6 +586,12 @@ export async function runExpertTask(taskId: string) {
       previewHtml = podcast.html;
       podcastStatus = podcast.status;
     }
+    else if (task.expert_slug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG) {
+      const result = await runListedFundParticipation(task, leaseToken);
+      report = result.markdown;
+      listedFundHtml = result.html;
+      listedFundStatus = { incomplete: result.report.budgets.truncated || result.report.gaps.length > 0, gaps: result.report.gaps.length, issuers: result.report.issuers.length, announcements: result.report.budgets.announcementsRead };
+    }
     else if (task.expert_slug === EXPERT_SLUG) report = await runBuiltin(task, leaseToken);
     else if (task.expert_slug === PANORAMA_EXPERT_SLUG) {
       const panorama = await runPanoramaExpert(task, leaseToken);
@@ -539,7 +612,7 @@ export async function runExpertTask(taskId: string) {
       const active = await tx`SELECT id FROM member_expert_tasks WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} AND lease_expires_at > now() FOR UPDATE`;
       if (!active.length) return;
       await tx`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256) VALUES (${taskId},${task.user_id},${`expert-${taskId}.${isSectorPeer ? "html" : "md"}`},${isSectorPeer ? "text/html; charset=utf-8" : "text/markdown; charset=utf-8"},${body},${digest}) ON CONFLICT(task_id) DO NOTHING`;
-      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json(isSectorPeer ? { html: report, format: "html" } : isFrontierPodcast ? { html: previewHtml, format: "html", podcast: podcastStatus } : task.expert_slug === PANORAMA_EXPERT_SLUG ? { html: panoramaHtml, format: "html", panorama: panoramaStatus } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),expires_at=GREATEST(expires_at,(SELECT expires_at FROM member_expert_artifacts WHERE task_id=${taskId})),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
+      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json(isSectorPeer ? { html: report, format: "html" } : isFrontierPodcast ? { html: previewHtml, format: "html", podcast: podcastStatus } : task.expert_slug === PANORAMA_EXPERT_SLUG ? { html: panoramaHtml, format: "html", panorama: panoramaStatus } : task.expert_slug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG ? { html: listedFundHtml, format: "html", listedFund: listedFundStatus } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),expires_at=GREATEST(expires_at,(SELECT expires_at FROM member_expert_artifacts WHERE task_id=${taskId})),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
     });
   } catch (error) {
     const detail = errorText(error);

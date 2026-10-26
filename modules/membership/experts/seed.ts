@@ -8,7 +8,7 @@
 // left at `coming_soon`, or the sector-peer card inserted before its status was settled) is corrected
 // by the next seed instead of staying in the catalog under a badge that no longer matches the card.
 import { sql } from "@aihot/backend/db";
-import { BUILTIN_EXPERT, COMING_SOON_EXPERT, FRONTIER_PODCAST_EXPERT, HIDDEN_EXPERT_STATUS, PANORAMA_EXPERT, SECTOR_PEER_EXPERT } from "./catalog.ts";
+import { BUILTIN_EXPERT, COMING_SOON_EXPERT, FRONTIER_PODCAST_EXPERT, HIDDEN_EXPERT_STATUS, LISTED_FUND_PARTICIPATION_EXPERT, PANORAMA_EXPERT, SECTOR_PEER_EXPERT } from "./catalog.ts";
 
 export async function seedBuiltinExperts(): Promise<void> {
   // The one-layer expert keeps its row, its skill text and its worker, but the employee platform no
@@ -41,6 +41,10 @@ export async function seedBuiltinExperts(): Promise<void> {
   // row an earlier release left at another status is corrected instead of staying wrong in the catalog.
   await sql`INSERT INTO member_experts(slug, owner_id, name, description, version, skill_md, manifest, status, missing_dependencies)
     VALUES (${FRONTIER_PODCAST_EXPERT.slug}, NULL, ${FRONTIER_PODCAST_EXPERT.name}, ${FRONTIER_PODCAST_EXPERT.description}, ${FRONTIER_PODCAST_EXPERT.version}, ${FRONTIER_PODCAST_EXPERT.skillMd}, ${sql.json({ tools: [] })}, 'available', ${sql.array(FRONTIER_PODCAST_EXPERT.missingDependencies)}::text[])
+    ON CONFLICT(slug) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, version=EXCLUDED.version,
+      skill_md=EXCLUDED.skill_md, manifest=EXCLUDED.manifest, status=EXCLUDED.status, missing_dependencies=EXCLUDED.missing_dependencies`;
+  await sql`INSERT INTO member_experts(slug, owner_id, name, description, version, skill_md, manifest, status, missing_dependencies)
+    VALUES (${LISTED_FUND_PARTICIPATION_EXPERT.slug}, NULL, ${LISTED_FUND_PARTICIPATION_EXPERT.name}, ${LISTED_FUND_PARTICIPATION_EXPERT.description}, ${LISTED_FUND_PARTICIPATION_EXPERT.version}, ${LISTED_FUND_PARTICIPATION_EXPERT.skillMd}, ${sql.json({ tools: [] })}, 'available', ${sql.array(LISTED_FUND_PARTICIPATION_EXPERT.missingDependencies)}::text[])
     ON CONFLICT(slug) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, version=EXCLUDED.version,
       skill_md=EXCLUDED.skill_md, manifest=EXCLUDED.manifest, status=EXCLUDED.status, missing_dependencies=EXCLUDED.missing_dependencies`;
 }

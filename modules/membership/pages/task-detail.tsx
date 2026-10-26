@@ -16,7 +16,7 @@ export const meta = () => pageMeta({ title: "任务详情", path: "/tasks", noin
 
 type Candidate = { id: string; name: string; status: string | null; creditCode: string | null; address: string | null; startDate: string | null; typeName?: string | null; branchOf?: string | null };
 type Task = {
-  id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string; query?: string; notes?: string };
+  id: string; expertSlug: string; expertName: string; state: string; stage: string; input: { companyName?: string; query?: string; region?: string; startDate?: string; endDate?: string; stockCodes?: string[]; notes?: string };
   result: { candidates?: Candidate[]; preview?: string; html?: string; format?: string; approximate?: boolean; query?: string; panorama?: { incomplete: boolean; gapCount: number; limits: string[] } } | null;
   errorCode: string | null; errorMessage: string | null; executionAttempts: number;
   createdAt: string; updatedAt: string; expiresAt: string; hasArtifact: boolean;
@@ -144,7 +144,9 @@ export default function TaskDetailPage() {
           {task.input?.companyName ? <p className="text-ink-2">核查主体：{task.input.companyName}</p> : null}
           {query ? <p className="break-words text-ink-2">查询：{query}</p> : null}
           {notes ? <p className="max-h-40 overflow-auto whitespace-pre-wrap rounded-control bg-bg-sunk p-3 text-xs leading-relaxed text-ink-2">{notes}</p> : null}
-          {!task.input?.companyName && !query && !notes ? <p className="text-ink-3">没有填写输入内容。</p> : null}
+          {task.input?.region ? <p className="text-ink-2">地区：{task.input.region} · 报告期：{task.input.startDate ?? "未提供"} 至 {task.input.endDate ?? "未提供"}</p> : null}
+          {task.input?.stockCodes?.length ? <p className="break-words text-ink-2">证券代码：{task.input.stockCodes.join("、")}</p> : null}
+          {!task.input?.companyName && !query && !task.input?.region && !notes ? <p className="text-ink-3">没有填写输入内容。</p> : null}
           <p className="text-xs text-ink-3">任务编号 {task.id}</p>
         </CardContent>
       </Card>
