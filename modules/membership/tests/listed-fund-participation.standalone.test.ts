@@ -146,6 +146,30 @@ test("participation parser keeps missing fields unknown, separates rows, and rep
   assert.match(parsed.gaps[0]!, /正文未解析/);
 });
 
+test("participation amounts follow their own labels in rows and both report formats", () => {
+  const input = parseListedFundInput({ region: "浙江省", year: 2024 }, new Date("2026-10-26T00:00:00Z"));
+  const issuer = { code: "600120", name: "示例公司", region: "杭州市" };
+  const bodies = [
+    ["本公司作为有限合伙人参与甲创业投资基金，认缴出资1000万元，实缴出资200万元。", "1000万元", "200万元"],
+    ["本公司参与甲创业投资基金，实缴出资200万元，认缴出资1000万元。", "1000万元", "200万元"],
+    ["本公司参与甲创业投资基金，认缴出资1000万元。", "1000万元", null],
+    ["本公司参与甲创业投资基金，实缴出资200万元。", null, "200万元"],
+    ["本公司投资金额300万元参与甲创业投资基金，认缴出资1000万元，实缴出资200万元。", "1000万元", "200万元"],
+    ["本公司参与甲创业投资基金，认缴比例20%，出资1000万元，实缴出资200万元。", null, "200万元"],
+  ] as const;
+  for (const [text, subscribed, paid] of bodies) {
+    const announcement: ListedAnnouncement = { issuer, title: "参与基金公告", date: "2024-06-13", url: "https://static.cninfo.com.cn/a.pdf", announcementId: "1", text };
+    const report = buildListedFundReport(input, [issuer], [announcement], [], []);
+    assert.equal(report.rows[0]?.subscribedAmount, subscribed, text);
+    assert.equal(report.rows[0]?.paidAmount, paid, text);
+    const markdown = renderListedFundMarkdown(report);
+    const html = renderListedFundHtml(report);
+    const expected = `${subscribed ?? "未提供"} | ${paid ?? "未提供"}`;
+    assert.ok(markdown.includes(expected), text);
+    assert.match(html, new RegExp(`<td>${subscribed ?? "未提供"}</td>\\s*<td>${paid ?? "未提供"}</td>`), text);
+  }
+});
+
 test("report HTML and Markdown retain coverage, gaps, and safe escaped text", () => {
   const input = parseListedFundInput({ region: "杭州市", year: 2024 }, new Date("2026-10-26T00:00:00Z"));
   const issuer = { code: "600120", name: "浙江东方 <集团>", region: "杭州市" };

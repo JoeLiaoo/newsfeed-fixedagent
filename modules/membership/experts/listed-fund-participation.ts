@@ -237,6 +237,18 @@ export async function lookupFundRegistrations(names: string[], deps: { endpoint?
 const ROLE = /有限合伙人|普通合伙人|基金管理人|管理人|投资人|出资人|认缴|实缴/;
 const AMOUNT = /(?:人民币)?\s*[¥￥]?\s*(\d+(?:\.\d+)?)\s*(亿元|万元|元|万股|股)/;
 const FUND_WORD = /(?:产业基金|股权投资基金|创业投资基金|投资基金|私募基金|基金合伙企业|合伙企业)/;
+function disclosedAmount(sentence: string, label: "认缴" | "实缴"): string | null {
+  const labels = [...sentence.matchAll(/认缴|实缴/g)];
+  const amounts: string[] = [];
+  for (const [index, match] of labels.entries()) {
+    if (match[0] !== label) continue;
+    const segment = sentence.slice(match.index! + label.length, labels[index + 1]?.index ?? sentence.length).split(/[，,]/, 1)[0]!;
+    const found = [...segment.matchAll(new RegExp(AMOUNT.source, "g"))];
+    if (found.length !== 1 || found[0]!.index! > 24 || /\d/.test(segment.slice(0, found[0]!.index))) return null;
+    amounts.push(found[0]![0].trim());
+  }
+  return amounts.length === 1 ? amounts[0]! : null;
+}
 export function candidateFundNames(text: string): string[] {
   const matches = text.match(/[^，。；;\n]{2,100}(?:产业基金|股权投资基金|创业投资基金|投资基金|私募基金|基金合伙企业|合伙企业)/g) ?? [];
   return [...new Set(matches.map((value) => value.trim().replace(/^.*(?:参与|出资|投资于|认购|认缴|拟设立|共同设立)/, "").trim()).filter((value) => value.length >= 3 && value.length <= 80 && FUND_WORD.test(value)))];
@@ -254,9 +266,13 @@ export function extractParticipationRows(announcements: ListedAnnouncement[], re
       const start = Math.max(0, text.indexOf(fundName) - 220);
       const context = text.slice(start, Math.min(text.length, start + fundName.length + 320));
       const roleMatch = context.match(/(?:作为|担任|成为)?\s*(有限合伙人|普通合伙人|基金管理人|管理人|投资人|出资人)/);
-      const amountMatch = context.match(AMOUNT);
+      const nameAt = text.indexOf(fundName);
+      const sentenceStart = Math.max(text.lastIndexOf("。", nameAt - 1), text.lastIndexOf("；", nameAt - 1), text.lastIndexOf(";", nameAt - 1)) + 1;
+      const sentenceEnd = text.slice(nameAt).search(/[。；;]/);
+      const sentence = text.slice(sentenceStart, sentenceEnd < 0 ? text.length : nameAt + sentenceEnd);
+      const soleFund = names.filter((name) => sentence.includes(name)).length === 1;
       const registration = byName.get(norm(fundName));
-      rows.push({ issuer: announcement.issuer, fundName, registrationNumber: registration?.registrationNumber ?? null, managerName: registration?.managerName ?? null, role: roleMatch?.[1] ?? null, subscribedAmount: /认缴/.test(context) ? amountMatch?.[0]?.trim() ?? null : null, paidAmount: /实缴/.test(context) ? amountMatch?.[0]?.trim() ?? null : null, disclosureDate: announcement.date, announcementTitle: announcement.title, announcementUrl: announcement.url, reason: "由公告正文规则提取，待人工核对" });
+      rows.push({ issuer: announcement.issuer, fundName, registrationNumber: registration?.registrationNumber ?? null, managerName: registration?.managerName ?? null, role: roleMatch?.[1] ?? null, subscribedAmount: soleFund ? disclosedAmount(sentence, "认缴") : null, paidAmount: soleFund ? disclosedAmount(sentence, "实缴") : null, disclosureDate: announcement.date, announcementTitle: announcement.title, announcementUrl: announcement.url, reason: "由公告正文规则提取，待人工核对" });
     }
   }
   const deduped = new Map<string, ParticipationRow>();

@@ -555,9 +555,15 @@ async function runFrontierPodcast(task: TaskRow, leaseToken: string) {
 
 export async function runExpertTask(taskId: string) {
   const leaseToken = randomUUID();
-  const tasks = await sql<TaskRow[]>`UPDATE member_expert_tasks SET state='running', stage='processing', updated_at=now(), lease_token=${leaseToken}, lease_expires_at=now() + interval '5 minutes', execution_attempts=execution_attempts+1,last_attempt_at=now(),error_code=NULL,error_message=NULL WHERE id=${taskId} AND state='queued' AND expires_at > now() AND execution_attempts < 3 RETURNING id,user_id,expert_slug,input,selected_entity,execution_attempts`;
+  const tasks = await sql<TaskRow[]>`UPDATE member_expert_tasks SET state='running', stage='processing', updated_at=now(), lease_token=${leaseToken}, lease_expires_at=now() + interval '5 minutes', execution_attempts=execution_attempts+1,confirmed_attempts=confirmed_attempts+CASE WHEN selected_entity IS NULL THEN 0 ELSE 1 END,last_attempt_at=now(),error_code=NULL,error_message=NULL WHERE id=${taskId} AND state='queued' AND expires_at > now() AND (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END) < 3 RETURNING id,user_id,expert_slug,input,selected_entity,execution_attempts`;
   const task = tasks[0];
-  if (!task) return;
+  if (!task) {
+    await sql`UPDATE member_expert_tasks SET state='failed',stage='failed',error_code='expert_retry_exhausted',
+      error_message='任务执行次数已用尽，请重新提交。',finished_at=now(),updated_at=now()
+      WHERE id=${taskId} AND state='queued' AND expires_at>now()
+        AND (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END)>=3`;
+    return;
+  }
   let leaseLost = false;
   const heartbeat = setInterval(() => {
     void sql`UPDATE member_expert_tasks SET updated_at=now(), lease_expires_at=now() + interval '5 minutes' WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`
@@ -635,17 +641,32 @@ export async function runExpertTask(taskId: string) {
 export async function recoverExpertTasks(enqueue: (taskId: string, tx: Db) => Promise<unknown>) {
   return sql.begin(async tx => {
     const stale = await tx<{ id: string; state: string }[]>`UPDATE member_expert_tasks SET
-      state=CASE WHEN execution_attempts<3 THEN 'queued' ELSE 'failed' END,
-      stage=CASE WHEN execution_attempts<3 THEN 'recovered' ELSE 'failed' END,
-      error_code=CASE WHEN execution_attempts<3 THEN NULL ELSE 'expert_retry_exhausted' END,
-      error_message=CASE WHEN execution_attempts<3 THEN NULL ELSE '自动恢复次数已用尽，请管理员检查任务。' END,
-      finished_at=CASE WHEN execution_attempts<3 THEN NULL ELSE now() END,
+      state=CASE WHEN (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END)<3 THEN 'queued' ELSE 'failed' END,
+      stage=CASE WHEN (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END)<3 THEN 'recovered' ELSE 'failed' END,
+      error_code=CASE WHEN (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END)<3 THEN NULL ELSE 'expert_retry_exhausted' END,
+      error_message=CASE WHEN (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END)<3 THEN NULL ELSE '自动恢复次数已用尽，请管理员检查任务。' END,
+      finished_at=CASE WHEN (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END)<3 THEN NULL ELSE now() END,
       updated_at=now(),lease_token=NULL,lease_expires_at=NULL
       WHERE state='running' AND lease_expires_at < now() AND expires_at > now()
       RETURNING id,state`;
+    // Older queued rows may have spent all three claims finding the entity before confirmation.
+    // They are now claimable; enqueue a bounded batch through the queue's singleton key.
+    const legacy = await tx<{ id: string }[]>`WITH pending AS (
+        SELECT id FROM member_expert_tasks WHERE state='queued' AND stage='queued' AND selected_entity IS NOT NULL
+          AND execution_attempts>=3 AND confirmed_attempts=0 AND expires_at>now()
+        ORDER BY updated_at,id LIMIT 100 FOR UPDATE SKIP LOCKED
+      ) UPDATE member_expert_tasks t SET stage='recovered',updated_at=now() FROM pending WHERE t.id=pending.id RETURNING t.id`;
+    const exhaustedQueued = await tx`WITH pending AS (
+        SELECT id FROM member_expert_tasks WHERE state='queued' AND expires_at>now()
+          AND (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END)>=3
+        ORDER BY updated_at,id LIMIT 100 FOR UPDATE SKIP LOCKED
+      ) UPDATE member_expert_tasks t SET state='failed',stage='failed',error_code='expert_retry_exhausted',
+        error_message='任务执行次数已用尽，请重新提交。',finished_at=now(),updated_at=now()
+        FROM pending WHERE t.id=pending.id RETURNING t.id`;
     const queued = stale.filter(row => row.state === "queued");
     for (const row of queued) await enqueue(row.id, tx);
-    return { recovered: queued.length, exhausted: stale.length - queued.length };
+    for (const row of legacy) await enqueue(row.id, tx);
+    return { recovered: queued.length + legacy.length, exhausted: stale.length - queued.length + exhaustedQueued.length };
   });
 }
 
