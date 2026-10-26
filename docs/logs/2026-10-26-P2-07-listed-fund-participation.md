@@ -2,7 +2,7 @@
 
 - Agent：Codex
 - 对应任务：P2-07（新增披露驱动的地区上市公司基金参与内置专家）
-- 完成状态：实现与 fixture 验证完成；待 PR 评审、CI、部署和真实员工样例复核
+- 完成状态：实现与 CI 完成；PR #139 已向 `main` 打开并通过当前代码 head 检查，待 Review、部署和真实员工样例复核
 
 ## 本次改动
 
@@ -32,7 +32,9 @@
   - `npm ci`：安装完成，审计未报告漏洞。
   - `npm run typecheck`：通过。
   - `node --import ./tests/standalone.ts --test modules/membership/tests/listed-fund-participation.standalone.test.ts`：8 项通过，均为本地 fixture/纯函数测试。
+  - 受影响页面与专家 fixture 用例合并复跑：15 项通过。
   - `git diff --check`：通过。
+  - GitHub PR #139 head `44f74c5`：`quality`、`postgres-integration`、`links` 均通过；质量工作流包含迁移检查、类型检查、Web 构建、架构与 standalone 用例。
 - 未执行或需用户试用的检查：
   - 未运行全量测试、真实公告 HTTP、真实基金备案查询或真实主体 MCP 调用；默认 fixture 用例不触网。
   - `FUND_REGISTRY_SEARCH_URL` 的授权、可用性及真实响应 schema 尚待运维核对；公告解析对复杂 PDF 表格的覆盖未验收。
@@ -46,4 +48,4 @@
   - 备案公示查询地址默认未配置；未命中不代表“未备案”。主体核验上限为 40 项，基金名称查询上限为 80 项。
   - 员工更新日志保持待发布 JSON，按仓库发布流程在构建前应用；本 PR 不部署。
 - 下一步：
-  - 检查 PR 同一 head 的 CI 与评审意见；发布前由运维核对基金公示来源授权/schema，随后使用员工账号和小型已知样例核对发行人、公告、PDF 候选、身份与备案结果。
+  - 等待 PR 评审意见；发布前由运维核对基金公示来源授权/schema，随后使用员工账号和小型已知样例核对发行人、公告、PDF 候选、身份与备案结果。
