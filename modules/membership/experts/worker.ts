@@ -557,7 +557,13 @@ export async function runExpertTask(taskId: string) {
   const leaseToken = randomUUID();
   const tasks = await sql<TaskRow[]>`UPDATE member_expert_tasks SET state='running', stage='processing', updated_at=now(), lease_token=${leaseToken}, lease_expires_at=now() + interval '5 minutes', execution_attempts=execution_attempts+1,confirmed_attempts=confirmed_attempts+CASE WHEN selected_entity IS NULL THEN 0 ELSE 1 END,last_attempt_at=now(),error_code=NULL,error_message=NULL WHERE id=${taskId} AND state='queued' AND expires_at > now() AND (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END) < 3 RETURNING id,user_id,expert_slug,input,selected_entity,execution_attempts`;
   const task = tasks[0];
-  if (!task) return;
+  if (!task) {
+    await sql`UPDATE member_expert_tasks SET state='failed',stage='failed',error_code='expert_retry_exhausted',
+      error_message='任务执行次数已用尽，请重新提交。',finished_at=now(),updated_at=now()
+      WHERE id=${taskId} AND state='queued' AND expires_at>now()
+        AND (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END)>=3`;
+    return;
+  }
   let leaseLost = false;
   const heartbeat = setInterval(() => {
     void sql`UPDATE member_expert_tasks SET updated_at=now(), lease_expires_at=now() + interval '5 minutes' WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`

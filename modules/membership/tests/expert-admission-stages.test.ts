@@ -87,6 +87,11 @@ test("entity search and confirmed execution have separate bounded claims", async
   assert.ok(requeued.includes(stranded), "old queued tasks are rescheduled in a bounded recovery batch");
   await recoverExpertTasks(async id => { requeued.push(id); });
   assert.equal(requeued.filter(id => id === stranded).length, 1, "legacy recovery does not enqueue the same row every minute");
+  const unclaimable = randomUUID();
+  await sql`INSERT INTO member_expert_tasks(id,user_id,expert_slug,state,input,execution_attempts)
+    VALUES(${unclaimable},${userId},${PANORAMA_EXPERT_SLUG},'queued','{}'::jsonb,3)`;
+  await runExpertTask(unclaimable);
+  assert.equal((await sql<{ error_code: string }[]>`SELECT error_code FROM member_expert_tasks WHERE id=${unclaimable}`)[0]?.error_code, "expert_retry_exhausted");
 });
 
 test("manual retry shares the two-active-task admission lock with create", async t => {
