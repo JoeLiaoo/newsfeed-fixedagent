@@ -8,6 +8,8 @@ import { aggregateContributions, targetKeyOf, type Contribution } from "./aggreg
 import { DEFAULT_BASE_ID, scopedSlug, scopedTargetKey } from "./bases.ts";
 import { renderPage } from "./render.ts";
 import type { CompiledDraft, Finding, PageDraft, SourceRecord } from "./schema.ts";
+import type { FigureFinding } from "./figure-model.ts";
+import type { FigureCoverage } from "./figures.ts";
 
 export type ContributionRow = {
   versionId: string;
@@ -21,6 +23,8 @@ export type ContributionRow = {
   sources: SourceRecord[];
   attribution: string | null;
   materialTitle: string | null;
+  figureFindings?: FigureFinding[];
+  figureCoverage?: FigureCoverage | null;
 };
 
 export type WrittenPage = { pageId: string; slug: string; revision: number };
@@ -84,7 +88,8 @@ async function lockTargets(tx: Tx, keys: string[]): Promise<void> {
 
 /** The material's own contribution: what this material says about the target, and nothing else. */
 async function writeContribution(tx: Tx, contribution: ContributionRow): Promise<void> {
-  const stored = { page: contribution.page, sources: contribution.sources, attribution: contribution.attribution, materialTitle: contribution.materialTitle };
+  const stored = { page: contribution.page, sources: contribution.sources, attribution: contribution.attribution, materialTitle: contribution.materialTitle,
+    figureFindings: contribution.figureFindings ?? [], figureCoverage: contribution.figureCoverage ?? null };
   await tx`
     INSERT INTO member_wiki_contributions(id, target_key, slug, page_type, target_type, target_name, track, document_id, version_id, version_no, task_id, status, contribution)
     VALUES (${randomUUID()}, ${contribution.targetKey}, ${contribution.slug}, ${contribution.page.pageType}, ${contribution.page.targetType}, ${contribution.page.targetName}, ${contribution.page.track}, ${contribution.documentId}, ${contribution.versionId}, ${contribution.versionNo}, ${contribution.taskId}, 'active', ${tx.json(stored as never)})
@@ -95,7 +100,7 @@ async function writeContribution(tx: Tx, contribution: ContributionRow): Promise
 export async function activeContributions(tx: Tx, targetKey: string, baseId: string): Promise<ContributionRow[]> {
   const rows = await tx<{
     version_id: string; document_id: string; version_no: number; created_at: Date; task_id: string | null; slug: string;
-    contribution: { page: PageDraft; sources: SourceRecord[]; attribution: string | null; materialTitle: string | null };
+    contribution: { page: PageDraft; sources: SourceRecord[]; attribution: string | null; materialTitle: string | null; figureFindings?: FigureFinding[]; figureCoverage?: FigureCoverage | null };
   }[]>`SELECT c.version_id, c.document_id, c.version_no, c.created_at, c.task_id, c.slug, c.contribution
     FROM member_wiki_contributions c
     JOIN member_wiki_documents d ON d.id = c.document_id
@@ -113,6 +118,7 @@ export async function activeContributions(tx: Tx, targetKey: string, baseId: str
     sources: row.contribution.sources ?? [],
     attribution: row.contribution.attribution ?? null,
     materialTitle: row.contribution.materialTitle ?? null,
+    figureFindings: row.contribution.figureFindings ?? [], figureCoverage: row.contribution.figureCoverage ?? null,
   }));
 }
 
@@ -121,7 +127,7 @@ async function writeRevision(tx: Tx, page: { id: string; slug: string }, aggrega
   const latest = await tx<{ revision: number }[]>`SELECT max(revision) AS revision FROM member_wiki_page_revisions WHERE page_id = ${page.id}`;
   const revision = (latest[0]?.revision ?? 0) + 1;
   const body = { ...aggregate.page, slug: page.slug };
-  const rendered = renderPage(body, aggregate.sources, meta.documentId);
+  const rendered = renderPage(body, aggregate.sources, meta.documentId, aggregate.figures, aggregate.figureCoverage);
   await tx`INSERT INTO member_wiki_page_revisions(id, page_id, revision, body_md, coverage, task_id, version_id)
     VALUES (${randomUUID()}, ${page.id}, ${revision}, ${rendered.bodyMd}, ${tx.json(rendered.coverage as never)}, ${meta.taskId}, ${meta.versionId})`;
   for (const citation of aggregate.citations) {
@@ -164,6 +170,8 @@ export async function publishBuildPages(tx: Tx, args: {
   findings: Finding[];
   attribution: string | null;
   materialTitle: string | null;
+  verifiedFigures?: FigureFinding[];
+  figureCoverage?: FigureCoverage | null;
 }): Promise<WrittenPage[]> {
   // Remember every target of the previous published version before retiring it, including targets
   // the new draft no longer contains. Retire once per build, never once per page.
@@ -192,6 +200,8 @@ export async function publishBuildPages(tx: Tx, args: {
       sources: args.draft.sources as SourceRecord[],
       attribution: args.attribution,
       materialTitle: args.materialTitle,
+      figureFindings: (args.verifiedFigures ?? []).filter(finding => (page.figureRefs ?? []).some(ref => ref.figureId === finding.figureId && ref.findingIds.includes(finding.id))),
+      figureCoverage: args.figureCoverage ?? null,
     };
     await writeContribution(tx, contribution);
     const aggregate = aggregateContributions(await activeContributions(tx, targetKey, args.baseId));

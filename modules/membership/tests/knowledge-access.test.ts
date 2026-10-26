@@ -11,6 +11,7 @@ import { SERVER_MODULES } from "../../../site/modules/server.ts";
 import { stub, tag } from "../../../tests/setup.ts";
 import { checksum, runWikiTask, recoverWikiTasks } from "../knowledge/worker.ts";
 import { TASK_ERRORS } from "../knowledge/catalog.ts";
+import sharp from "sharp";
 
 const DRAFT = {
   pages: [{
@@ -198,6 +199,19 @@ test("the shared library is open to approved employees and closed to everyone el
   const original = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: { cookie: cookies[1]!, ...common } });
   assert.equal(original.statusCode, 200);
   assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: common })).statusCode, 401);
+  const figureId = randomUUID();
+  const syntheticFigure = await sharp({ create: { width: 240, height: 120, channels: 3, background: "white" } }).jpeg().toBuffer();
+  await sql`UPDATE member_wiki_document_versions SET figure_manifest=${sql.json({ pipelineVersion: 1, htmlSha256: "synthetic", candidates: [], candidatesTruncated: false })} WHERE id=${uploaded.versionId}`;
+  await sql`INSERT INTO member_wiki_figure_assets(id,version_id,ordinal,locator,caption,original_sha256,normalized_sha256,original_body,normalized_body,media_type,width,height)
+    VALUES (${figureId},${uploaded.versionId},1,${sql.json({ kind: "html", label: "图 1" })},'合成图','synthetic-original','synthetic-normalized',${syntheticFigure},${syntheticFigure},'image/jpeg',240,120)`;
+  const figurePath = `/api/v1/membership/knowledge/versions/${uploaded.versionId}/figures/${figureId}/content`;
+  assert.equal((await app.inject({ method: "GET", url: figurePath, headers: common })).statusCode, 401);
+  const figureResponse = await app.inject({ method: "GET", url: figurePath, headers: { cookie: cookies[1]!, ...common } });
+  assert.equal(figureResponse.statusCode, 200);
+  assert.equal(figureResponse.headers["cache-control"], "private, no-store");
+  assert.equal(figureResponse.headers["x-content-type-options"], "nosniff");
+  assert.equal(figureResponse.headers["content-type"], "image/jpeg");
+  assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/figures`, headers: { cookie: cookies[1]!, ...common } })).statusCode, 200);
 
   // A second organisation's material about the same target joins the page instead of replacing it.
   const secondUpload = await app.inject({
@@ -206,6 +220,7 @@ test("the shared library is open to approved employees and closed to everyone el
   });
   assert.equal(secondUpload.statusCode, 202);
   const second = await secondUpload.json() as { documentId: string; versionId: string; taskId: string };
+  assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${second.versionId}/figures/${figureId}/content`, headers: { cookie: cookies[1]!, ...common } })).statusCode, 404, "a figure cannot be read through another version");
   await runWikiTask(second.taskId);
   const merged = await sql`SELECT body_md, coverage FROM member_wiki_page_revisions ORDER BY revision DESC LIMIT 1`;
   assert.match(merged[0]!.body_md, /\| 张三 \| 某券商 \| 看好 \| 2026-06-20 \|/, "前一份材料的观点仍在");
@@ -378,6 +393,7 @@ test("the shared library is open to approved employees and closed to everyone el
   assert.match(afterBody[0]!.body_md, /王五/, "其他机构的观点仍在");
   const withdrawnOriginal = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: { cookie: cookies[1]!, ...common } });
   assert.equal(withdrawnOriginal.statusCode, 404, "共享库不再提供撤回材料的原件");
+  assert.equal((await app.inject({ method: "GET", url: figurePath, headers: { cookie: cookies[1]!, ...common } })).statusCode, 404, "withdrawn figure bytes are no longer shared");
   const outsiderOriginal = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: { cookie: cookies[2]!, ...common } });
   assert.equal(outsiderOriginal.statusCode, 404, "没有上传过的员工也读不到撤回材料");
   const auditorOriginal = await app.inject({ method: "GET", url: `/api/v1/membership/knowledge/versions/${uploaded.versionId}/original`, headers: { cookie: cookies[0]!, ...common } });

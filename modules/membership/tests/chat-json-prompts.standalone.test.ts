@@ -5,9 +5,10 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { SECTOR_PEER_SYNTHESIS_PROMPT } from "../experts/worker.ts";
 import { ANSWER_SYSTEM, AUDITOR_SYSTEM, BUILDER_SYSTEM } from "../knowledge/prompts.ts";
+import { FIGURE_READ_SYSTEM, FIGURE_VERIFY_SYSTEM } from "../knowledge/figure-model.ts";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const importedPrompts: Record<string, string> = { ANSWER_SYSTEM, AUDITOR_SYSTEM, BUILDER_SYSTEM, SECTOR_PEER_SYNTHESIS_PROMPT };
+const importedPrompts: Record<string, string> = { ANSWER_SYSTEM, AUDITOR_SYSTEM, BUILDER_SYSTEM, SECTOR_PEER_SYNTHESIS_PROMPT, FIGURE_READ_SYSTEM, FIGURE_VERIFY_SYSTEM };
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
@@ -31,5 +32,5 @@ test("every membership chatJson system prompt names JSON mode", () => {
       checked++;
     }
   }
-  assert.equal(checked, 9);
+  assert.equal(checked, 11);
 });

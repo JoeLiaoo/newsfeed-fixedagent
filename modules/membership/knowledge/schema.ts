@@ -89,6 +89,7 @@ export const pageDraftSchema = z.object({
   anchors: z.array(z.string().max(240)).max(12),
   metrics: z.array(monitorSchema).max(30),
   related: z.array(z.string().max(80)).max(16),
+  figureRefs: z.array(z.object({ figureId: z.string().max(80), findingIds: z.array(z.string().max(80)).max(6) })).max(8).default([]),
 });
 
 /** One source inside the material, with the attribution the material itself gives. */

@@ -24,13 +24,16 @@ type Version = {
   sourceTitle: string | null; sourceAuthor: string | null; sourceOrg: string | null; sourceDate: string | null; sourceKind: string | null;
   extractionStatus: string; extractionNote: string | null; createdAt: string; uploaderName: string;
   taskId: string | null; taskState: string | null; taskStage: string | null; errorCode: string | null; errorMessage: string | null; attemptCount: number | null;
+  hasFigureManifest: boolean; figurePhase: string | null; figureCoverage: { status: string; read?: boolean; candidates: number; processed: number; evidenced: number; unreadable: number; unprocessed: number; truncated: boolean } | null;
 };
+type VersionFigures = { figures: Array<{ id: string; ordinal: number; caption: string | null; width: number; height: number; anchor: string; findings: Array<{ id: string; statement: string }> }> };
 type DocumentDetail = { id: string; title: string; status: string; baseId: string; uploaderId: string; createdAt: string; withdrawnAt: string | null };
 
 export default function KnowledgeDocumentPage() {
   const { id } = useParams();
   const [document, setDocument] = useState<DocumentDetail | null>(null);
   const [versions, setVersions] = useState<Version[]>([]);
+  const [figureData, setFigureData] = useState<Record<string, VersionFigures>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -40,6 +43,11 @@ export default function KnowledgeDocumentPage() {
     const result = await response.json() as { document: DocumentDetail; versions: Version[] };
     setDocument(result.document);
     setVersions(result.versions);
+    const entries = await Promise.all(result.versions.filter(version => version.hasFigureManifest).map(async version => {
+      const figures = await fetch(`${ENDPOINT}versions/${encodeURIComponent(version.id)}/figures`).then(response => response.ok ? response.json() as Promise<VersionFigures> : null).catch(() => null);
+      return [version.id, figures] as const;
+    }));
+    setFigureData(Object.fromEntries(entries.filter((entry): entry is readonly [string, VersionFigures] => entry[1] !== null)));
   }, [id]);
 
   useEffect(() => { void load().catch(() => setMessage("加载失败，请刷新重试。")).finally(() => setLoading(false)); }, [load]);
@@ -85,6 +93,16 @@ export default function KnowledgeDocumentPage() {
           <p className="mt-1 text-xs text-ink-3">{version.sourceOrg ?? "机构未知"} · {version.sourceAuthor ?? "分析师未知"} · {version.sourceDate ?? "材料日期未知"}{version.sourceKind ? ` · ${version.sourceKind}` : ""} · {version.uploaderName} · {new Date(version.createdAt).toLocaleString("zh-CN")} · {Math.round(version.byteSize / 1024)} KB</p>
           {version.extractionStatus === "unavailable" && <p className="mt-1 text-xs text-hot">{version.extractionNote ?? "未能提取文本"}</p>}
           {version.errorCode && <p className="mt-1 text-xs text-hot">{TASK_ERRORS[version.errorCode] ?? version.errorMessage ?? version.errorCode}</p>}
+          {version.hasFigureManifest && <section className="mt-3" aria-label={`版本 ${version.versionNo} 图表证据`}>
+            <h3 className="text-sm font-medium text-ink">图表证据</h3>
+            {version.taskState === "running" && version.taskStage === "extracting" && <p className="mt-1 text-xs text-ink-3" role="status">{version.figurePhase === "verifying" ? "图表复核" : "读取图表"}</p>}
+            {version.figureCoverage && <p className="mt-1 text-xs text-ink-3" role="status">{version.figureCoverage.read ? <>发现{version.figureCoverage.truncated ? "至少" : ""} {version.figureCoverage.candidates} 张候选图；处理 {version.figureCoverage.processed} 张，{version.figureCoverage.evidenced} 张有可用证据；{version.figureCoverage.unreadable} 张无可用证据，{version.figureCoverage.unprocessed} 张未处理。{version.figureCoverage.status !== "complete" && "部分图片未处理或未能辨认。"}</> : "本次未读取图片，正文照常构建。"}</p>}
+            {figureData[version.id]?.figures.length ? <ul className="mt-3 grid gap-3">{figureData[version.id].figures.map(figure => <li id={figure.anchor} key={figure.id} className="scroll-mt-24 rounded-card border border-line p-3">
+              <p className="text-sm font-medium text-ink">图 {figure.ordinal}{figure.caption ? ` · ${figure.caption}` : ""}</p>
+              {document.status === "active" && <img src={`${ENDPOINT}versions/${encodeURIComponent(version.id)}/figures/${encodeURIComponent(figure.id)}/content`} width={figure.width} height={figure.height} loading="lazy" alt={figure.caption ?? `材料图 ${figure.ordinal}`} className="mt-2 h-auto max-w-full rounded-card border border-line" />}
+              {figure.findings.length ? <ul className="mt-2 list-disc pl-5 text-sm text-ink">{figure.findings.map(finding => <li key={finding.id}>{finding.statement}</li>)}</ul> : <p className="mt-2 text-xs text-ink-3">未形成通过复核的图表事实。</p>}
+            </li>)}</ul> : null}
+          </section>}
           <div className="mt-2 flex flex-wrap gap-3">
             <Button asChild variant="outline" size="sm"><a href={`${ENDPOINT}versions/${version.id}/original`}><Download size={14} aria-hidden="true" />下载原件</a></Button>
             {version.sourceUrl && <a className="self-center text-sm text-accent underline-offset-4 hover:underline" href={version.sourceUrl} target="_blank" rel="noreferrer">查看来源网页</a>}

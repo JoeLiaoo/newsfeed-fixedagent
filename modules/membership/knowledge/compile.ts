@@ -5,6 +5,7 @@ import { chatJson } from "@aihot/backend/providers/llm";
 import { AUDITOR_SYSTEM, BUILDER_SYSTEM } from "./prompts.ts";
 import { normalizeAuditResult, normalizeCompiledDraft } from "./normalize.ts";
 import { auditResultSchema, compiledDraftSchema, type AuditResult, type CompiledDraft } from "./schema.ts";
+import type { FigureFinding } from "./figure-model.ts";
 
 /** The Builder is asked for few pages on purpose: the platform accepts more, but a long draft is a long
  *  answer, and a long answer is one that runs into the output limit. */
@@ -17,6 +18,8 @@ export type MaterialInput = {
   /** What the uploader wrote down about the material; it is the material's own attribution, as given. */
   declared: { author: string | null; organization: string | null; date: string | null; kind: string | null };
   text: string;
+  verifiedFigures?: FigureFinding[];
+  evidenceDigest?: string;
 };
 
 /** What the Builder is given: the material and the attribution the uploader recorded with it. */
@@ -35,6 +38,9 @@ function builderUser(material: MaterialInput): string {
       },
     },
     materialText: material.text,
+    verifiedFigures: material.verifiedFigures ?? [],
+    evidenceDigest: material.evidenceDigest ?? null,
+    figureRule: "只在 figureRefs 中选择 verifiedFigures 已有的 figureId 与 finding id；不能改写图中事实，也不能把图中结论写进 consensus。若正文很短，仅用已核实图表确定页面主题，文字事实字段留空。",
     // The contract is the shape the answer must have. The model drifts from it more often than the
     // schema can forgive, so it is written out here rather than left to the example of the fields.
     outputContract: {
@@ -64,6 +70,7 @@ function builderUser(material: MaterialInput): string {
         anchors: "string[]，可空",
         metrics: "array，可空",
         related: "string[]，可空",
+        figureRefs: "{figureId:string,findingIds:string[]}[]，只选 verifiedFigures 中已有 ID，可空",
       },
       sources: "材料里的来源：ref 用 S1、S2 递增；机构、作者、日期按材料给出，材料没写就填 null 或空数组",
       notes: "路由决定、逐份来源的去向说明、被排除内容为什么不沉淀",
@@ -82,6 +89,8 @@ function auditorUser(material: MaterialInput, draft: CompiledDraft): string {
   return JSON.stringify({
     task: "独立复核这份草稿：对原文核实、撤回无依据的内容、把无法证实的归因降为未知",
     materialText: material.text,
+    verifiedFigures: material.verifiedFigures ?? [],
+    evidenceDigest: material.evidenceDigest ?? null,
     draft,
     corrections: {
       section: "stances | timeline | divergences | risks | consensus | marginalChanges | expectations",
@@ -98,7 +107,7 @@ export async function compileMaterial(material: MaterialInput): Promise<Compiled
     model: "default",
     purpose: "knowledge",
     subject: `wiki:build:${material.versionId}`,
-    promptVersion: "wiki-builder-1c",
+    promptVersion: material.evidenceDigest ? "wiki-builder-figures-1" : "wiki-builder-1c",
     system: BUILDER_SYSTEM,
     user: builderUser(material),
     schema: compiledDraftSchema,
@@ -116,7 +125,7 @@ export async function auditMaterial(material: MaterialInput, draft: CompiledDraf
     model: "default",
     purpose: "knowledge",
     subject: `wiki:audit:${material.versionId}`,
-    promptVersion: "wiki-auditor-1e",
+    promptVersion: material.evidenceDigest ? "wiki-auditor-figures-1" : "wiki-auditor-1e",
     system: AUDITOR_SYSTEM,
     user: auditorUser(material, draft),
     schema: auditResultSchema,

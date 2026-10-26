@@ -48,6 +48,14 @@ export const MODELS: Record<string, ModelSpec> = {
 
 export type ContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
 
+/**
+ * Whether a model may look at images. A named preset declares it; `default` follows LLM_VISION.
+ * The knowledge pipeline asks here rather than guessing from the model name.
+ */
+export function modelSupportsVision(model: string): boolean {
+  return MODELS[model]?.vision === true;
+}
+
 export interface ChatJsonOptions<S extends z.ZodType> {
   model: string;
   /** One independently operated, evaluated backup. Only availability failures switch providers. */
@@ -65,6 +73,8 @@ export interface ChatJsonOptions<S extends z.ZodType> {
   maxTokens?: number;
   attemptTag?: string;
   timeoutMs?: number;
+  /** Hard limit on the final UTF-8 request body, including image base64 and provider extras. */
+  maxRequestBytes?: number;
   /** false: the model answers in its own text format (no JSON mode); `parse` turns it into the schema's input. */
   json?: boolean;
   parse?: (content: string) => unknown;
@@ -188,6 +198,10 @@ async function chatOnce<S extends z.ZodType>(opts: ChatJsonOptions<S>, circuit =
     ...(spec.jsonMode && opts.json !== false ? { response_format: { type: "json_object" } } : {}),
     ...(spec.extra ?? {}),
   };
+  const serializedBody = JSON.stringify(body);
+  if (opts.maxRequestBytes && Buffer.byteLength(serializedBody, "utf8") > opts.maxRequestBytes) {
+    throw new ModelUnavailableError("model_request_too_large");
+  }
 
   const receipt = await paidRequest(
     { ...request, fallbackFor },
@@ -199,7 +213,7 @@ async function chatOnce<S extends z.ZodType>(opts: ChatJsonOptions<S>, circuit =
         res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify(body),
+          body: serializedBody,
           signal: AbortSignal.timeout(timeoutMs),
         });
         text = await res.text();

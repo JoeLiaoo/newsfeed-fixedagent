@@ -3,6 +3,7 @@
 import { STANCE_WORDS } from "./catalog.ts";
 import type { CompiledDraft, Finding, PageDraft } from "./schema.ts";
 import { isKnownDate } from "./render.ts";
+import type { FigureFinding } from "./figure-model.ts";
 
 /** Attributions that name nobody. */
 const VAGUE = ["某券商", "某分析师", "某机构", "机构人士", "市场人士", "有分析师", "部分分析师", "业内", "市场", "unknown", "n/a", "tbd"];
@@ -87,7 +88,7 @@ export function lintPage(page: PageDraft, knownSlugs: Set<string>): Finding[] {
 }
 
 /** The checks on a whole build. */
-export function lintDraft(draft: CompiledDraft, knownSlugs: Set<string>): Finding[] {
+export function lintDraft(draft: CompiledDraft, knownSlugs: Set<string>, verifiedFigures: FigureFinding[] = []): Finding[] {
   const findings: Finding[] = [];
   const slugs = new Set<string>();
   const reachable = new Set([...knownSlugs, ...draft.pages.map(page => page.slug)]);
@@ -95,6 +96,13 @@ export function lintDraft(draft: CompiledDraft, knownSlugs: Set<string>): Findin
     if (slugs.has(page.slug)) findings.push({ level: "P0", category: "duplicate-page", target: page.slug, message: "同一批里出现了两个同名页面。", evidence: null });
     slugs.add(page.slug);
     findings.push(...lintPage(page, reachable));
+    const byId = new Map(verifiedFigures.map(item => [item.id, item]));
+    for (const ref of page.figureRefs ?? []) {
+      if (!ref.findingIds.length || ref.findingIds.some(id => byId.get(id)?.figureId !== ref.figureId)) {
+        findings.push({ level: "P0", category: "figure-reference-invalid", target: page.slug,
+          message: "图表引用不属于本次已核实的图片证据。", evidence: null });
+      }
+    }
   }
   return findings;
 }

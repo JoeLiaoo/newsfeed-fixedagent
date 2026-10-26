@@ -42,6 +42,45 @@ export const MAX_PAGES_PER_BUILD = 8;
 /** Shared budget for worker lease recovery and an employee's manual retry. */
 export const MAX_WIKI_ATTEMPTS = 5;
 
+/**
+ * The limits of the figure pipeline: how much of a public page's imagery one build may read.
+ * These are product protection values, not the limits of any image or model service; the image
+ * decode limits themselves live with the image helper.
+ */
+export const FIGURE_LIMITS = {
+  /** Image candidates collected from one page; beyond this the collection is marked truncated. */
+  candidates: 40,
+  /** Downloads actually attempted; a failed attempt still costs one. */
+  downloadAttempts: 12,
+  /** Images that may enter the visual steps. */
+  visualImages: 8,
+  /** Bytes one image download may read. */
+  imageBytes: 4 * 1024 * 1024,
+  /** Bytes all image downloads of one build may read. */
+  downloadBytes: 24 * 1024 * 1024,
+  /** The whole download stage may take. */
+  downloadStageMs: 60_000,
+  /** One image download may take, redirects included. */
+  imageTimeoutMs: 10_000,
+  /** Images one model call may carry. */
+  batchSize: 2,
+  /** Model calls the visual steps may make in one build, across resumes. */
+  visionRequests: 8,
+  /** The whole visual stage may take. */
+  visualStageMs: 480_000,
+  /** One visual call may take. */
+  visualCallMs: 45_000,
+  /** Bytes the normalized images of one build may take. */
+  normalizedBytes: 8 * 1024 * 1024,
+  /** Bytes one serialized model request may take, images included. */
+  requestBytes: 8 * 1024 * 1024,
+  /** Findings one image may yield. */
+  findingsPerImage: 6,
+  /** Output tokens the reading call and the verifying call may use. */
+  readTokens: 4096,
+  verifyTokens: 2048,
+} as const;
+
 /** The stance words a viewpoint table may hold; the set is closed so a page cannot grow a new one. */
 export const STANCE_WORDS = ["看多", "看好", "中性", "看空", "超配", "标配", "低配", "上行", "震荡", "下行"] as const;
 
@@ -107,6 +146,8 @@ export const TASK_ERRORS: Record<string, string> = {
   knowledge_file_unreadable: "文件无法读取或已损坏。",
   knowledge_text_unavailable: "未能从文件中提取出可用文本，未生成知识页。",
   knowledge_text_empty: "材料内容超出单次构建上限且未能截取到有效文本，未生成知识页。",
+  knowledge_content_empty: "网页已打开，但没有足够的正文，也没有通过复核的图表证据，未生成知识页。",
+  knowledge_figure_evidence_changed: "图表证据与已保存的草稿不一致，本次构建未发布任何页面，可重试。",
   knowledge_model_failed: "模型调用失败，构建未完成，可重试。",
   knowledge_model_output_invalid: "模型输出无法解析，构建未完成，可重试。",
   knowledge_audit_failed: "独立复核未完成，未发布任何页面，可重试。",
