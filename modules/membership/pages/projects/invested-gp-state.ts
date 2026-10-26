@@ -4,7 +4,7 @@ export type GpProjectsState={items:Investment[];interestTags:string[];nextOffset
 export const initialGpProjectsState:GpProjectsState={items:[],interestTags:[],nextOffset:null,loading:true,loadingMore:false,message:"",retry:{offset:0,append:false}};
 
 // Initial reads, append pages and retries share one cancellation/version scope.
-export function createGpProjectsLoader(publish:(state:GpProjectsState)=>void,onUnauthorized:()=>void){
+export function createGpProjectsLoader(publish:(state:GpProjectsState)=>void,onUnauthorized:()=>void,group?:"citic-alliance"|"market-leaders"){
   let state=initialGpProjectsState,mode:boolean|undefined,version=0;
   let controller:AbortController|undefined;
   function cancel(){version++;controller?.abort();}
@@ -19,7 +19,7 @@ export function createGpProjectsLoader(publish:(state:GpProjectsState)=>void,onU
     state=append?{...state,loadingMore:true,message:""}:{...initialGpProjectsState,loading:true};
     publish(state);
     try{
-      const response=await fetch(`/api/v1/membership/gp-projects?limit=50&offset=${offset}${matched?"&matched=1":""}`,{signal:request.signal});
+      const response=await fetch(`/api/v1/membership/gp-projects?limit=50&offset=${offset}${matched?"&matched=1":""}${group?`&group=${group}`:""}`,{signal:request.signal});
       if(!isCurrent())return;
       if(response.status===401){onUnauthorized();return;}
       if(!response.ok)throw new Error("request_failed");

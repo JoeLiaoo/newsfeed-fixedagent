@@ -1,0 +1,1 @@
+ALTER TABLE member_gp_watchlist VALIDATE CONSTRAINT member_gp_project_groups_valid;

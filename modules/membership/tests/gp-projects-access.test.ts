@@ -34,6 +34,7 @@ test("GP project list requires an active member and only exposes approved active
     "/api/v1/membership/gp-projects?limit=abc",
     "/api/v1/membership/gp-projects?offset=1.5",
     "/api/v1/membership/gp-projects?limit=1&limit=2",
+    "/api/v1/membership/gp-projects?group=other",
   ]) {
     const invalid = await app.inject({ method: "GET", url, headers: { cookie } });
     assert.equal(invalid.statusCode, 400, url);
@@ -87,6 +88,7 @@ test("GP project list requires an active member and only exposes approved active
   assert.equal(body.pagination.nextOffset, 1);
 
   const detailPath = `/api/v1/membership/gp-projects/${approvedId}`;
+  assert.equal((await app.inject({ method: "GET", url: `${detailPath}?group=other`, headers: { cookie } })).statusCode, 400);
   assert.equal((await app.inject({ method: "GET", url: detailPath })).statusCode, 401);
   for (const hiddenId of [randomUUID(), observedId, pausedInvestmentId, nonGpInvestmentId]) {
     assert.equal((await app.inject({ method: "GET", url: `/api/v1/membership/gp-projects/${hiddenId}`, headers: { cookie } })).statusCode, 404);
@@ -99,7 +101,24 @@ test("GP project list requires an active member and only exposes approved active
   assert.equal(investment.investee_name, "已核实企业");
   assert.equal(investment.source_url, null);
   assert.equal(investment.source_placeholder, true);
-  assert.ok(!["raw_evidence", "approved_by", "approved_at", "gp_id"].some(field => field in investment));
+  assert.ok(!["raw_evidence", "approved_by", "approved_at", "gp_id", "project_groups", "project_group_basis"].some(field => field in investment));
+
+  const allianceList = "/api/v1/membership/gp-projects?group=citic-alliance";
+  const leadersList = "/api/v1/membership/gp-projects?group=market-leaders";
+  const names = async (url: string) => ((await (await app.inject({ method: "GET", url, headers: { cookie } })).json()) as {investments:Array<{id:string}>}).investments.map(row => row.id);
+  assert.deepEqual(await names(allianceList), [], "unclassified GPs never appear in a collection");
+  assert.deepEqual(await names(leadersList), []);
+  assert.equal((await app.inject({ method: "GET", url: `${detailPath}?group=citic-alliance`, headers: { cookie } })).statusCode, 404);
+  await sql`UPDATE member_gp_watchlist SET project_groups=ARRAY['citic-alliance']::text[],project_group_basis='人工核实的分类依据' WHERE id=${activeGp}`;
+  assert.ok((await names(allianceList)).includes(approvedId));
+  assert.deepEqual(await names(leadersList), []);
+  assert.equal((await app.inject({ method: "GET", url: `${detailPath}?group=citic-alliance`, headers: { cookie } })).statusCode, 200);
+  assert.equal((await app.inject({ method: "GET", url: `${detailPath}?group=market-leaders`, headers: { cookie } })).statusCode, 404);
+  await sql`UPDATE member_gp_watchlist SET project_groups=ARRAY['market-leaders']::text[],project_group_basis='人工核实的分类依据' WHERE id=${pausedGp}`;
+  assert.deepEqual(await names(leadersList), [], "paused GP investments stay hidden despite their category");
+  await sql`UPDATE member_gp_watchlist SET project_groups=ARRAY['citic-alliance','market-leaders']::text[] WHERE id=${activeGp}`;
+  assert.ok((await names(leadersList)).includes(approvedId));
+  assert.ok(!(await names(leadersList)).includes(observedId));
 
   await sql`UPDATE member_users SET status='pending' WHERE id=${member!.id}`;
   const inactive = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects", headers: { cookie } });
@@ -111,6 +130,7 @@ test("GP project list requires an active member and only exposes approved active
   const matched = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects?matched=1&limit=1", headers: { cookie } });
   const matchedBody = await matched.json() as { investments: Array<Record<string, unknown>>; interest_tags: string[]; pagination: { nextOffset: number | null } };
   assert.deepEqual([...matchedBody.interest_tags].sort(), ["光伏", "战略配售", "自定义储能", "储能"].sort());
+  assert.ok((await names(`${leadersList}&matched=1`)).includes(approvedId));
   assert.equal(matchedBody.investments.length, 1);
   assert.equal(matchedBody.investments[0]?.id, approvedId);
   assert.equal(matchedBody.pagination.nextOffset, 1);

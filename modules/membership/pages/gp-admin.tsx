@@ -10,7 +10,7 @@ import { DIRECTIONS } from "../catalog.ts";
 import { createAdminPageLoader } from "./gp-admin-state.ts";
 const GP_TAGS = DIRECTIONS.filter(d => d.name !== "战略配售").flatMap(d => [...d.tags]);
 const PAGE_SIZE=25;
-type GP={id:string;canonical_name:string;aliases:string[];entity_id:string|null;credit_code:string|null;entity_role:string;status:string;source_ref:string;last_synced_at:string|null;last_error:string|null};
+type GP={id:string;canonical_name:string;aliases:string[];entity_id:string|null;credit_code:string|null;entity_role:string;status:string;source_ref:string;project_groups:string[];project_group_basis:string|null;last_synced_at:string|null;last_error:string|null};
 type Observation={id:string;gp_name:string;investee_name:string;status:string;sector_tags:string[];sector_reason:string|null;data_date:string|null;provider_updated_at:string|null;investment_date:string|null;first_seen_at:string;snapshot_captured_at:string|null;approved_source_url:string|null;approved_event_date:string|null};
 const prefix="/api/v1/membership/admin";
 const GP_STATES=[{id:"candidate",label:"候选"},{id:"active",label:"启用"},{id:"paused",label:"暂停"}] as const;
@@ -40,7 +40,7 @@ export default function GpAdminPage(){
   async function saveGp(id:string,input:Record<string,unknown>){
     setBusy(true);setMessage("");
     try{const response=await fetch(prefix+"/gps/"+encodeURIComponent(id),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(input)});
-      setMessage(response.ok?"已保存主体核查结果。":response.status===409?"主体身份在已有快照后不可修改。":"保存失败，请检查主体身份、GP 角色和依据。");
+      setMessage(response.ok?"已保存主体核查结果。":response.status===409?"主体身份不可修改，或项目分类缺少依据。":"保存失败，请检查主体身份、GP 角色和依据。");
       if(response.ok)setGpsRefresh(value=>value+1);
     }catch{setMessage("网络异常，保存未完成。");}finally{setBusy(false);}
   }
@@ -119,7 +119,7 @@ function Pager({offset,next,loading,onChange}:{offset:number;next:number|null;lo
 }
 
 function GpRow({gp,busy,syncMessage,onSave,onSync}:{gp:GP;busy:boolean;syncMessage?:string;onSave:(input:Record<string,unknown>)=>void;onSync:()=>void}){
-  return <form onSubmit={event=>{event.preventDefault();const values=new FormData(event.currentTarget);onSave({role:values.get("role"),status:values.get("status"),entityId:values.get("entityId"),creditCode:values.get("creditCode"),sourceRef:values.get("sourceRef"),aliases:String(values.get("aliases")??"").split(/[,，、]/).map(v=>v.trim()).filter(Boolean)});}} className="grid gap-2 rounded-control border border-line-soft p-4">
+  return <form onSubmit={event=>{event.preventDefault();const values=new FormData(event.currentTarget);onSave({role:values.get("role"),status:values.get("status"),entityId:values.get("entityId"),creditCode:values.get("creditCode"),sourceRef:values.get("sourceRef"),projectGroups:values.getAll("projectGroups"),projectGroupBasis:values.get("projectGroupBasis"),aliases:String(values.get("aliases")??"").split(/[,，、]/).map(v=>v.trim()).filter(Boolean)});}} className="grid gap-2 rounded-control border border-line-soft p-4">
     <strong>{gp.canonical_name}</strong><p className="text-xs text-ink-3">别名：{gp.aliases.length?gp.aliases.join("、"):"无"} · 当前身份：{gp.entity_role} · 上次同步：{gp.last_synced_at?beijingStamp(gp.last_synced_at):"未同步"}</p>
     <p className="text-xs text-ink-3">最近错误：{gp.last_error||"无"}</p>
     <div className="grid gap-2 sm:grid-cols-2">
@@ -130,6 +130,11 @@ function GpRow({gp,busy,syncMessage,onSave,onSync}:{gp:GP;busy:boolean;syncMessa
     </div>
     <label className="grid gap-1 text-sm">别名（逗号分隔）<Input name="aliases" defaultValue={gp.aliases.join("、")}/></label>
     <label className="grid gap-1 text-sm">依据<Input name="sourceRef" defaultValue={gp.source_ref} required/></label>
+    <fieldset className="flex flex-wrap gap-3"><legend className="mb-1 text-sm">员工项目分类（核实后才展示）</legend>
+      <label className="inline-flex min-h-11 items-center gap-2 text-sm"><Checkbox name="projectGroups" value="citic-alliance" defaultChecked={gp.project_groups.includes("citic-alliance")}/>中信股权联盟</label>
+      <label className="inline-flex min-h-11 items-center gap-2 text-sm"><Checkbox name="projectGroups" value="market-leaders" defaultChecked={gp.project_groups.includes("market-leaders")}/>市场头部机构</label>
+    </fieldset>
+    <label className="grid gap-1 text-sm">分类依据（分类时必填，至少 8 字）<Input name="projectGroupBasis" defaultValue={gp.project_group_basis||""} maxLength={1000}/></label>
     <div className="flex flex-wrap items-center gap-2"><Button size="sm" disabled={busy} type="submit">保存主体</Button><Button size="sm" variant="outline" disabled={busy||gp.status!=="active"} type="button" onClick={onSync}>请求同步</Button>{syncMessage&&<span role="status" className="text-xs text-ink-3">{syncMessage}</span>}</div>
   </form>;
 }

@@ -51,6 +51,17 @@ test("GP admin APIs require admins and paginate filtered observations in stable 
   assert.equal((await gps.json() as {gps:unknown[];pagination:{nextOffset:number|null}}).gps.length,1);
   assert.equal((await gps.json() as {pagination:{nextOffset:number|null}}).pagination.nextOffset,1);
 
+  const groupPath=`/api/v1/membership/admin/gps/${gp}`;
+  const patchHeaders={cookie:adminCookie,...credentials};
+  const patchBody={role:"gp",status:"candidate",entityId:"confirmed-entity",creditCode:"",sourceRef:"https://example.org/identity",aliases:["人工核对别名"]};
+  assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:{cookie:memberCookie,...credentials},payload:{...patchBody,projectGroups:["citic-alliance"],projectGroupBasis:"分类依据已经核实"}})).statusCode,403);
+  assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:patchHeaders,payload:{...patchBody,projectGroups:["other"],projectGroupBasis:"分类依据已经核实"}})).statusCode,400);
+  assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:patchHeaders,payload:{...patchBody,projectGroups:["citic-alliance"],projectGroupBasis:""}})).statusCode,400);
+  assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:patchHeaders,payload:{...patchBody,projectGroups:["citic-alliance"]}})).statusCode,400);
+  assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:patchHeaders,payload:{...patchBody,projectGroups:["citic-alliance","market-leaders"],projectGroupBasis:"分类依据已经核实"}})).statusCode,200);
+  const [grouped]=await sql<{project_groups:string[];project_group_basis:string}[]>`SELECT project_groups,project_group_basis FROM member_gp_watchlist WHERE id=${gp}`;
+  assert.deepEqual(grouped,{project_groups:["citic-alliance","market-leaders"],project_group_basis:"分类依据已经核实"});
+
   const first=await app.inject({method:"GET",url:"/api/v1/membership/admin/gp-observations?status=observed&limit=1",headers:{cookie:adminCookie}});
   assert.equal(first.statusCode,200);
   const firstBody=await first.json() as {observations:Array<{id:string}>;pagination:{nextOffset:number|null}};

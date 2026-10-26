@@ -69,3 +69,29 @@ test("switching back cancels pending JSON and unmount cancels retry/redirect upd
   pending[3]!.resolve({status:401} as Response);await retry;
   assert.equal(state,snapshot);assert.equal(redirects,0);
 });
+
+for(const group of ["citic-alliance","market-leaders"] as const){
+  test(`${group} loader keeps its category on first page, matched view and retry`,async t=>{
+    const urls:string[]=[];
+    let fail=false;
+    t.mock.method(globalThis,"fetch",async(url:string)=>{urls.push(url);if(fail)throw new Error("offline");return page("approved",null);});
+    let state=initialGpProjectsState;
+    const loader=createGpProjectsLoader(value=>{state=value;},()=>assert.fail(),group);
+    await loader.load(false,0);
+    assert.deepEqual(state.items.map(item=>item.id),["approved"]);
+    await loader.load(true,0);
+    fail=true;
+    await loader.load(true,50,true);
+    assert.deepEqual(state.retry,{offset:50,append:true});
+    assert.deepEqual(state.items.map(item=>item.id),["approved"]);
+    fail=false;
+    await loader.load(true,state.retry.offset,state.retry.append);
+    assert.deepEqual(state.items.map(item=>item.id),["approved","approved"]);
+    assert.deepEqual(urls,[
+      `/api/v1/membership/gp-projects?limit=50&offset=0&group=${group}`,
+      `/api/v1/membership/gp-projects?limit=50&offset=0&matched=1&group=${group}`,
+      `/api/v1/membership/gp-projects?limit=50&offset=50&matched=1&group=${group}`,
+      `/api/v1/membership/gp-projects?limit=50&offset=50&matched=1&group=${group}`,
+    ]);
+  });
+}
