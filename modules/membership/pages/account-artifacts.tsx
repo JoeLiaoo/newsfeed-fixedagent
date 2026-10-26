@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { Download, FileText, ChevronRight } from "lucide-react";
+import { ClipboardList, Download, FileText, ChevronRight } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
@@ -47,11 +47,16 @@ export default function AccountArtifactsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
+  // The page the reader is on: a refresh of the same page keeps the rows on screen, another page shows
+  // its loading state.
+  const listKey = `${offset}|${filter}`;
+  const shownKey = useRef<string | null>(null);
 
   useEffect(() => {
     let current = true;
-    setLoading(true);
-    setError("");
+    const sameList = shownKey.current === listKey;
+    shownKey.current = listKey;
+    if (!sameList) setLoading(true);
     const query = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
     if (filter) query.set("state", filter);
     void (async () => {
@@ -63,6 +68,7 @@ export default function AccountArtifactsPage() {
         if (!current) return;
         setTasks(data.tasks);
         setNextOffset(data.pagination.nextOffset ?? null);
+        setError("");
       } catch {
         if (current) setError("任务与产物暂时无法加载，请重试。");
       } finally {
@@ -70,7 +76,14 @@ export default function AccountArtifactsPage() {
       }
     })();
     return () => { current = false; };
-  }, [offset, filter, reload]);
+  }, [offset, filter, reload, listKey]);
+
+  // A task that has not finished yet keeps its row current.
+  useEffect(() => {
+    if (!tasks.some(task => TASK_STATES_RUNNING.includes(task.state))) return;
+    const timer = setInterval(() => setReload(value => value + 1), 5000);
+    return () => clearInterval(timer);
+  }, [tasks]);
 
   function turn(next: number) {
     const params = new URLSearchParams(searchParams);
@@ -120,6 +133,9 @@ export default function AccountArtifactsPage() {
               </li>)}
             </ul>}
             <div className="flex flex-wrap gap-3">
+              <IntentLink to={`/tasks/${task.id}`} className="inline-flex items-center gap-1 text-sm text-accent underline-offset-4 hover:underline">
+                <ClipboardList size={14} aria-hidden="true" />查看任务
+              </IntentLink>
               {task.hasArtifact && <a className="inline-flex items-center gap-1 text-sm text-accent underline-offset-4 hover:underline" href={`/api/v1/membership/expert-tasks/${task.id}/artifact`}>
                 <Download size={14} aria-hidden="true" />下载 Markdown 产物
               </a>}

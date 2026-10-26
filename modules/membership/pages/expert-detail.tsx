@@ -205,7 +205,7 @@ export default function ExpertDetailPage() {
   return <main className="mx-auto w-full max-w-4xl px-5 py-8">
     <header className="mb-6">
       <Button asChild variant="outline" size="sm" className="mb-4"><IntentLink to="/experts"><ArrowLeft size={14} aria-hidden="true" />专家平台</IntentLink></Button>
-      <p className="mb-3"><IntentLink to="/tasks" className="text-sm text-accent underline-offset-4 hover:underline">查看全部任务记录</IntentLink></p>
+      <p className="mb-3"><IntentLink to="/account/artifacts" className="text-sm text-accent underline-offset-4 hover:underline">查看全部任务与产物</IntentLink></p>
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-1 text-2xl font-semibold tracking-tight text-ink">{expert?.name ?? "专家"}</h1>
         {(expert.status !== "available" || expert.slug === SECTOR_PEER_EXPERT_SLUG) && <Badge variant={badge.variant}>{badge.label}</Badge>}

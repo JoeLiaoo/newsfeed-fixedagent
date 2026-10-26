@@ -39,7 +39,6 @@ export default function ExpertsPage() {
     <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
       <h1 className="text-2xl font-semibold tracking-tight text-ink">专家平台</h1>
       <div className="flex flex-wrap gap-2">
-        <Button asChild variant="outline"><IntentLink to="/tasks">任务记录</IntentLink></Button>
         <Button asChild variant="outline"><IntentLink to="/account/artifacts"><FolderOpen size={16} aria-hidden="true" />我的任务与产物</IntentLink></Button>
         <Button asChild><IntentLink to="/experts/new"><Plus size={16} aria-hidden="true" />新增专家</IntentLink></Button>
       </div>

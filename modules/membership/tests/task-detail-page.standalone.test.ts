@@ -7,20 +7,30 @@ const moduleSource = readFileSync(new URL("../module.ts", import.meta.url), "utf
 const page = readFileSync(new URL("../pages/task-detail.tsx", import.meta.url), "utf8");
 const expertDetail = readFileSync(new URL("../pages/expert-detail.tsx", import.meta.url), "utf8");
 const tasksPage = readFileSync(new URL("../pages/tasks.tsx", import.meta.url), "utf8");
+const artifactsPage = readFileSync(new URL("../pages/account-artifacts.tsx", import.meta.url), "utf8");
+const expertsPage = readFileSync(new URL("../pages/experts.tsx", import.meta.url), "utf8");
 
 test("the task detail page is registered on its own path", () => {
-  assert.match(moduleSource, /\{\s*path:\s*"tasks",\s*file:\s*"pages\/tasks\.tsx"\s*\}/, "任务历史页注册在 /tasks");
+  assert.match(moduleSource, /\{\s*path:\s*"tasks",\s*file:\s*"pages\/tasks\.tsx"\s*\}/, "旧的任务记录地址仍在 /tasks");
   assert.match(moduleSource, /\{\s*path:\s*"tasks\/:id",\s*file:\s*"pages\/task-detail\.tsx"\s*\}/, "任务详情页注册在 /tasks/:id");
+  assert.match(moduleSource, /\{\s*path:\s*"account\/artifacts",\s*file:\s*"pages\/account-artifacts\.tsx"\s*\}/, "任务与产物页注册在 /account/artifacts");
 });
 
 test("the employee task history pages through all of the logged-in employee's expert tasks", () => {
-  assert.match(tasksPage, /\/api\/v1\/membership\/expert-tasks\?limit=/, "历史页调用员工任务列表接口");
-  assert.match(tasksPage, /pagination: \{ nextOffset: number \| null \}/, "读取服务端分页游标");
-  assert.match(tasksPage, /下一页/, "可以访问更早的任务");
-  assert.match(tasksPage, /上一页/, "可以返回较新的任务");
-  assert.match(tasksPage, /全部任务/, "明确说明这是跨专家历史");
-  assert.match(tasksPage, /查看任务/, "每条记录可打开详情");
-  assert.match(expertDetail, /IntentLink to="\/tasks"/, "专家页可以发现全局任务历史");
+  assert.match(artifactsPage, /\/api\/v1\/membership\/expert-tasks\?/, "任务与产物页调用员工任务列表接口");
+  assert.match(artifactsPage, /pagination: \{ limit: number; offset: number; hasMore: boolean; nextOffset: number \| null \}/, "读取服务端分页游标");
+  assert.match(artifactsPage, /下一页/, "可以访问更早的任务");
+  assert.match(artifactsPage, /上一页/, "可以返回较新的任务");
+  assert.match(artifactsPage, /进行中/, "可以按状态筛选任务");
+  assert.match(artifactsPage, /<IntentLink to=\{`\/tasks\/\$\{task\.id\}`\}/, "每条记录可打开任务详情");
+  assert.match(artifactsPage, /查看任务/, "任务详情的入口写给员工看");
+  assert.match(expertDetail, /IntentLink to="\/account\/artifacts"/, "专家页可以发现全部任务与产物");
+  assert.match(expertsPage, /我的任务与产物/, "专家平台只有一个任务入口");
+  assert.doesNotMatch(expertsPage, />任务记录</, "专家平台不再有第二个任务入口");
+});
+
+test("the old task list address lands on the task and artifact library", () => {
+  assert.match(tasksPage, /redirect\(`\/account\/artifacts\$\{new URL\(request\.url\)\.search\}`\)/, "旧地址转到任务与产物页并带上分页参数");
 });
 
 test("the task page reads the one task it shows, and keeps the states of the employee flow", () => {
@@ -38,7 +48,7 @@ test("the task page reads the one task it shows, and keeps the states of the emp
   assert.match(page, /\/artifact`/, "可下载产物");
   assert.doesNotMatch(page, /\/checkpoint|下载采集台账/, "员工详情页不暴露内部采集台账");
   assert.match(page, /srcDoc=\{task\.result\.html\} sandbox=""/, "成功的全景任务显示隔离的 HTML 预览");
-  assert.match(tasksPage, /下载 Markdown 产物/, "全景任务历史页明确下载 Markdown");
+  assert.match(artifactsPage, /下载 Markdown 产物/, "任务与产物页明确下载 Markdown");
   assert.match(page, /companyRelationLabel\(candidate, candidates, task\.result\?\.query/, "任务详情的主体选择复用相同的母公司／分支标签");
   assert.match(page, /\/materials\/\$\{material\.id\}/, "可下载材料");
   assert.match(page, /method: "DELETE"/, "任务结束后可删除材料");
