@@ -16,14 +16,21 @@ function displayDate(value: string | null) {
 }
 
 export function ProjectList({collection}:{collection:ProjectCollection}) {
-  const [searchParams] = useSearchParams();
+  const [searchParams,setSearchParams] = useSearchParams();
   const matched = searchParams.get("matched") === "1";
-  const [{items,interestTags,nextOffset,loading,loadingMore,message,retry},setPage] = useState(initialGpProjectsState);
+  const filters={motherFund:searchParams.get("motherFund")||"",subfund:searchParams.get("subfund")||"",sector:searchParams.get("sector")||"",province:searchParams.get("province")||""};
+  const filterKey=JSON.stringify(filters);
+  const [{items,interestTags,filterOptions,nextOffset,loading,loadingMore,message,retry},setPage] = useState(initialGpProjectsState);
   const [loader] = useState(() => createGpProjectsLoader(setPage, () => { location.href = "/login"; },collection.group));
   useEffect(() => {
-    void loader.load(matched, 0);
+    void loader.load(matched, 0, false, filters);
     return () => loader.cancel();
-  }, [loader, matched]);
+  }, [loader, matched, filterKey]);
+  function changeFilter(name:keyof typeof filters,value:string){
+    const next=new URLSearchParams(searchParams);
+    if(value)next.set(name,value);else next.delete(name);
+    next.delete("offset");setSearchParams(next);
+  }
 
   return <main className="mx-auto w-full max-w-5xl px-5 py-8">
     <header className="mb-6">
@@ -32,10 +39,16 @@ export function ProjectList({collection}:{collection:ProjectCollection}) {
         <Button asChild variant={matched ? "outline" : "default"}><Link to={collection.path} aria-current={!matched?"page":undefined}>全部已核实</Link></Button>
         <Button asChild variant={matched ? "default" : "outline"}><Link to={`${collection.path}?matched=1`} aria-current={matched?"page":undefined}>与我关注匹配</Link></Button>
       </nav>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="已投项目筛选条件">
+        <label className="grid gap-1 text-sm">母基金<select value={filters.motherFund} onChange={event=>changeFilter("motherFund",event.target.value)} className="min-h-11 rounded-control border border-line bg-surface px-3 text-base text-ink sm:text-sm"><option value="">全部母基金</option>{filterOptions.mother_funds.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+        <label className="grid gap-1 text-sm">子基金<select value={filters.subfund} onChange={event=>changeFilter("subfund",event.target.value)} className="min-h-11 rounded-control border border-line bg-surface px-3 text-base text-ink sm:text-sm"><option value="">全部子基金</option>{filterOptions.subfunds.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+        <label className="grid gap-1 text-sm">赛道<select value={filters.sector} onChange={event=>changeFilter("sector",event.target.value)} className="min-h-11 rounded-control border border-line bg-surface px-3 text-base text-ink sm:text-sm"><option value="">全部赛道</option>{filterOptions.sectors.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+        <label className="grid gap-1 text-sm">项目区域（省）<select value={filters.province} onChange={event=>changeFilter("province",event.target.value)} className="min-h-11 rounded-control border border-line bg-surface px-3 text-base text-ink sm:text-sm"><option value="">全部省份</option>{filterOptions.provinces.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+      </div>
     </header>
 
     {message && <Alert className="mb-5 flex flex-wrap items-center justify-between gap-3" role="alert">
-      <span>{message}</span><Button variant="outline" onClick={() => void loader.load(matched, retry.offset, retry.append)}>重试</Button>
+      <span>{message}</span><Button variant="outline" onClick={() => void loader.load(matched, retry.offset, retry.append, filters)}>重试</Button>
     </Alert>}
 
     {loading
@@ -54,6 +67,7 @@ export function ProjectList({collection}:{collection:ProjectCollection}) {
                 <div className="min-w-0">
                   <p className="break-words text-base font-semibold text-ink"><Link className="rounded-control text-accent underline-offset-4 after:absolute after:inset-0 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" to={`${collection.path}/${encodeURIComponent(item.id)}`}>{item.investee_name}</Link></p>
                   <p className="mt-1 break-words text-sm text-ink-3">{item.gp_name}</p>
+                  <p className="mt-1 break-words text-xs text-ink-3">母基金：{item.mother_fund_name||"未知"} · 子基金：{item.subfund_name||"未知"} · 项目区域（省）：{item.project_province}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {item.sector_tags.length
@@ -74,14 +88,15 @@ export function ProjectList({collection}:{collection:ProjectCollection}) {
             </li>)}
           </ul>
           {nextOffset !== null && <div className="mt-6 flex justify-center">
-            <Button variant="outline" disabled={loadingMore} onClick={() => void loader.load(matched, nextOffset, true)}>
+            <Button variant="outline" disabled={loadingMore} onClick={() => void loader.load(matched, nextOffset, true, filters)}>
               {loadingMore ? "正在加载…" : "加载更多"}
             </Button>
           </div>}
         </>
         : message ? null : <Card className="px-6 py-12 text-center">
-          <p className="font-medium text-ink">{matched ? "暂无匹配的已核实投资" : "暂无已核实的直投项目"}</p>
-          <p className="mt-2 text-sm text-ink-3">{matched ? "后续审核通过且赛道标签与关注重合的投资会显示在这里。" : "经审核并处于有效状态的项目会显示在这里。"}</p>
+          <p className="font-medium text-ink">{matched ? "暂无匹配的已核实投资" : Object.values(filters).some(Boolean) ? "没有符合筛选条件的项目" : "暂无已核实的直投项目"}</p>
+          <p className="mt-2 text-sm text-ink-3">{matched ? "后续审核通过且赛道标签与关注重合的投资会显示在这里。" : Object.values(filters).some(Boolean) ? "可调整或清除筛选条件后重试。" : "经审核并处于有效状态的项目会显示在这里。"}</p>
+          {Object.values(filters).some(Boolean)&&<Button variant="outline" className="mt-4" onClick={()=>setSearchParams(matched?{matched:"1"}:{})}>清除筛选</Button>}
         </Card>}
   </main>;
 }

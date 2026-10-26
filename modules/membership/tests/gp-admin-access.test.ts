@@ -84,6 +84,15 @@ test("GP admin APIs require admins and paginate filtered observations in stable 
   assert.equal((await missingEvidence.json() as {error:string}).error,"event_evidence_required");
   const approve=await app.inject({method:"PATCH",url:`/api/v1/membership/admin/gp-observations/${observed[0]}`,headers:{cookie:adminCookie,host:"newsfeed.test",origin:"http://newsfeed.test"},payload:{tags:["光伏"],status:"verified",eventDate:"2026-02-28",sourceUrl:"https://example.org/evidence"}});
   assert.equal(approve.statusCode,200);
+  const provincePath=`/api/v1/membership/admin/gp-observations/${observed[0]}/province`;
+  assert.equal((await app.inject({method:"POST",url:provincePath,headers:{cookie:memberCookie,...credentials}})).statusCode,403);
+  assert.equal((await app.inject({method:"POST",url:provincePath,headers:patchHeaders})).statusCode,409,"no Xinhua entity ID must stay unknown without making a provider request");
+  const noRelationEvidence=await app.inject({method:"PATCH",url:`/api/v1/membership/admin/gp-observations/${observed[0]}`,headers:patchHeaders,payload:{tags:["光伏"],status:"verified",eventDate:"2026-02-28",sourceUrl:"https://example.org/evidence",motherFund:"母基金甲",subfund:"子基金甲",fundRelationBasis:"已核验基金关系依据"}});
+  assert.equal(noRelationEvidence.statusCode,400);
+  const relation=await app.inject({method:"PATCH",url:`/api/v1/membership/admin/gp-observations/${observed[0]}`,headers:patchHeaders,payload:{tags:["光伏"],status:"verified",eventDate:"2026-02-28",sourceUrl:"https://example.org/evidence",motherFund:"母基金甲",subfund:"子基金甲",fundRelationBasis:"已核验基金关系依据",fundRelationSourceUrl:"https://example.org/fund-relation"}});
+  assert.equal(relation.statusCode,200);
+  const [relationRow]=await sql<{mother_fund_name:string;subfund_name:string;fund_relation_source_url:string}[]>`SELECT mother_fund_name,subfund_name,fund_relation_source_url FROM member_gp_investments WHERE id=${observed[0]}`;
+  assert.deepEqual(relationRow,{mother_fund_name:"母基金甲",subfund_name:"子基金甲",fund_relation_source_url:"https://example.org/fund-relation"});
   const [approved]=await sql<{status:string;approved_event_date:string;approved_source_url:string}[]>`SELECT status,approved_event_date::text,approved_source_url FROM member_gp_investments WHERE id=${observed[0]}`;
   assert.deepEqual(approved,{status:"verified",approved_event_date:"2026-02-28",approved_source_url:"https://example.org/evidence"});
 });

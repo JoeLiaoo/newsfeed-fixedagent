@@ -95,3 +95,15 @@ for(const group of ["citic-alliance","market-leaders"] as const){
     ]);
   });
 }
+
+test("loader sends all four filters with the first page and retries",async t=>{
+  const urls:string[]=[];
+  t.mock.method(globalThis,"fetch",async(url:string)=>{urls.push(url);return page("filtered",null);});
+  const loader=createGpProjectsLoader(()=>{},()=>assert.fail());
+  await loader.load(false,0,false,{motherFund:"母基金甲",subfund:"子基金乙",sector:"光伏",province:"江苏省"});
+  const parsed=new URL(urls[0]!,"http://localhost");
+  assert.equal(parsed.searchParams.get("motherFund"),"母基金甲");
+  assert.equal(parsed.searchParams.get("subfund"),"子基金乙");
+  assert.equal(parsed.searchParams.get("sector"),"光伏");
+  assert.equal(parsed.searchParams.get("province"),"江苏省");
+});
