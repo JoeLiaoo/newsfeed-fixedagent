@@ -5,6 +5,7 @@ import {
   ANNOUNCEMENT_KEYWORDS,
   LISTED_ISSUER_SEED_SOURCE,
   buildListedFundReport,
+  extractAnnouncementText,
   extractParticipationRows,
   fetchIssuerAnnouncements,
   lookupFundRegistrations,
@@ -43,22 +44,46 @@ test("region resolution discloses finite seed scope and refuses to invent a regi
   assert.match(resolveListedIssuers({ ...input, region: "四川省" }).gaps[0]!, /补充证券代码/);
 });
 
-test("announcement adapter reads fixture pages, filters dates, and never requires live HTTP", async () => {
+test("announcement adapter maps fixture list records, applies title/date filters, and never requires live HTTP", async () => {
   const input = parseListedFundInput({ region: "浙江省", startDate: "2024-01-01", endDate: "2024-12-31", maxAnnouncements: 10 });
   const requests: URL[] = [];
   const fetchFixture: typeof fetch = async (url) => {
     const parsed = new URL(String(url)); requests.push(parsed);
-    return new Response(JSON.stringify({ totalpages: 1, announcements: [
-      { announcementTitle: "关于参与设立产业基金的公告", announcementId: "a-1", noticeDate: "2024-06-13", adjunctUrl: "2024/06/13/abcd.pdf" },
-      { announcementTitle: "超出报告期", announcementId: "a-2", noticeDate: "2025-01-02", adjunctUrl: "2025/01/02/efgh.pdf" },
-    ] }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ data: { total_pages: 1, list: [
+      { title: "关于参与设立产业基金的公告", art_code: "a-1", notice_date: "2024-06-13 00:00:00" },
+      { title: "关于参与设立产业基金的公告", art_code: "a-2", notice_date: "2025-01-02 00:00:00" },
+      { title: "年度审计报告", art_code: "a-3", notice_date: "2024-06-13 00:00:00" },
+    ] } }), { status: 200, headers: { "content-type": "application/json" } });
   };
   const { items } = await fetchIssuerAnnouncements({ code: "600120", name: "浙江东方集团股份有限公司", region: "杭州市" }, input, { fetch: fetchFixture });
-  assert.ok(requests.length >= 1);
-  assert.ok(requests.every((request) => ANNOUNCEMENT_KEYWORDS.includes(request.searchParams.get("searchkey") as never)));
-  assert.ok(items.length === 1);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]!.origin, "https://np-anotice-stock.eastmoney.com");
+  assert.equal(requests[0]!.searchParams.get("stock_list"), "600120");
+  assert.equal(requests[0]!.searchParams.get("page_index"), "1");
+  assert.equal(items.length, 1);
   assert.equal(items[0]!.date, "2024-06-13");
-  assert.equal(items[0]!.url, "https://static.cninfo.com.cn/2024/06/13/abcd.pdf");
+  assert.equal(items[0]!.announcementId, "a-1");
+  assert.equal(items[0]!.url, "https://pdf.dfcfw.com/pdf/H2_a-1_1.pdf");
+  assert.ok(ANNOUNCEMENT_KEYWORDS.some((keyword) => items[0]!.title.includes(keyword)));
+});
+
+test("announcement adapter separates empty results from list service failures", async () => {
+  const input = parseListedFundInput({ region: "浙江省", year: 2024 });
+  const issuer = { code: "600120", name: "浙江东方集团股份有限公司", region: "杭州市" };
+  const empty = await fetchIssuerAnnouncements(issuer, input, { fetch: async () => new Response(JSON.stringify({ data: { list: [], total_pages: 0 } }), { status: 200 }) });
+  assert.equal(empty.items.length, 0);
+  assert.match(empty.gaps[0]!, /空列表.*不能确认不存在/);
+  const failed = await fetchIssuerAnnouncements(issuer, input, { fetch: async () => new Response("", { status: 503 }) });
+  assert.match(failed.gaps[0]!, /HTTP 503.*未能读取披露列表/);
+});
+
+test("PDF extraction accepts the configured disclosure hosts and rejects other hosts before fetching", async () => {
+  const requested: string[] = [];
+  const fetchFixture: typeof fetch = async (url) => { requested.push(String(url)); return new Response("", { status: 404 }); };
+  await assert.rejects(extractAnnouncementText("https://pdf.dfcfw.com/pdf/H2_a-1_1.pdf", { fetch: fetchFixture }), /listed_fund_pdf_http_404/);
+  await assert.rejects(extractAnnouncementText("https://static.cninfo.com.cn/a.pdf", { fetch: fetchFixture }), /listed_fund_pdf_http_404/);
+  await assert.rejects(extractAnnouncementText("https://evil.example/a.pdf", { fetch: fetchFixture }), /listed_fund_pdf_url_invalid/);
+  assert.equal(requested.length, 2);
 });
 
 test("fund master adapter accepts only exact normalized-name matches and reports no configured source", async () => {

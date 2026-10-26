@@ -90,8 +90,13 @@ async function runListedFundParticipation(task: TaskRow, leaseToken: string) {
   const gaps = [...resolved.gaps];
   const announcements: ListedAnnouncement[] = [];
   for (const issuer of resolved.issuers) {
+    const remainingAnnouncementBudget = input.maxAnnouncements - announcements.length;
+    if (remainingAnnouncementBudget <= 0) {
+      gaps.push(`公告达到上限 ${input.maxAnnouncements} 条；后续发行人未查询。`);
+      break;
+    }
     await assertRunning(task.id, leaseToken);
-    const found = await fetchIssuerAnnouncements(issuer, input, { beforeRequest: () => assertRunning(task.id, leaseToken) });
+    const found = await fetchIssuerAnnouncements(issuer, { ...input, maxAnnouncements: remainingAnnouncementBudget }, { beforeRequest: () => assertRunning(task.id, leaseToken) });
     gaps.push(...found.gaps);
     announcements.push(...found.items);
     if (announcements.length >= input.maxAnnouncements) {
@@ -110,7 +115,12 @@ async function runListedFundParticipation(task: TaskRow, leaseToken: string) {
     }
     pdfAttempts += 1;
     try { announcement.text = await extractAnnouncementText(announcement.url, { beforeRequest: () => assertRunning(task.id, leaseToken) }); }
-    catch { gaps.push(`${announcement.issuer.code}《${announcement.title}》正文未解析；仅保留公告元数据。`); }
+    catch (error) {
+      const detail = error instanceof Error && /^listed_fund_pdf_http_\d+$/.test(error.message)
+        ? `正文下载返回 HTTP ${error.message.slice("listed_fund_pdf_http_".length)}`
+        : "正文下载或解析失败";
+      gaps.push(`${announcement.issuer.code}《${announcement.title}》${detail}；仅保留公告元数据。`);
+    }
   }
   const fundNames = [...new Set(uniqueAnnouncements.flatMap((item) => item.text ? candidateFundNames(item.text) : []))];
   const registryNames = fundNames.slice(0, 80);
