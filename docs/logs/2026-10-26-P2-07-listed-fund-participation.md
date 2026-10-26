@@ -12,6 +12,7 @@
   - `modules/membership/experts/listed-fund-participation.ts`
   - `modules/membership/pages/experts.tsx`、`expert-detail.tsx`、`task-detail.tsx`、`account-artifacts.tsx`
   - `modules/membership/tests/listed-fund-participation.standalone.test.ts`
+  - `modules/membership/tests/task-detail-page.standalone.test.ts`（地区任务输入展示断言）
   - `site/changelog/pending/listed-fund-participation.json`
   - `docs/PLAN.md`、`docs/IMPLEMENTATION.md`、`docs/P2-EXPERT-ADAPTER.md`、`README.md`、`docs/README.md`
 - 实际完成：
