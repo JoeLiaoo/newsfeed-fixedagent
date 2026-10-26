@@ -69,6 +69,8 @@ test("GP project list requires an active member and only exposes approved active
   const secondApprovedId = randomUUID();
   await sql`INSERT INTO member_gp_investments(id,gp_id,investee_key,investee_name,raw_evidence,status,sector_tags,approved_event_date,approved_source_url,approved_by,approved_at)
     VALUES(${secondApprovedId},${activeGp},'approved-older','较早核实企业',${sql.json({})},'verified',ARRAY[]::text[],'2026-09-20'::date,'https://example.org/older',${admin!.id},now())`;
+  await sql`UPDATE member_gp_investments SET mother_fund_name='母基金甲',subfund_name='子基金甲',project_province='江苏省',province_source='xinhua_company_profile',province_checked_at=now() WHERE id=${approvedId}`;
+  await sql`UPDATE member_gp_investments SET mother_fund_name='母基金乙',subfund_name='子基金乙',project_province='广东省' WHERE id=${secondApprovedId}`;
 
   const page = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects?limit=1", headers: { cookie } });
   assert.equal(page.statusCode, 200);
@@ -86,6 +88,19 @@ test("GP project list requires an active member and only exposes approved active
   assert.equal("approved_by" in body.investments[0]!, false);
   assert.equal("approved_at" in body.investments[0]!, false);
   assert.equal(body.pagination.nextOffset, 1);
+  const filters=await app.inject({method:"GET",url:"/api/v1/membership/gp-projects?motherFund=%E6%AF%8D%E5%9F%BA%E9%87%91%E7%94%B2&subfund=%E5%AD%90%E5%9F%BA%E9%87%91%E7%94%B2&sector=%E5%85%89%E4%BC%8F&province=%E6%B1%9F%E8%8B%8F%E7%9C%81",headers:{cookie}});
+  assert.equal(filters.statusCode,200);
+  const filtered=await filters.json() as {investments:Array<{id:string;mother_fund_name:string;subfund_name:string;project_province:string;province_verified:boolean}>;filter_options:{provinces:string[]}};
+  assert.deepEqual(filtered.investments.map(row=>row.id),[approvedId]);
+  assert.equal(filtered.investments[0]?.mother_fund_name,"母基金甲");
+  assert.equal(filtered.investments[0]?.subfund_name,"子基金甲");
+  assert.equal(filtered.investments[0]?.project_province,"江苏省");
+  assert.equal(filtered.investments[0]?.province_verified,true);
+  assert.ok(filtered.filter_options.provinces.includes("广东省"));
+  const noMatch=await app.inject({method:"GET",url:"/api/v1/membership/gp-projects?motherFund=%E6%AF%8D%E5%9F%BA%E9%87%91%E7%94%B2&province=%E5%B9%BF%E4%B8%9C%E7%9C%81",headers:{cookie}});
+  assert.deepEqual((await noMatch.json() as {investments:unknown[]}).investments,[]);
+  const invalidFilter=await app.inject({method:"GET",url:"/api/v1/membership/gp-projects?province="+"x".repeat(121),headers:{cookie}});
+  assert.equal(invalidFilter.statusCode,400);
 
   const detailPath = `/api/v1/membership/gp-projects/${approvedId}`;
   assert.equal((await app.inject({ method: "GET", url: `${detailPath}?group=other`, headers: { cookie } })).statusCode, 400);

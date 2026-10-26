@@ -1,0 +1,1 @@
+ALTER TABLE member_gp_investments VALIDATE CONSTRAINT member_gp_investments_project_province_valid;

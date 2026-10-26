@@ -6,6 +6,9 @@ import { GP_QUEUE } from "./queue.ts";
 import { GP_TAGS, canReviewInvestment, normalizeAliases, validSectorTags } from "./core.ts";
 import type { MemberSession } from "../server.ts";
 import { employeeSource } from "./source.ts";
+import { withXinhua } from "../experts/xinhua.ts";
+import { querySelectedCompanyProfile } from "../experts/data.ts";
+import { provinceFromAddress } from "./province.ts";
 
 type Auth = (req:FastifyRequest)=>Promise<MemberSession|null>;
 const body=(req:FastifyRequest)=>req.body && typeof req.body==="object" ? req.body as Record<string,unknown> : {};
@@ -19,17 +22,36 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     reply.header("Cache-Control","private, no-store").header("Vary","Cookie");
     const user=await authenticate(req);
     if(!user) return reply.code(401).send({error:"login_required"});
-    const query=req.query as {limit?:unknown;offset?:unknown;matched?:unknown;group?:unknown};
+    const query=req.query as {limit?:unknown;offset?:unknown;matched?:unknown;group?:unknown;motherFund?:unknown;subfund?:unknown;sector?:unknown;province?:unknown};
     const validInteger=(value:unknown)=>value===undefined || (typeof value==="string" && /^\d+$/.test(value) && Number.isSafeInteger(Number(value)));
-    if(!validInteger(query.limit)||!validInteger(query.offset)||!(query.matched===undefined||query.matched==="0"||query.matched==="1")||!validProjectGroup(query.group))
+    if(!validInteger(query.limit)||!validInteger(query.offset)||!(query.matched===undefined||query.matched==="0"||query.matched==="1")||!validProjectGroup(query.group)||
+       !validFilterValue(query.motherFund)||!validFilterValue(query.subfund)||!validFilterValue(query.sector)||!validFilterValue(query.province))
       return reply.code(400).send({error:"invalid_query"});
     const matched=query.matched==="1";
     const requestedLimit=Number(query.limit??50),requestedOffset=Number(query.offset??0);
     const limit=Math.min(100,Math.max(1,requestedLimit));
     const offset=Math.min(100_000,Math.max(0,requestedOffset));
+    const motherFund=typeof query.motherFund==="string"?query.motherFund:null;
+    const subfund=typeof query.subfund==="string"?query.subfund:null;
+    const sector=typeof query.sector==="string"?query.sector:null;
+    const province=typeof query.province==="string"?query.province:null;
     const interests=matched?await sql<{tag:string}[]>`SELECT tag FROM member_interest_tags WHERE user_id=${user.id} ORDER BY tag`:[];
     const interestTags=interests.map(row=>row.tag);
-    const rows=await sql<Array<{id:string;gp_name:string;investee_name:string;sector_tags:string[];event_date:string|null;status:string;source_url:string|null}>>`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.sector_tags,
+    const [filterOptions]=await sql<{mother_funds:string[];subfunds:string[];sectors:string[];provinces:string[];unknown_mother:boolean;unknown_subfund:boolean;unknown_province:boolean}[]>`SELECT
+      COALESCE(array_agg(DISTINCT i.mother_fund_name) FILTER(WHERE i.mother_fund_name IS NOT NULL),'{}') AS mother_funds,
+      COALESCE(array_agg(DISTINCT i.subfund_name) FILTER(WHERE i.subfund_name IS NOT NULL),'{}') AS subfunds,
+      COALESCE(array_agg(DISTINCT tag) FILTER(WHERE tag IS NOT NULL),'{}') AS sectors,
+      COALESCE(array_agg(DISTINCT i.project_province) FILTER(WHERE i.project_province IS NOT NULL),'{}') AS provinces,
+      COALESCE(bool_or(i.mother_fund_name IS NULL),false) AS unknown_mother,
+      COALESCE(bool_or(i.subfund_name IS NULL),false) AS unknown_subfund,
+      COALESCE(bool_or(i.project_province IS NULL),false) AS unknown_province
+      FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
+      LEFT JOIN LATERAL unnest(i.sector_tags) AS sector(tag) ON true
+      WHERE i.status='verified' AND g.status='active' AND g.entity_role='gp'
+        AND (${query.group??null}::text IS NULL OR ${query.group??null}::text=ANY(g.project_groups))
+        AND (NOT ${matched} OR EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id} AND t.tag=ANY(i.sector_tags) AND t.tag<>'战略配售'))`;
+    const rows=await sql<{id:string;gp_name:string;investee_name:string;sector_tags:string[];event_date:string|null;status:string;source_url:string|null;mother_fund_name:string|null;subfund_name:string|null;project_province:string|null;province_checked_at:Date|null}[]>`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.sector_tags,
+      i.mother_fund_name,i.subfund_name,i.project_province,i.province_checked_at,
       i.approved_event_date::text AS event_date,'verified'::text AS status,i.approved_source_url AS source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       WHERE i.status='verified' AND g.status='active' AND g.entity_role='gp'
@@ -38,13 +60,22 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
           EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id}
             AND t.tag=ANY(i.sector_tags) AND t.tag<>'战略配售')
         ))
+        AND (${motherFund}::text IS NULL OR (${motherFund}::text='未知' AND i.mother_fund_name IS NULL) OR i.mother_fund_name=${motherFund})
+        AND (${subfund}::text IS NULL OR (${subfund}::text='未知' AND i.subfund_name IS NULL) OR i.subfund_name=${subfund})
+        AND (${sector}::text IS NULL OR ${sector}=ANY(i.sector_tags))
+        AND (${province}::text IS NULL OR (${province}::text='未知' AND i.project_province IS NULL) OR i.project_province=${province})
       ORDER BY i.approved_event_date DESC NULLS LAST,i.approved_at DESC NULLS LAST,i.id
       LIMIT ${limit+1} OFFSET ${offset}`;
     const hasMore=rows.length>limit;
     return {investments:rows.slice(0,limit).map(row => {
       const source = employeeSource(row.source_url);
-      return { ...row, source_url: source.url, source_placeholder: source.placeholder };
-    }),pagination:{limit,offset,nextOffset:hasMore?offset+limit:null},...(matched?{interest_tags:interestTags}: {})};
+      return { ...row, project_province: row.project_province ?? "未知", province_verified: row.province_checked_at !== null,
+        source_url: source.url, source_placeholder: source.placeholder };
+    }),pagination:{limit,offset,nextOffset:hasMore?offset+limit:null},
+      filter_options:{mother_funds:[...filterOptions!.mother_funds,...(filterOptions!.unknown_mother?["未知"]:[])].sort(),
+        subfunds:[...filterOptions!.subfunds,...(filterOptions!.unknown_subfund?["未知"]:[])].sort(),sectors:filterOptions!.sectors.sort(),
+        provinces:[...filterOptions!.provinces,...(filterOptions!.unknown_province?["未知"]:[])].sort()},
+      ...(matched?{interest_tags:interestTags}: {})};
   });
 
   app.get("/api/v1/membership/gp-projects/:id",async(req,reply)=>{
@@ -140,8 +171,8 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const {limit,offset}=pageParams(query);
     const status=query.status;
     if(status!==undefined&&!['observed','verified','baseline','retracted'].includes(status)) return reply.code(400).send({error:'invalid_status'});
-    const observations=await sql`SELECT i.id,i.gp_id,g.canonical_name AS gp_name,i.investee_name,i.first_seen_at,i.investment_date,i.provider_updated_at,i.data_date,s.captured_at AS snapshot_captured_at,
-      i.status,i.sector_tags,i.sector_reason,i.classification_state,i.approved_event_date,i.approved_source_url
+    const observations=await sql`SELECT i.id,i.gp_id,g.canonical_name AS gp_name,i.investee_name,i.investee_id,i.first_seen_at,i.investment_date,i.provider_updated_at,i.data_date,s.captured_at AS snapshot_captured_at,
+      i.status,i.sector_tags,i.sector_reason,i.classification_state,i.approved_event_date,i.approved_source_url,i.mother_fund_name,i.subfund_name,i.fund_relation_basis,i.fund_relation_source_url,i.project_province,i.province_checked_at
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       LEFT JOIN member_gp_snapshots s ON s.id=i.source_snapshot_id
       WHERE (${status??null}::text IS NULL OR i.status=${status??null}) ORDER BY i.first_seen_at DESC,i.id DESC LIMIT ${limit+1} OFFSET ${offset}`;
@@ -155,6 +186,10 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const date=typeof input.eventDate==="string"?input.eventDate:"";
     const source=typeof input.sourceUrl==="string"?input.sourceUrl.trim():"";
     const reason=typeof input.reason==="string"?input.reason.slice(0,1000):"";
+    const motherFund=optionalName(input.motherFund),subfund=optionalName(input.subfund);
+    const fundBasis=typeof input.fundRelationBasis==="string"?input.fundRelationBasis.trim().slice(0,1000):"";
+    const fundSource=typeof input.fundRelationSourceUrl==="string"?input.fundRelationSourceUrl.trim():"";
+    if(motherFund===undefined||subfund===undefined||((motherFund||subfund)&&(fundBasis.length<8||!isHttpsEvidenceUrl(fundSource)))) return reply.code(400).send({error:"invalid_fund_names"});
     if(!tags||!["baseline","observed","verified","retracted"].includes(String(status))) return reply.code(400).send({error:"invalid_review"});
     // A new-investment assertion requires separately checked evidence; snapshots alone never qualify.
     if(status==="verified"&&(!tags.length||!isCalendarDate(date)||!isHttpsEvidenceUrl(source)))
@@ -162,10 +197,10 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const id=(req.params as {id:string}).id;
     const outcome=await sql.begin(async tx=>{
       const [old]=await tx<{
-        status:string; sector_tags:string[]; sector_reason:string|null;
+        status:string; sector_tags:string[]; sector_reason:string|null;mother_fund_name:string|null;subfund_name:string|null;fund_relation_basis:string|null;fund_relation_source_url:string|null;
         approved_event_date:string|null; approved_source_url:string|null; approved_by:string|null;
         approved_at:Date|null; revision:number; source_snapshot_id:string|null;
-      }[]>`SELECT status,sector_tags,sector_reason,approved_event_date::text,approved_source_url,approved_by,
+      }[]>`SELECT status,sector_tags,sector_reason,mother_fund_name,subfund_name,fund_relation_basis,fund_relation_source_url,approved_event_date::text,approved_source_url,approved_by,
         approved_at,revision,source_snapshot_id FROM member_gp_investments WHERE id=${id} FOR UPDATE`;
       if(!old) return "not_found";
       if(!canReviewInvestment(old.status,String(status))) return "invalid_transition";
@@ -177,17 +212,47 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       const [updated]=await tx`UPDATE member_gp_investments SET status=${status as string},
         sector_tags=${tags},sector_reason=${reason},classification_state='reviewed',
         approved_event_date=${eventDate}::date,approved_source_url=${evidenceUrl},
-        approved_by=${approvedBy},approved_at=${approvedAt},revision=revision+1
+        approved_by=${approvedBy},approved_at=${approvedAt},mother_fund_name=${motherFund},subfund_name=${subfund},
+        fund_relation_basis=${fundBasis||null},fund_relation_source_url=${fundSource||null},revision=revision+1
         WHERE id=${id} RETURNING id,revision`;
       const before={...old};
       const after={...old,status,sector_tags:tags,sector_reason:reason,approved_event_date:eventDate,
-        approved_source_url:evidenceUrl,approved_by:approvedBy,approved_at:approvedAt,revision:updated.revision};
+        approved_source_url:evidenceUrl,approved_by:approvedBy,approved_at:approvedAt,mother_fund_name:motherFund,
+        subfund_name:subfund,fund_relation_basis:fundBasis||null,fund_relation_source_url:fundSource||null,revision:updated.revision};
       await tx`INSERT INTO member_gp_review_audit(investment_id,actor_id,tags,reason,before_state,after_state)
         VALUES(${id},${user.id},${tags},${reason},${tx.json(before as never)},${tx.json(after as never)})`;
       return "ok";
     });
     return outcome==="ok"?{ok:true}:reply.code(outcome==="not_found"?404:409).send({error:outcome});
   });
+
+  app.post("/api/v1/membership/admin/gp-observations/:id/province",async(req,reply)=>{
+    const user=await admin(req,reply);if(!user) return;
+    const id=(req.params as {id:string}).id;
+    const [row]=await sql<{investee_name:string;investee_id:string|null}[]>`SELECT investee_name,investee_id FROM member_gp_investments WHERE id=${id}`;
+    if(!row) return reply.code(404).send({error:"not_found"});
+    if(!row.investee_id) return reply.code(409).send({error:"xinhua_identity_unavailable"});
+    try {
+      const province=await withXinhua(async call=>{
+        const entity={id:row.investee_id!,name:row.investee_name,status:null,creditCode:null,address:null,startDate:null};
+        const {profile}=await querySelectedCompanyProfile(call,entity);
+        const address=typeof profile.address==="string"?profile.address:typeof profile.registered_address==="string"?profile.registered_address:null;
+        return provinceFromAddress(address);
+      });
+      await sql`UPDATE member_gp_investments SET project_province=${province},province_source='xinhua_company_profile',province_checked_at=now(),revision=revision+1 WHERE id=${id}`;
+      return {project_province:province??"未知",verified:province!==null};
+    } catch {
+      return reply.code(502).send({error:"xinhua_province_unavailable"});
+    }
+  });
+}
+
+function validFilterValue(value:unknown):boolean{return value===undefined||value===null||typeof value==="string"&&value.length>0&&value.length<=120;}
+function optionalName(value:unknown):string|null|undefined{
+  if(value===undefined)return null;
+  if(typeof value!=="string")return undefined;
+  const trimmed=value.trim();
+  return trimmed.length>120?undefined:trimmed||null;
 }
 
 function validProjectGroup(value:unknown):value is undefined|"citic-alliance"|"market-leaders" {

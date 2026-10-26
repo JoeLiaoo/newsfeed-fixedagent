@@ -11,7 +11,7 @@ import { createAdminPageLoader } from "./gp-admin-state.ts";
 const GP_TAGS = DIRECTIONS.filter(d => d.name !== "战略配售").flatMap(d => [...d.tags]);
 const PAGE_SIZE=25;
 type GP={id:string;canonical_name:string;aliases:string[];entity_id:string|null;credit_code:string|null;entity_role:string;status:string;source_ref:string;project_groups:string[];project_group_basis:string|null;last_synced_at:string|null;last_error:string|null};
-type Observation={id:string;gp_name:string;investee_name:string;status:string;sector_tags:string[];sector_reason:string|null;data_date:string|null;provider_updated_at:string|null;investment_date:string|null;first_seen_at:string;snapshot_captured_at:string|null;approved_source_url:string|null;approved_event_date:string|null};
+type Observation={id:string;gp_name:string;investee_name:string;investee_id:string|null;status:string;sector_tags:string[];sector_reason:string|null;data_date:string|null;provider_updated_at:string|null;investment_date:string|null;first_seen_at:string;snapshot_captured_at:string|null;approved_source_url:string|null;approved_event_date:string|null;mother_fund_name:string|null;subfund_name:string|null;fund_relation_basis:string|null;fund_relation_source_url:string|null;project_province:string|null;province_checked_at:string|null};
 const prefix="/api/v1/membership/admin";
 const GP_STATES=[{id:"candidate",label:"候选"},{id:"active",label:"启用"},{id:"paused",label:"暂停"}] as const;
 const OBS_STATES=[{id:"observed",label:"待核"},{id:"verified",label:"已核实"},{id:"baseline",label:"历史基线"},{id:"retracted",label:"已撤回"}] as const;
@@ -61,10 +61,18 @@ export default function GpAdminPage(){
   }
   async function review(event:FormEvent<HTMLFormElement>,id:string){
     event.preventDefault();setBusy(true);setMessage("");const data=new FormData(event.currentTarget);
-    try{const response=await fetch(prefix+"/gp-observations/"+encodeURIComponent(id),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({tags:data.getAll("tags"),status:data.get("status"),reason:data.get("reason"),eventDate:data.get("eventDate"),sourceUrl:data.get("sourceUrl")})});
-      setMessage(response.ok?"审核记录已保存。":response.status===400?"审核失败：核准投资须提供有效日期、HTTPS 证据和赛道。":"审核未保存，请重试。");
+    try{const response=await fetch(prefix+"/gp-observations/"+encodeURIComponent(id),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({tags:data.getAll("tags"),status:data.get("status"),reason:data.get("reason"),eventDate:data.get("eventDate"),sourceUrl:data.get("sourceUrl"),motherFund:data.get("motherFund"),subfund:data.get("subfund"),fundRelationBasis:data.get("fundRelationBasis"),fundRelationSourceUrl:data.get("fundRelationSourceUrl")})});
+      setMessage(response.ok?"审核记录已保存。":response.status===400?"审核失败：核准投资须有日期、HTTPS 证据和赛道；基金归属须有依据和 HTTPS 来源。":"审核未保存，请重试。");
       if(response.ok)setObsRefresh(value=>value+1);
     }catch{setMessage("网络异常，审核未完成。");}finally{setBusy(false);}
+  }
+  async function verifyProvince(id:string){
+    setBusy(true);setMessage("");
+    try{const response=await fetch(prefix+"/gp-observations/"+encodeURIComponent(id)+"/province",{method:"POST"});
+      const body=await response.json().catch(()=>({})) as {project_province?:string;error?:string};
+      setMessage(response.ok?`新华财经工商画像已核验，项目省份：${body.project_province}。`:body.error==="xinhua_identity_unavailable"?"缺少新华财经主体 ID，无法核验省份；员工端将显示“未知”。": "新华财经暂时无法核验省份；员工端将显示“未知”。");
+      if(response.ok)setObsRefresh(value=>value+1);
+    }catch{setMessage("网络异常，省份未核验。");}finally{setBusy(false);}
   }
   return <main className="mx-auto w-full max-w-5xl px-5 py-8">
     <h1 className="mb-5 text-2xl font-semibold">GP 投资动向</h1>
@@ -102,6 +110,16 @@ export default function GpAdminPage(){
           <label className="grid gap-1 text-sm">状态<select name="status" defaultValue={row.status} className="rounded-control border border-line bg-surface p-2"><option value="baseline">历史基线</option><option value="observed">新发现（待核）</option><option value="verified">证据核准，可推送</option><option value="retracted">撤回</option></select></label>
           <label className="grid gap-1 text-sm">事件日期<Input name="eventDate" type="date" defaultValue={row.approved_event_date?.slice(0,10)||""}/></label>
           <label className="grid gap-1 text-sm">证据链接<Input name="sourceUrl" type="url" defaultValue={row.approved_source_url||""}/></label>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="grid gap-1 text-sm">母基金<Input name="motherFund" defaultValue={row.mother_fund_name||""} maxLength={120} placeholder="依据核验后填写…"/></label>
+          <label className="grid gap-1 text-sm">子基金<Input name="subfund" defaultValue={row.subfund_name||""} maxLength={120} placeholder="依据核验后填写…"/></label>
+        </div>
+        <label className="grid gap-1 text-sm">母／子基金关系依据（填写至少 8 字）<Input name="fundRelationBasis" defaultValue={row.fund_relation_basis||""} maxLength={1000} placeholder="说明证据如何确认该归属…"/></label>
+        <label className="grid gap-1 text-sm">母／子基金关系来源<Input name="fundRelationSourceUrl" type="url" defaultValue={row.fund_relation_source_url||""} placeholder="https://…"/></label>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-ink-3">
+          <span>项目区域（省）：{row.project_province||"未知"}{row.province_checked_at?" · 已通过新华财经核验":" · 未核验"}</span>
+          <Button type="button" size="sm" variant="outline" disabled={busy||!row.investee_id} onClick={()=>void verifyProvince(row.id)}>用新华财经核验省份</Button>
         </div>
         <label className="grid gap-1 text-sm">核验备注<Input name="reason" defaultValue={row.sector_reason||""}/></label>
         <Button size="sm" type="submit" disabled={busy} className="justify-self-start">保存核验</Button>
