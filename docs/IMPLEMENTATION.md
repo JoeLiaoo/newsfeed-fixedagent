@@ -185,6 +185,8 @@ P4 出口：新平台可用，旧组件退役范围明确且有记录，新平�
 
 2026-10-24 针对 [Issue #43](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/43) 将知识库自动恢复与手动重试统一限定为 5 次，耗尽后保留失败原因；针对 [#44](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/44) 将材料日期校验改为真实日历日期。真实员工材料验收仍待执行，见[工作日志](logs/2026-10-24-P2-P5-backend-hardening.md)。
 
+2026-10-26 针对 [Issue #130](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/130) 将问答前置、问答记录加页头入口、将构建状态与材料／知识页列表收起，并移除手填来源字段和更新材料下拉框；针对 [Issue #129](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/129) 增加公开网页链接异步抓取、来源 URL 留存和正文元数据识别。实现和本地验证见[工作日志](logs/2026-10-26-kb-i129-i130.md)。本地代码完成不改变 P5-02～P5-04 的真实员工、真实材料与引用验收状态，任务勾选不变。
+
 2026-10-26 针对 [Issue #66](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/66)、[#67](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/67) 与 [#68](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/68)，收紧撤回后的重试、恢复与 worker 领取；撤回材料的 SHA 不再阻挡重新上传；上传与手动重试共用每人并发及每小时准入额度。代码与本地数据库回归见[工作日志](logs/2026-10-26-P5-i66-i67-i68.md)。本项为维护任务，P5-02～P5-04 的真实员工验收仍未完成，勾选不变。
 
 P5-01 的产物是代码与文档：材料、版本、构建任务、知识页、材料贡献、页面修订、引用、质量问题、审计及问答共十张表，构建／复核／lint／发布四段可恢复流程，以及带脚注引用的问答。PR #34 已合并，最终 CI 与临时 PostgreSQL 场景检查通过，见[复审日志](logs/2026-10-24-P5-pr34-review.md)；生产迁移与部署已随 2026-10-24 的 `4a91199` 完成，见[发布记录](logs/2026-10-24-P4-pr32-34-deployment.md)。P5-02～P5-04 需要真实账号和真实材料，按仓库约定保持未勾选。

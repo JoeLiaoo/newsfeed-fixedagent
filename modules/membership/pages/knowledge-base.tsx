@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router";
-import { ArrowLeft, ChevronDown, Download, FileUp, MessageSquare, RefreshCw, Search } from "lucide-react";
+import { ArrowLeft, ChevronDown, Download, FileUp, Link2, MessageSquare, RefreshCw, Search } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
@@ -33,6 +33,7 @@ type Overview = {
 type DocumentRow = {
   id: string; title: string; uploaderId: string; uploaderName: string; createdAt: string; versionNo: number;
   fileName: string; format: string; byteSize: number; sourceTitle: string | null; sourceAuthor: string | null; sourceOrg: string | null; sourceDate: string | null; sourceKind: string | null;
+  sourceUrl: string | null;
   versionCreatedAt: string; freshness: FreshnessTier;
   extractionStatus: string; extractionNote: string | null; taskState: string | null; taskStage: string | null;
   errorCode: string | null; errorMessage: string | null;
@@ -119,6 +120,7 @@ export default function KnowledgeBasePage() {
   const historyRead = useRef("");
   const [withdrawing, setWithdrawing] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [sourceUrl, setSourceUrl] = useState("");
   const [missing, setMissing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -176,31 +178,31 @@ export default function KnowledgeBasePage() {
     event.preventDefault();
     const form = event.currentTarget;
     const picked = file;
-    if (!picked) { setMessage("请选择要上传的材料文件。"); return; }
+    const url = sourceUrl.trim();
+    if (!picked && !url) { setMessage("请选择文件或粘贴网页链接。"); return; }
+    if (picked && url) { setMessage("请上传文件或添加网页链接，每次选择一种方式。"); return; }
     setBusy(true);
     setMessage("正在上传…");
     try {
-      const data = new FormData(form);
-      const response = await fetch(`${ENDPOINT}documents`, {
+      const response = url ? await fetch(`${ENDPOINT}documents/url`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ baseId, url }),
+      }) : await fetch(`${ENDPOINT}documents`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           baseId,
-          fileName: picked.name,
-          base64: await fileAsBase64(picked),
-          title: String(data.get("title") ?? ""),
-          author: String(data.get("author") ?? ""),
-          organization: String(data.get("organization") ?? ""),
-          date: String(data.get("date") ?? ""),
-          kind: String(data.get("kind") ?? ""),
-          documentId: String(data.get("documentId") ?? ""),
+          fileName: picked!.name,
+          base64: await fileAsBase64(picked!),
         }),
       });
       const result = await response.json() as { duplicate?: boolean; message?: string; error?: string };
       if (!response.ok) { setMessage(result.message ?? result.error ?? "上传失败，请重试。"); return; }
-      setMessage(result.duplicate ? "这份材料已在共享库中，未重复入库。" : "已进入共享库，正在构建知识页。");
+      setMessage(result.duplicate ? result.message ?? "这份材料已在本库中，无需重复添加。" : url ? "链接已加入队列，正在读取网页并构建知识页。" : "材料已加入队列，正在构建知识页。");
       form.reset();
       setFile(null);
+      setSourceUrl("");
       await Promise.all([load(search), loadTasks()]);
     } catch { setMessage("上传失败，请检查网络后重试。"); }
     finally { setBusy(false); }
@@ -286,46 +288,51 @@ export default function KnowledgeBasePage() {
       <Button asChild variant="outline" size="sm" className="mb-4"><Link to="/knowledge"><ArrowLeft size={14} aria-hidden="true" />知识库</Link></Button>
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-2 text-2xl font-semibold tracking-tight text-ink">{base?.name ?? "知识库"}</h1>
-        {(overview?.running ?? 0) + (overview?.queued ?? 0) > 0 && <Badge variant="warning">构建中 {(overview?.running ?? 0) + (overview?.queued ?? 0)}</Badge>}
-        {(overview?.failed ?? 0) > 0 && <Badge variant="destructive">失败 {overview?.failed}</Badge>}
-        {(overview?.openIssues ?? 0) > 0 && <Badge variant="warning">质量问题 {overview?.openIssues}</Badge>}
       </div>
       {base?.description && <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-3">{base.description}</p>}
+      <Link to="#answers" className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-accent underline-offset-4 hover:underline"><MessageSquare size={15} aria-hidden="true" />问答记录</Link>
     </header>
     {message && <Alert className="mb-5" role="status">{message}</Alert>}
 
     <div className="grid gap-6">
-      <Card>
-        <CardHeader><CardTitle>上传材料</CardTitle></CardHeader>
-        <CardContent>
-          <form onSubmit={upload} className="grid gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="wiki-file">文件</Label>
-              <FileInput id="wiki-file" name="file" accept=".pdf,.docx,.md,.markdown,.txt,application/pdf" onChange={event => setFile(event.target.files?.[0] ?? null)} required />
-              <p className="text-xs text-ink-3">支持 PDF、DOCX、Markdown；PPT 请先转换为 PDF。</p>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="grid gap-2"><Label htmlFor="wiki-title">标题</Label><Input id="wiki-title" name="title" maxLength={200} placeholder="留空则用文件名" /></div>
-              <div className="grid gap-2"><Label htmlFor="wiki-kind">材料类型</Label><Input id="wiki-kind" name="kind" maxLength={60} placeholder="研报 / 纪要 / 演示 / 笔记" /></div>
-              <div className="grid gap-2"><Label htmlFor="wiki-author">作者</Label><Input id="wiki-author" name="author" maxLength={120} placeholder="未知" /></div>
-              <div className="grid gap-2"><Label htmlFor="wiki-organization">机构</Label><Input id="wiki-organization" name="organization" maxLength={120} placeholder="未知" /></div>
-              <div className="grid gap-2"><Label htmlFor="wiki-date">材料日期</Label><Input id="wiki-date" name="date" type="date" /></div>
-              <div className="grid gap-2">
-                <Label htmlFor="wiki-document">更新已有材料</Label>
-                <select id="wiki-document" name="documentId" className="h-10 w-full rounded-control border border-line-strong bg-surface px-3 text-sm text-ink shadow-sm">
-                  <option value="">新建材料</option>
-                  {documents.filter(document => document.uploaderId === overview?.myId).map(document => <option key={document.id} value={document.id}>{document.title}（v{document.versionNo}）</option>)}
-                </select>
-              </div>
-            </div>
-            <Button type="submit" disabled={busy}><FileUp size={16} aria-hidden="true" />{busy ? "处理中…" : "上传并进入共享库"}</Button>
+      <Card id="ask" className="border-accent/30">
+        <CardHeader><CardTitle>知识库问答</CardTitle></CardHeader>
+        <CardContent className="grid gap-4">
+          <form onSubmit={ask} className="grid gap-3">
+            <div className="grid gap-2"><Label htmlFor="wiki-question">问题</Label><Input id="wiki-question" value={question} onChange={event => setQuestion(event.target.value)} maxLength={500} placeholder="例如：当前各机构对某标的的评级分歧在哪里？" /></div>
+            <Button type="submit" disabled={busy}><MessageSquare size={16} aria-hidden="true" />{busy ? "检索中…" : "提问"}</Button>
           </form>
+          {answerMessage && <Alert role="status">{answerMessage}</Alert>}
+          {answer && <div className="grid gap-3">
+            <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(answer.answerMd, siteUrl()).html }} />
+            <div className="grid gap-1 border-t border-line pt-3"><h3 className="text-sm font-semibold text-ink">参考资料</h3><AnswerCitations citations={answer.citations} /></div>
+            <p className="text-xs text-ink-4">覆盖：分析师 {answer.coverage.analysts} · 机构 {answer.coverage.firms} · 材料 {answer.coverage.reports} · {answer.coverage.first_report ?? "起始日期未知"} 至 {answer.coverage.last_report ?? "最近日期未知"}</p>
+          </div>}
         </CardContent>
       </Card>
 
       <Card>
+        <CardHeader><CardTitle>添加材料</CardTitle></CardHeader>
+        <CardContent>
+          <form onSubmit={upload} className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="wiki-file">上传文件</Label>
+              <FileInput key={sourceUrl.trim() ? "url-entry" : "file-entry"} id="wiki-file" name="file" accept=".pdf,.docx,.md,.markdown,.txt,application/pdf" onChange={event => setFile(event.target.files?.[0] ?? null)} required={!sourceUrl.trim()} />
+              <p className="text-xs text-ink-3">支持 PDF、DOCX、Markdown。标题与已标注的来源信息会从内容中提取；未能识别的仍显示未知。</p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="wiki-url">网页链接</Label>
+              <Input id="wiki-url" type="url" inputMode="url" autoComplete="url" value={sourceUrl} onChange={event => { setSourceUrl(event.target.value); if (event.target.value) setFile(null); }} placeholder="https://…" />
+            </div>
+            <Button type="submit" disabled={busy}>{sourceUrl.trim() ? <Link2 size={16} aria-hidden="true" /> : <FileUp size={16} aria-hidden="true" />}{busy ? "处理中…" : sourceUrl.trim() ? "添加网页" : "上传材料"}</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <details className="rounded-card border border-line bg-surface text-ink shadow-sm">
+        <summary className="cursor-pointer px-5 py-4 text-base font-semibold">构建状态</summary>
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>构建状态</CardTitle>
+          <CardTitle>处理进度</CardTitle>
           <Button type="button" variant="outline" size="sm" onClick={() => void Promise.all([load(search), loadTasks()])}><RefreshCw size={14} aria-hidden="true" />刷新</Button>
         </CardHeader>
         <CardContent>
@@ -346,11 +353,12 @@ export default function KnowledgeBasePage() {
             </div>
           </div>
         </CardContent>
-      </Card>
+      </details>
 
-      <Card>
+      <details className="rounded-card border border-line bg-surface text-ink shadow-sm">
+        <summary className="cursor-pointer px-5 py-4 text-base font-semibold">材料与知识页</summary>
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>共享库</CardTitle>
+          <CardTitle>材料与知识页</CardTitle>
           <form className="flex items-center gap-2" onSubmit={event => { event.preventDefault(); setSearch(query.trim()); }}>
             <Input aria-label="检索共享库" value={query} onChange={event => setQuery(event.target.value)} placeholder="标的 / 来源 / 关键词" className="h-9 w-44" />
             <Button type="submit" variant="outline" size="sm"><Search size={14} aria-hidden="true" />检索</Button>
@@ -383,6 +391,7 @@ export default function KnowledgeBasePage() {
                 </span>
               </div>
               <p className="mt-1 text-xs text-ink-3">{document.sourceOrg ?? "机构未知"} · {document.sourceAuthor ?? "分析师未知"} · {document.sourceDate ?? "材料日期未知"} · {document.sourceKind ?? "类型未知"} · {document.uploaderName} · 入库 {new Date(document.versionCreatedAt).toLocaleString("zh-CN")}</p>
+              {document.sourceUrl && <a href={document.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 block break-all text-xs text-accent underline-offset-4 hover:underline">来源网页：{document.sourceUrl}</a>}
               {document.extractionStatus === "unavailable" && <p className="mt-1 text-xs text-hot">{document.extractionNote ?? "未能提取文本"}</p>}
               {document.errorCode && <p className="mt-1 text-xs text-hot">{TASK_ERRORS[document.errorCode] ?? document.errorMessage ?? document.errorCode}</p>}
               <div className="mt-2 flex flex-wrap gap-3">
@@ -397,31 +406,9 @@ export default function KnowledgeBasePage() {
             {documentNextOffset !== null && <Button type="button" variant="outline" size="sm" disabled={loadingMore} onClick={() => void loadMore("documents")}>{loadingMore ? "加载中…" : "加载更多材料"}</Button>}
           </div>
         </CardContent>
-      </Card>
+      </details>
 
-      <Card>
-        <CardHeader><CardTitle>问答</CardTitle></CardHeader>
-        <CardContent className="grid gap-4">
-          <form onSubmit={ask} className="grid gap-3">
-            <div className="grid gap-2">
-              <Label htmlFor="wiki-question">问题</Label>
-              <Input id="wiki-question" value={question} onChange={event => setQuestion(event.target.value)} maxLength={500} placeholder="例如：当前各机构对某标的的评级分歧在哪里？" />
-            </div>
-            <Button type="submit" variant="outline" disabled={busy}><MessageSquare size={16} aria-hidden="true" />{busy ? "检索中…" : "提问"}</Button>
-          </form>
-          {answerMessage && <Alert role="status">{answerMessage}</Alert>}
-          {answer && <div className="grid gap-3">
-            <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(answer.answerMd, siteUrl()).html }} />
-            <div className="grid gap-1 border-t border-line pt-3">
-              <h3 className="text-sm font-semibold text-ink">参考资料</h3>
-              <AnswerCitations citations={answer.citations} />
-            </div>
-            <p className="text-xs text-ink-4">覆盖：分析师 {answer.coverage.analysts} · 机构 {answer.coverage.firms} · 材料 {answer.coverage.reports} · {answer.coverage.first_report ?? "起始日期未知"} 至 {answer.coverage.last_report ?? "最近日期未知"}</p>
-          </div>}
-        </CardContent>
-      </Card>
-
-      <Card>
+      <Card id="answers">
         <CardHeader><CardTitle>问答记录</CardTitle></CardHeader>
         <CardContent className="grid gap-3">
           {historyFailed ? <p className="text-sm text-ink-3">问答记录暂时读不到，请刷新重试。</p>
