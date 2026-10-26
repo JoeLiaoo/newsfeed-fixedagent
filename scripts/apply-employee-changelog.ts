@@ -46,6 +46,12 @@ export function beijingMinute(now: Date): { date: string; time: string } {
   return { date: beijingDate(now), time: beijingTime(now) };
 }
 
+/** Release-only gate; feature PRs are expected to contain pending files. */
+export async function assertNoPendingChangelog(root: string): Promise<void> {
+  const files = (await readdir(path.join(root, "site/changelog/pending"))).filter(name => name.endsWith(".json")).sort();
+  if (files.length) throw new Error(`unapplied employee changelog: ${files.join(", ")}; run npm run changelog:apply and commit before archive/build`);
+}
+
 function contentKey(entry: Pick<ChangelogRelease, "kind" | "title" | "body" | "urgent">): string {
   return JSON.stringify([entry.kind, entry.title, entry.body, entry.urgent === true]);
 }
@@ -84,7 +90,12 @@ export async function applyEmployeeChangelog(root: string, now = new Date()): Pr
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = path.resolve(import.meta.dirname, "..");
-  applyEmployeeChangelog(root).then(result => {
+  if (process.argv[2] === "--check") {
+    assertNoPendingChangelog(root).then(() => console.log("no pending changelog")).catch(error => { console.error(error); process.exitCode = 1; });
+  } else if (process.argv.length > 2) {
+    console.error("usage: node scripts/apply-employee-changelog.ts [--check]");
+    process.exitCode = 1;
+  } else applyEmployeeChangelog(root).then(result => {
     console.log(result.pending ? `applied ${result.applied} of ${result.pending} pending changelog entries${result.version ? `; latestVersion ${result.version}` : " (already present)"}` : "no pending changelog");
   }).catch(error => { console.error(error); process.exitCode = 1; });
 }
