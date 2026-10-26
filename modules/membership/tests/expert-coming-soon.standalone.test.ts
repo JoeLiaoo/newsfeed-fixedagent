@@ -15,6 +15,8 @@ test("old sentiment entry is hidden and the public-data expert is runnable", () 
   assert.ok(!/DeepSeek|Search API/i.test(SECTOR_PEER_EXPERT.description));
   assert.deepEqual(SECTOR_PEER_EXPERT.missingDependencies, []);
   assert.equal(expertStatusBadge("available").label, "可运行");
+  assert.equal(expertStatusBadge("coming_soon").label, "开发中");
+  assert.equal(expertStatusBadge("blocked").label, "缺少依赖");
   assert.match(SECTOR_PEER_EXPERT.skillMd, /可访问 URL/);
   assert.match(SECTOR_PEER_EXPERT.skillMd, /未披露／未检索到/);
 });

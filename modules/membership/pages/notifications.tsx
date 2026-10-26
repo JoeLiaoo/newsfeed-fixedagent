@@ -120,7 +120,7 @@ export default function NotificationsPage(){
     }catch{setMessage("网络异常，请重试。");}finally{setBusy(false);}
   }
   return <main className="mx-auto w-full max-w-3xl px-5 py-8">
-    <Button asChild variant="outline" className="mb-5"><Link to="/settings/profile"><ArrowLeft aria-hidden="true" />返回个人设置</Link></Button>
+    <Button asChild variant="outline" className="mb-5"><Link to="/more"><ArrowLeft aria-hidden="true" />返回我的</Link></Button>
     <h1 className="mb-6 text-2xl font-semibold">绑定微信</h1>
     {message&&<Alert role="status" variant={message.startsWith("绑定成功")?"success":undefined} className="mb-4">{message}</Alert>}
     <Card className="mb-5"><CardHeader><CardTitle>绑定个人微信</CardTitle></CardHeader><CardContent className="grid gap-3">

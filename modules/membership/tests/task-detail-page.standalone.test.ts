@@ -20,6 +20,7 @@ test("the employee task history pages through all of the logged-in employee's ex
   assert.match(artifactsPage, /\/api\/v1\/membership\/expert-tasks\?/, "任务与产物页调用员工任务列表接口");
   assert.match(artifactsPage, /pagination: \{ limit: number; offset: number; hasMore: boolean; nextOffset: number \| null \}/, "读取服务端分页游标");
   assert.match(artifactsPage, /下一页/, "可以访问更早的任务");
+  assert.match(artifactsPage, /返回专家平台/, "任务与产物页有返回专家平台入口");
   assert.match(artifactsPage, /上一页/, "可以返回较新的任务");
   assert.match(artifactsPage, /进行中/, "可以按状态筛选任务");
   assert.match(artifactsPage, /<IntentLink to=\{`\/tasks\/\$\{task\.id\}`\}/, "每条记录可打开任务详情");

@@ -1,7 +1,8 @@
 import { type ReactNode } from "react";
+import { useState } from "react";
 import { Link, redirect, useLoaderData, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/more";
-import { Settings2 } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { POLICY, SITE } from "@aihot/site";
 import type { loader as rootLoader } from "../root";
 import { useChangelogDot } from "../components/shell/Sidebar";
@@ -86,6 +87,20 @@ export default function MorePage() {
   const member = useLoaderData<typeof loader>();
   const changelogDot = useChangelogDot(root?.changelogVersion ?? null);
   const font = useFontPreference();
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+
+  async function logout() {
+    setLogoutBusy(true);
+    setLogoutError("");
+    try {
+      const response = await fetch("/api/v1/membership/logout", { method: "POST" });
+      if (!response.ok) { setLogoutError("退出失败，请重试。"); return; }
+      location.href = "/login";
+    } catch { setLogoutError("网络异常，请重试。"); }
+    finally { setLogoutBusy(false); }
+  }
+
   return (
     <div className="mx-auto max-w-[var(--page-max-reading)] pb-8">
       <PhoneBar title="我的" large />
@@ -101,8 +116,7 @@ export default function MorePage() {
             <NavList groups={sidebar()} />
           </div>
         </section>
-        <Group>
-          <RowLink row={{ to: "/settings/profile", label: "个人设置", icon: <Settings2 size={20} /> }} />
+        <Group title="平台设置">
           <li className="flex min-h-[56px] items-center gap-3 px-4 text-[16px] font-medium text-ink">
             <span className="text-ink-3">
               <IconMoon size={20} />
@@ -118,6 +132,14 @@ export default function MorePage() {
               <option value="browser">浏览器默认字体</option>
             </Select>
           </li>
+          <li>
+            <button type="button" disabled={logoutBusy} onClick={() => void logout()} className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left text-[16px] font-medium text-ink transition-colors active:bg-bg-sunk disabled:opacity-60 lg:hover:bg-bg-sunk">
+              <span className="text-ink-3"><LogOut size={20} aria-hidden="true" /></span>
+              <span className="flex-1">退出登录</span>
+              <IconChevronRight size={16} className="text-ink-4" />
+            </button>
+          </li>
+          {logoutError && <li role="status" className="px-4 py-2 text-sm text-hot">{logoutError}</li>}
         </Group>
         <Group title="工具与入口">
           {tools().map((r) => (
