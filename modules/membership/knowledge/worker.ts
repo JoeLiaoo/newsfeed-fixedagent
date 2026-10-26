@@ -8,14 +8,14 @@ import { ModelOutputError, ModelUnavailableError } from "@aihot/backend/provider
 import { compileMaterial, auditMaterial, type MaterialInput } from "./compile.ts";
 import { applyCorrections, coverageOf } from "./render.ts";
 import { lintDraft, blockingFindings } from "./lint.ts";
-import { capExtraction, detectFormat, extractMaterial } from "./extract.ts";
+import { capExtraction, detectFormat, extractMaterial, type ExtractionResult, type ExtractionSection } from "./extract.ts";
 import { publishBuildPages } from "./publish.ts";
 import { DEFAULT_BASE_ID, baseSlugOf } from "./bases.ts";
 import { compiledDraftSchema, auditResultSchema, type AuditResult, type CompiledDraft, type Finding } from "./schema.ts";
-import { MAX_EXTRACTED_CHARS, MAX_WIKI_ATTEMPTS, TASK_ERRORS, type WikiFormat } from "./catalog.ts";
+import { FIGURE_LIMITS, MAX_EXTRACTED_CHARS, MAX_WIKI_ATTEMPTS, TASK_ERRORS, type WikiFormat } from "./catalog.ts";
 import { fetchPublicArticle } from "./fetch-url.ts";
 import { extractSourceMetadata } from "./metadata.ts";
-import { processFigures, snapshotFigures, type FigureCheckpoint, type FigureCoverage, type FigureManifest } from "./figures.ts";
+import { processFigures, pdfFigureManifest, readFigureManifest, snapshotFigures, type FigureCheckpoint, type FigureCoverage, type FigureManifest } from "./figures.ts";
 import type { FigureFinding } from "./figure-model.ts";
 
 type TaskRow = {
@@ -47,7 +47,8 @@ type VersionRow = {
   extracted_text: string | null;
   extraction_status: string;
   source_url: string | null;
-  figure_manifest: FigureManifest | null;
+  sha256: string;
+  figure_manifest: unknown;
 };
 
 function failureCode(error: unknown): { code: string; message: string } {
@@ -58,6 +59,7 @@ function failureCode(error: unknown): { code: string; message: string } {
   if (code === "knowledge_text_unavailable" || code === "knowledge_file_unreadable") return { code, message: "未能读取材料内容，未生成知识页。" };
   if (code === "knowledge_text_empty") return { code, message: TASK_ERRORS.knowledge_text_empty };
   if (code === "knowledge_content_empty") return { code, message: TASK_ERRORS.knowledge_content_empty };
+  if (code === "knowledge_pdf_cover_only") return { code, message: TASK_ERRORS.knowledge_pdf_cover_only };
   if (code === "knowledge_figure_evidence_changed") return { code, message: TASK_ERRORS.knowledge_figure_evidence_changed };
   if (code.startsWith("knowledge_url_")) {
     const message = code === "knowledge_url_extract_empty" ? "网页已打开，但没有提取到足够的正文。" :
@@ -89,7 +91,7 @@ async function loadTask(taskId: string): Promise<TaskRow | null> {
 }
 
 async function loadVersion(versionId: string): Promise<VersionRow | null> {
-  const rows = await sql<VersionRow[]>`SELECT id, document_id, version_no, format, file_name, body, source_title, source_author, source_org, source_date, source_kind, extracted_text, extraction_status, source_url, figure_manifest FROM member_wiki_document_versions WHERE id = ${versionId}`;
+  const rows = await sql<VersionRow[]>`SELECT id, document_id, version_no, format, file_name, body, source_title, source_author, source_org, source_date, source_kind, extracted_text, extraction_status, source_url, sha256, figure_manifest FROM member_wiki_document_versions WHERE id = ${versionId}`;
   return rows[0] ?? null;
 }
 
@@ -98,7 +100,7 @@ async function fetchUrlVersion(version: VersionRow): Promise<VersionRow> {
   if (!version.source_url || version.body.length) return version;
   const article = await fetchPublicArticle(version.source_url);
   const body = Buffer.from(article.text || article.title || "图表材料", "utf8");
-  const figureManifest: FigureManifest = { pipelineVersion: 1, htmlSha256: article.htmlSha256, candidates: article.figures, candidatesTruncated: article.candidatesTruncated };
+  const figureManifest: FigureManifest = { pipelineVersion: 1, kind: "html", htmlSha256: article.htmlSha256, candidates: article.figures, candidatesTruncated: article.candidatesTruncated };
   const fileName = `${(article.title || version.file_name).replace(/\.md$/i, "").slice(0, 195)}.md`;
   await sql`UPDATE member_wiki_document_versions SET body=${body}, byte_size=${body.length}, sha256=${checksum(body)},
       file_name=${fileName},
@@ -129,6 +131,14 @@ async function saveCheckpoint(taskId: string, leaseToken: string, field: "draft"
   if (!rows.length) throw new Error("knowledge_lease_lost");
 }
 
+/**
+ * The pages of a PDF that may be drawn. A research report draws its charts as vectors, so the page
+ * itself is the picture: the platform reads the first pages and leaves the rest to the text layer.
+ */
+function pdfManifest(version: VersionRow, result: ExtractionResult, capped: { sections: ExtractionSection[] }) {
+  return pdfFigureManifest({ sourceSha256: version.sha256, totalPages: result.pages?.total ?? 0, sections: capped.sections });
+}
+
 /** Reads the material out and keeps the text on the version, so a retry does not read the file again. */
 async function extractVersion(version: VersionRow): Promise<string> {
   // A cached extraction must not let a historical PPTX resume its model build.
@@ -136,19 +146,36 @@ async function extractVersion(version: VersionRow): Promise<string> {
     await sql`UPDATE member_wiki_document_versions SET extraction_status='unavailable', extraction_note='PPTX 已停止处理，请先转换为 PDF。' WHERE id=${version.id}`;
     throw new Error("knowledge_file_type_unsupported");
   }
-  if (version.extraction_status === "available" && version.extracted_text) return version.extracted_text;
+  if (version.extraction_status === "available" && version.extracted_text) {
+    // A PDF read before the pages existed has no manifest yet: the pages are counted again, so the
+    // material may still be drawn.
+    if (version.format === "pdf" && !readFigureManifest(version.figure_manifest)) {
+      const result = await extractMaterial("pdf", version.body);
+      const manifest = pdfManifest(version, result, capExtraction(result, MAX_EXTRACTED_CHARS));
+      await sql`UPDATE member_wiki_document_versions SET figure_manifest=${sql.json(manifest as never)} WHERE id=${version.id}`;
+      version.figure_manifest = manifest;
+    }
+    return version.extracted_text;
+  }
   const format = detectFormat(version.file_name, version.body);
   if (!format) throw new Error("knowledge_file_type_unsupported");
   const result = await extractMaterial(format, version.body);
-  if (result.status === "unavailable") {
+  // A PDF whose pages hold no letters is a scan, not a broken file: the build may still find the
+  // evidence in the pictures of its pages.
+  const scanned = format === "pdf" && result.status === "unavailable" && result.reason === "no_text";
+  if (result.status === "unavailable" && !scanned) {
     await sql`UPDATE member_wiki_document_versions SET extraction_status='unavailable', extraction_note=${result.note} WHERE id=${version.id}`;
     throw new Error("knowledge_text_unavailable");
   }
   const capped = capExtraction(result, MAX_EXTRACTED_CHARS);
   // A build without text has nothing to compile; it fails here rather than asking a model to read
-  // an empty material.
-  if (!capped.text.trim()) throw new Error("knowledge_text_empty");
-  const note = [result.note, capped.truncated ? `内容超出上限，已截取前 ${capped.sections.length} 节（末节可能不完整）` : null].filter(Boolean).join("；") || null;
+  // an empty material. A scan is the exception: its pages may carry the evidence.
+  if (!capped.text.trim() && !scanned) throw new Error("knowledge_text_empty");
+  const note = [
+    result.note,
+    scanned ? "本次改由页面识图读取该材料" : null,
+    capped.truncated ? `内容超出上限，已截取前 ${capped.sections.length} 节（末节可能不完整）` : null,
+  ].filter(Boolean).join("；") || null;
   const metadata = extractSourceMetadata(capped.text);
   const fileTitle = version.file_name.replace(/\.[^.]+$/, "");
   const title = metadata.title && (!version.source_title || version.source_title === fileTitle) ? metadata.title.slice(0, 200) : version.source_title;
@@ -156,8 +183,13 @@ async function extractVersion(version: VersionRow): Promise<string> {
   const organization = version.source_org ?? metadata.organization;
   const date = version.source_date ?? metadata.date;
   const kind = version.source_kind ?? metadata.kind;
-  await sql`UPDATE member_wiki_document_versions SET extracted_text=${capped.text}, extraction_status='available', extraction_note=${note},
+  const manifest = format === "pdf" ? pdfManifest(version, result, capped) : null;
+  await sql`UPDATE member_wiki_document_versions SET extracted_text=${capped.text}, extraction_status=${scanned ? "unavailable" : "available"}, extraction_note=${note},
       source_title=${title}, source_author=${author}, source_org=${organization}, source_date=${date}::date, source_kind=${kind} WHERE id=${version.id}`;
+  if (manifest) {
+    await sql`UPDATE member_wiki_document_versions SET figure_manifest=${sql.json(manifest as never)} WHERE id=${version.id}`;
+    version.figure_manifest = manifest;
+  }
   if (title && title !== version.source_title) await sql`UPDATE member_wiki_documents SET title=${title}, updated_at=now() WHERE id=${version.document_id}`;
   version.source_title = title;
   version.source_author = author;
@@ -202,6 +234,13 @@ async function recordEvent(event: {
 async function knownSlugs(baseId: string, exclude: string[] = []): Promise<Set<string>> {
   const rows = await sql<{ slug: string }[]>`SELECT slug FROM member_wiki_pages WHERE base_id = ${baseId}`;
   return new Set(rows.map(row => baseSlugOf(row.slug, baseId)).filter(slug => !exclude.includes(slug)));
+}
+
+/** The pages the frozen pictures of a version came from, so a build knows which page a fact was read on. */
+async function figurePages(versionId: string): Promise<Map<string, number>> {
+  const rows = await sql<{ id: string; locator: { page?: number } | null }[]>`
+    SELECT id, locator FROM member_wiki_figure_assets WHERE version_id=${versionId}`;
+  return new Map(rows.map(row => [row.id, Number(row.locator?.page ?? 0)]));
 }
 
 /**
@@ -286,12 +325,22 @@ export async function runWikiTask(taskId: string): Promise<void> {
     }
     const text = await extractVersion(version);
     let figureCheckpoint: FigureCheckpoint | null = null;
-    if (version.source_url && version.figure_manifest) {
-      const snapshotted = await snapshotFigures(taskId, leaseToken, version.id, version.figure_manifest, task.figure_checkpoint);
-      figureCheckpoint = await processFigures(taskId, leaseToken, version.id, version.figure_manifest, snapshotted);
+    const manifest = readFigureManifest(version.figure_manifest);
+    if (manifest) {
+      const snapshotted = await snapshotFigures(taskId, leaseToken, version.id, manifest, task.figure_checkpoint, { body: version.body });
+      figureCheckpoint = await processFigures(taskId, leaseToken, version.id, manifest, snapshotted);
       // A page with little text may still be a report whose content is in the pictures; a page with
       // neither enough text nor one verified picture has nothing to build from.
       if (text.trim().length < 80 && !figureCheckpoint.verifiedFindings.length) throw new Error("knowledge_content_empty");
+      // A material whose text layer says almost nothing, whose only evidence is the cover, is not a
+      // report that was read.
+      if (manifest.kind === "pdf" && text.trim().length < 80 && figureCheckpoint.verifiedFindings.length) {
+        const pages = await figurePages(version.id);
+        const evidencePages = [...new Set(figureCheckpoint.verifiedFindings.map(finding => pages.get(finding.figureId) ?? 0).filter(page => page > 0))];
+        if (evidencePages.length && evidencePages.every(page => page === 1) && manifest.totalPages > 1) {
+          throw new Error("knowledge_pdf_cover_only");
+        }
+      }
     }
     const figureFindings = figureCheckpoint?.verifiedFindings ?? [];
     const evidenceDigest = figureCheckpoint?.evidenceDigest;

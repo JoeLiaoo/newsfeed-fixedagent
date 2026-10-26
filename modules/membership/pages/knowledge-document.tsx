@@ -10,6 +10,7 @@ import { siteUrl } from "@aihot/web/lib/seo";
 import { pageMeta } from "@aihot/web/lib/seo";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { TASK_ERRORS, TASK_STAGE_LABELS, TASK_STATE_LABELS } from "../knowledge/catalog.ts";
+import { pageRanges } from "../knowledge/render.ts";
 import { KnowledgeDetailSkeleton } from "./knowledge-detail-skeleton.tsx";
 
 export const handle: Screen = { tab: "knowledge", name: "材料" };
@@ -24,9 +25,9 @@ type Version = {
   sourceTitle: string | null; sourceAuthor: string | null; sourceOrg: string | null; sourceDate: string | null; sourceKind: string | null;
   extractionStatus: string; extractionNote: string | null; createdAt: string; uploaderName: string;
   taskId: string | null; taskState: string | null; taskStage: string | null; errorCode: string | null; errorMessage: string | null; attemptCount: number | null;
-  hasFigureManifest: boolean; figurePhase: string | null; figureCoverage: { status: string; read?: boolean; candidates: number; processed: number; evidenced: number; unreadable: number; unprocessed: number; truncated: boolean } | null;
+  hasFigureManifest: boolean; figurePhase: string | null; figureCoverage: { status: string; read?: boolean; candidates: number; processed: number; evidenced: number; unreadable: number; unprocessed: number; truncated: boolean; pages?: Array<{ total: number; textPages: number[]; visualPages: number[]; failed: Array<{ page: number; reason: string }>; uncovered: number[] }> | null } | null;
 };
-type VersionFigures = { figures: Array<{ id: string; ordinal: number; caption: string | null; width: number; height: number; anchor: string; findings: Array<{ id: string; statement: string }> }> };
+type VersionFigures = { figures: Array<{ id: string; ordinal: number; caption: string | null; width: number; height: number; anchor: string; locator?: { kind?: string; page?: number } | null; findings: Array<{ id: string; statement: string }> }> };
 type DocumentDetail = { id: string; title: string; status: string; baseId: string; uploaderId: string; createdAt: string; withdrawnAt: string | null };
 
 export default function KnowledgeDocumentPage() {
@@ -96,9 +97,13 @@ export default function KnowledgeDocumentPage() {
           {version.hasFigureManifest && <section className="mt-3" aria-label={`版本 ${version.versionNo} 图表证据`}>
             <h3 className="text-sm font-medium text-ink">图表证据</h3>
             {version.taskState === "running" && version.taskStage === "extracting" && <p className="mt-1 text-xs text-ink-3" role="status">{version.figurePhase === "verifying" ? "图表复核" : "读取图表"}</p>}
-            {version.figureCoverage && <p className="mt-1 text-xs text-ink-3" role="status">{version.figureCoverage.read ? <>发现{version.figureCoverage.truncated ? "至少" : ""} {version.figureCoverage.candidates} 张候选图；处理 {version.figureCoverage.processed} 张，{version.figureCoverage.evidenced} 张有可用证据；{version.figureCoverage.unreadable} 张无可用证据，{version.figureCoverage.unprocessed} 张未处理。{version.figureCoverage.status !== "complete" && "部分图片未处理或未能辨认。"}</> : "本次未读取图片，正文照常构建。"}</p>}
+            {version.figureCoverage?.pages?.length ? <div className="mt-1 text-xs text-ink-3" role="status">{version.figureCoverage.pages.map(page => <p key={`${page.total}-${page.visualPages.join(",")}`}>
+              共 {page.total} 页；{page.textPages.length ? `文字层读取第 ${pageRanges(page.textPages)} 页` : "没有可提取的文字层"}；{page.visualPages.length ? `页面识图覆盖第 ${pageRanges(page.visualPages)} 页` : "没有做页面识图"}。
+              {page.failed.length ? `第 ${pageRanges(page.failed.map(failure => failure.page))} 页未能渲染（${[...new Set(page.failed.map(failure => failure.reason))].join("、")}）。` : ""}
+              {page.uncovered.length ? `未做页面识图的页：第 ${pageRanges(page.uncovered)} 页。` : ""}
+            </p>)}</div> : version.figureCoverage ? <p className="mt-1 text-xs text-ink-3" role="status">{version.figureCoverage.read ? <>发现{version.figureCoverage.truncated ? "至少" : ""} {version.figureCoverage.candidates} 张候选图；处理 {version.figureCoverage.processed} 张，{version.figureCoverage.evidenced} 张有可用证据；{version.figureCoverage.unreadable} 张无可用证据，{version.figureCoverage.unprocessed} 张未处理。{version.figureCoverage.status !== "complete" && "部分图片未处理或未能辨认。"}</> : "本次未读取图片，正文照常构建。"}</p> : null}
             {figureData[version.id]?.figures.length ? <ul className="mt-3 grid gap-3">{figureData[version.id].figures.map(figure => <li id={figure.anchor} key={figure.id} className="scroll-mt-24 rounded-card border border-line p-3">
-              <p className="text-sm font-medium text-ink">图 {figure.ordinal}{figure.caption ? ` · ${figure.caption}` : ""}</p>
+              <p className="text-sm font-medium text-ink">{figure.locator?.kind === "pdf" && figure.locator.page ? `第 ${figure.locator.page} 页` : `图 ${figure.ordinal}`}{figure.caption && figure.locator?.kind !== "pdf" ? ` · ${figure.caption}` : ""}</p>
               {document.status === "active" && <img src={`${ENDPOINT}versions/${encodeURIComponent(version.id)}/figures/${encodeURIComponent(figure.id)}/content`} width={figure.width} height={figure.height} loading="lazy" alt={figure.caption ?? `材料图 ${figure.ordinal}`} className="mt-2 h-auto max-w-full rounded-card border border-line" />}
               {figure.findings.length ? <ul className="mt-2 list-disc pl-5 text-sm text-ink">{figure.findings.map(finding => <li key={finding.id}>{finding.statement}</li>)}</ul> : <p className="mt-2 text-xs text-ink-3">未形成通过复核的图表事实。</p>}
             </li>)}</ul> : null}

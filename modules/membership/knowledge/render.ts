@@ -4,7 +4,7 @@
 import type { CompiledDraft, Correction, Finding, PageDraft, SourceRecord } from "./schema.ts";
 import { FRESHNESS_TIERS, isRealDay, today } from "./catalog.ts";
 import type { MergedFigure } from "./aggregate.ts";
-import type { FigureCoverage } from "./figures.ts";
+import type { FigureCoverage, FigurePageCoverage } from "./figures.ts";
 
 export type Coverage = {
   analysts: number;
@@ -219,6 +219,48 @@ function frontmatter(page: PageDraft, coverage: Coverage): string {
   return lines.join("\n");
 }
 
+/** The pages of a set, written the way people read them: 1–8, 12, 15–20. */
+export function pageRanges(pages: number[]): string {
+  const sorted = [...new Set(pages)].sort((left, right) => left - right);
+  if (!sorted.length) return "无";
+  const parts: string[] = [];
+  let start = sorted[0]!;
+  let end = start;
+  for (const page of sorted.slice(1)) {
+    if (page === end + 1) { end = page; continue; }
+    parts.push(start === end ? `${start}` : `${start}–${end}`);
+    start = page;
+    end = page;
+  }
+  parts.push(start === end ? `${start}` : `${start}–${end}`);
+  return parts.join("、");
+}
+
+/**
+ * The page coverage of one material: what the text layer gave and what the drawn pages gave,
+ * told apart. A material that was read as text only still says so.
+ */
+function pageCoverageLines(pages: FigurePageCoverage[]): { lines: string[]; partial: boolean } {
+  const lines: string[] = [];
+  let partial = false;
+  for (const entry of pages) {
+    const title = entry.title ? `${entry.title}：` : "";
+    const read = entry.textPages.length ? `文字层读取第 ${pageRanges(entry.textPages)} 页` : "没有可提取的文字层";
+    const drawn = entry.visualPages.length ? `页面识图覆盖第 ${pageRanges(entry.visualPages)} 页` : "没有做页面识图";
+    lines.push(`- ${title}共 ${entry.total} 页；${read}；${drawn}。`);
+    if (entry.failed.length) {
+      const reasons = [...new Set(entry.failed.map(failure => failure.reason))].join("、");
+      lines.push(`- ${title}第 ${pageRanges(entry.failed.map(failure => failure.page))} 页未能渲染（${reasons}）。`);
+    }
+    if (entry.uncovered.length) {
+      lines.push(`- ${title}未做页面识图的页：第 ${pageRanges(entry.uncovered)} 页。`);
+    }
+    // Something was left out: the text layer was cut, a page failed or a page was never drawn.
+    if (entry.textPages.length < entry.total || entry.failed.length || entry.uncovered.length) partial = true;
+  }
+  return { lines, partial };
+}
+
 /**
  * The page. A viewpoint page keeps the seven sections in one order; a precompiled answer, a judgment
  * framework and a monitoring scale keep their own sections. Everything a page shows, it shows with the
@@ -236,16 +278,26 @@ export function renderPage(page: PageDraft, sources: SourceRecord[], documentId:
     return parts.length ? parts.flatMap(part => [part, ""]) : [UNKNOWN, ""];
   };
   const finish = (body: string[]) => {
+    const pages = figureCoverage?.pages ?? null;
     if (figureCoverage && figureCoverage.status !== "legacy_text_only" && (figureCoverage.read || figureCoverage.candidates > 0)) {
       const scope = figureCoverage.read
-        ? `处理范围：发现${figureCoverage.truncated ? "至少" : ""} ${figureCoverage.candidates} 张候选图；处理 ${figureCoverage.processed} 张，${figureCoverage.evidenced} 张有可用证据；${figureCoverage.unreadable} 张无可用证据，${figureCoverage.unprocessed} 张未处理。${figureCoverage.status === "complete" ? "" : "部分图片未处理或未能辨认。"}`
-        : "本次未读取图片：材料正文照常构建，图表证据不可用。";
+        ? pages?.length
+          ? `处理范围：共 ${pages.reduce((sum, entry) => sum + entry.total, 0)} 页，自动处理前 ${figureCoverage.candidates} 页；渲染 ${figureCoverage.processed} 页，${figureCoverage.evidenced} 页有可用证据；${figureCoverage.unreadable} 页无可用证据，${figureCoverage.unprocessed} 页未处理。${figureCoverage.status === "complete" ? "" : "部分页面未处理或未能辨认。"}`
+          : `处理范围：发现${figureCoverage.truncated ? "至少" : ""} ${figureCoverage.candidates} 张候选图；处理 ${figureCoverage.processed} 张，${figureCoverage.evidenced} 张有可用证据；${figureCoverage.unreadable} 张无可用证据，${figureCoverage.unprocessed} 张未处理。${figureCoverage.status === "complete" ? "" : "部分图片未处理或未能辨认。"}`
+        : pages?.length
+          ? "本次未做页面识图：材料正文照常构建，页面证据不可用。"
+          : "本次未读取图片：材料正文照常构建，图表证据不可用。";
       body.push("", "## 图表证据", "", scope, "");
       for (const item of figures) {
         const finding = item.finding;
         body.push(`- [${item.label}](/knowledge/documents/${encodeURIComponent(item.documentId)}#figure-${encodeURIComponent(item.figureId)}) ${line(finding.statement)}（可见依据：${line(finding.visibleEvidence)}${finding.period ? `；期间：${line(finding.period)}` : ""}${finding.unit ? `；单位：${line(finding.unit)}` : ""}${finding.dataSource ? `；图示来源：${line(finding.dataSource)}` : ""}${finding.limitations.length ? `；限制：${finding.limitations.map(line).join("、")}` : ""}）`);
       }
       if (!figures.length) body.push("- 当前页没有引用通过复核的图表事实。");
+    }
+    if (pages?.length) {
+      const scope = pageCoverageLines(pages);
+      body.push("", "## 读取范围", "", ...scope.lines,
+        ...(scope.partial ? ["- 本次为部分读取，不代表整份材料的完整理解。"] : []), "");
     }
     return { bodyMd: body.join("\n"), coverage };
   };

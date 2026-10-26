@@ -79,6 +79,30 @@ export const FIGURE_LIMITS = {
   /** Output tokens the reading call and the verifying call may use. */
   readTokens: 4096,
   verifyTokens: 2048,
+  /**
+   * The bounded page rendering of a PDF. A research report draws its charts as vectors, so the
+   * page itself is the picture: the renderer turns the first pages into images and the same
+   * reading, reviewing and citation chain follows. The limits are the product's, not the
+   * renderer's: one page at a time, in a process that may be stopped.
+   */
+  pdfPages: {
+    /** The pages of one PDF that may enter the visual steps; the rest are read as text only. */
+    maxPages: 8,
+    /** One page render may take, the process start included. */
+    pageTimeoutMs: 10_000,
+    /** The whole render stage may take. */
+    totalBudgetMs: 90_000,
+    /** The heap the render process starts with; more than this ends the render. */
+    memoryMb: 512,
+    /** The scale a page is rendered at, at most. */
+    maxScale: 2,
+    /** The longest edge of a rendered page, in pixels. */
+    maxEdge: 1600,
+    /** The pixels a rendered page may have. */
+    maxPixels: 2_000_000,
+    /** The bytes one rendered page may carry back from the render process. */
+    pageBytes: 16 * 1024 * 1024,
+  },
 } as const;
 
 /** The stance words a viewpoint table may hold; the set is closed so a page cannot grow a new one. */
@@ -146,7 +170,8 @@ export const TASK_ERRORS: Record<string, string> = {
   knowledge_file_unreadable: "文件无法读取或已损坏。",
   knowledge_text_unavailable: "未能从文件中提取出可用文本，未生成知识页。",
   knowledge_text_empty: "材料内容超出单次构建上限且未能截取到有效文本，未生成知识页。",
-  knowledge_content_empty: "网页已打开，但没有足够的正文，也没有通过复核的图表证据，未生成知识页。",
+  knowledge_content_empty: "材料没有足够的正文，也没有通过复核的图表证据，未生成知识页。",
+  knowledge_pdf_cover_only: "这份扫描件只识别到封面，没有取得可核实的正文图表证据，未生成知识页。",
   knowledge_figure_evidence_changed: "图表证据与已保存的草稿不一致，本次构建未发布任何页面，可重试。",
   knowledge_model_failed: "模型调用失败，构建未完成，可重试。",
   knowledge_model_output_invalid: "模型输出无法解析，构建未完成，可重试。",

@@ -4,13 +4,17 @@ import { unzipSync } from "fflate";
 import { extractText as extractPdfText, getDocumentProxy } from "unpdf";
 import { FORMAT_EXTENSIONS, MAX_EXTRACTED_CHARS, type SupportedWikiFormat, type WikiFormat } from "./catalog.ts";
 
-export type ExtractionSection = { label: string; text: string };
+export type ExtractionSection = { label: string; text: string; page?: number };
 
 export type ExtractionResult = {
   status: "available" | "unavailable";
   text: string;
   sections: ExtractionSection[];
   note: string | null;
+  /** Why the material could not be read: no text at all, or the bytes could not be read. */
+  reason?: "no_text" | "unreadable";
+  /** The pages of a PDF: how many it has, and which of them the text layer gave. */
+  pages?: { total: number; read: number[] } | null;
 };
 
 /** The biggest XML part one office file may hold, so a small archive cannot expand into a huge one. */
@@ -82,18 +86,29 @@ function xmlParagraphs(xml: string, runTag: string): string[] {
 
 async function fromPdf(bytes: Uint8Array): Promise<ExtractionResult> {
   const document = await getDocumentProxy(new Uint8Array(bytes));
-  const { totalPages, text } = await extractPdfText(document, { mergePages: false });
-  const pages = (text as string[]).map((page, index) => ({ label: `第 ${index + 1} 页`, text: (page ?? "").replace(/[ \t]+\n/g, "\n").trim() }));
-  const sections = pages.filter(page => page.text);
-  const body = sections.map(page => `<!-- ${page.label} -->\n${page.text}`).join("\n\n");
-  if (!body.trim()) return { status: "unavailable", text: "", sections: [], note: "PDF 没有可提取的文字层（可能是扫描件），未生成知识页。" };
-  return { status: "available", text: body, sections, note: `共 ${totalPages} 页` };
+  try {
+    const { totalPages, text } = await extractPdfText(document, { mergePages: false });
+    const pages = (text as string[]).map((page, index) => ({ label: `第 ${index + 1} 页`, page: index + 1, text: (page ?? "").replace(/[ \t]+\n/g, "\n").trim() }));
+    const sections = pages.filter(page => page.text);
+    const body = sections.map(page => `<!-- ${page.label} -->\n${page.text}`).join("\n\n");
+    // A document whose pages hold no text is a scan: the file was read, the pages are there, the
+    // letters are not. That is a different case from a file that could not be read at all, and the
+    // build treats the two differently.
+    if (!body.trim()) return { status: "unavailable", text: "", sections: [], reason: "no_text",
+      note: `PDF 共 ${totalPages} 页，没有可提取的文字层（可能是扫描件）`, pages: { total: totalPages, read: [] } };
+    return { status: "available", text: body, sections, note: `共 ${totalPages} 页`,
+      pages: { total: totalPages, read: sections.map(section => section.page!) } };
+  } finally {
+    // The reader of the document is released: a worker that reads material after material must not
+    // keep the readers of the earlier ones.
+    await document.loadingTask.destroy();
+  }
 }
 
 function fromOffice(bytes: Uint8Array): ExtractionResult {
   const files = unzipSync(bytes, { filter: file => file.name === "word/document.xml" && file.originalSize <= MAX_XML_BYTES });
   const names = Object.keys(files);
-  if (!names.length) return { status: "unavailable", text: "", sections: [], note: "文档结构无法读取，未生成知识页。" };
+  if (!names.length) return { status: "unavailable", text: "", sections: [], reason: "unreadable", note: "文档结构无法读取，未生成知识页。" };
   const sections: ExtractionSection[] = [];
   for (const name of names) {
     const xml = new TextDecoder("utf-8", { fatal: false }).decode(files[name]!);
@@ -102,16 +117,16 @@ function fromOffice(bytes: Uint8Array): ExtractionResult {
     if (!text.trim()) continue;
     sections.push({ label: "正文", text });
   }
-  if (!sections.length) return { status: "unavailable", text: "", sections: [], note: "文档没有可提取的文字，未生成知识页。" };
+  if (!sections.length) return { status: "unavailable", text: "", sections: [], reason: "no_text", note: "文档没有可提取的文字，未生成知识页。" };
   return { status: "available", text: sections.map(section => `<!-- ${section.label} -->\n${section.text}`).join("\n\n"), sections, note: null };
 }
 
 function fromMarkdown(bytes: Uint8Array): ExtractionResult {
   let text: string;
   try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
-  catch { return { status: "unavailable", text: "", sections: [], note: "文件不是 UTF-8 文本，无法读取。" }; }
+  catch { return { status: "unavailable", text: "", sections: [], reason: "unreadable", note: "文件不是 UTF-8 文本，无法读取。" }; }
   const cleaned = text.replace(/\r\n/g, "\n").trim();
-  if (!cleaned) return { status: "unavailable", text: "", sections: [], note: "文件为空，未生成知识页。" };
+  if (!cleaned) return { status: "unavailable", text: "", sections: [], reason: "no_text", note: "文件为空，未生成知识页。" };
   return { status: "available", text: cleaned, sections: [{ label: "正文", text: cleaned }], note: null };
 }
 
@@ -123,7 +138,7 @@ export async function extractMaterial(format: WikiFormat, bytes: Uint8Array): Pr
     if (format === "docx") return fromOffice(bytes);
     return fromMarkdown(bytes);
   } catch (error) {
-    return { status: "unavailable", text: "", sections: [], note: `文件无法读取：${(error as Error).message.slice(0, 200)}` };
+    return { status: "unavailable", text: "", sections: [], reason: "unreadable", note: `文件无法读取：${(error as Error).message.slice(0, 200)}` };
   }
 }
 
@@ -149,16 +164,26 @@ function prefixOf(text: string, room: number): string {
 }
 
 /**
+ * The control characters a file may carry are not text: a NUL breaks the pages that store it and
+ * a stray control character only confuses the model that reads it. The line breaks and the tabs
+ * stay, because they carry the shape of the material.
+ */
+export function cleanExtractedText(value: string): string {
+  return value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+}
+
+/**
  * Keeps the material inside the budget the build allows. The budget counts the anchors and the
  * separators too, so the text that comes out never exceeds it; a section that does not fit whole
  * leaves a readable prefix behind instead of nothing at all.
  */
 export function capExtraction(result: ExtractionResult, limit = MAX_EXTRACTED_CHARS): { text: string; sections: ExtractionSection[]; truncated: boolean } {
-  const whole = result.sections.map(sectionText).join("\n\n");
-  if (whole.length <= limit) return { text: whole, sections: result.sections, truncated: false };
+  const cleaned = result.sections.map(section => ({ ...section, text: cleanExtractedText(section.text) }));
+  const whole = cleaned.map(sectionText).join("\n\n");
+  if (whole.length <= limit) return { text: whole, sections: cleaned, truncated: false };
   const sections: ExtractionSection[] = [];
   let used = 0;
-  for (const section of result.sections) {
+  for (const section of cleaned) {
     const separator = sections.length ? 2 : 0;
     const anchor = sectionText({ label: section.label, text: "" }).length;
     const room = limit - used - separator - anchor;
@@ -170,7 +195,7 @@ export function capExtraction(result: ExtractionResult, limit = MAX_EXTRACTED_CH
     }
     const prefix = prefixOf(section.text, room);
     if (!prefix) break;
-    sections.push({ label: section.label, text: prefix });
+    sections.push({ label: section.label, text: prefix, ...(typeof section.page === "number" ? { page: section.page } : {}) });
     used += separator + anchor + prefix.length;
     break;
   }
