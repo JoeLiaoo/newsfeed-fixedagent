@@ -14,6 +14,24 @@ test("iLink keepalive eligibility uses the configurable 20-hour default",()=>{
   assert.equal(keepaliveNudgeEligible({...eligible,lastInboundAt:new Date(now.getTime()-19*60*60*1000),thresholdHours:20}),false);
 });
 
+test("the threshold stays a whole number of hours between 1 and 23",()=>{
+  assert.equal(ilinkKeepaliveThresholdHours("1"),1);
+  assert.equal(ilinkKeepaliveThresholdHours("23"),23);
+  assert.equal(ilinkKeepaliveThresholdHours("0"),20);
+  assert.equal(ilinkKeepaliveThresholdHours("-1"),20);
+  assert.equal(ilinkKeepaliveThresholdHours("20.5"),20);
+  assert.equal(ilinkKeepaliveThresholdHours("abc"),20);
+  assert.equal(ilinkKeepaliveThresholdHours(""),20);
+});
+
+test("a timestamp given as text is read like the same instant",()=>{
+  assert.equal(keepaliveNudgeEligible({...eligible,lastInboundAt:stale.toISOString()}),true);
+  assert.equal(keepaliveNudgeEligible({...eligible,lastInboundAt:stale.toISOString(),
+    nudgedAt:new Date(stale.getTime()+1).toISOString()}),false);
+  assert.equal(keepaliveNudgeEligible({...eligible,lastInboundAt:"not-a-date"}),false);
+  assert.equal(keepaliveNudgeId("member-1",stale),keepaliveNudgeId("member-1",stale.toISOString()));
+});
+
 test("a successful nudge deduplicates only its inbound window",()=>{
   assert.equal(keepaliveNudgeEligible({...eligible,nudgedAt:new Date(stale.getTime()+1)}),false);
   assert.equal(keepaliveNudgeEligible({...eligible,lastInboundAt:new Date(stale.getTime()+1),nudgedAt:new Date(stale.getTime()+1),now:new Date(now.getTime()+1)}),true);

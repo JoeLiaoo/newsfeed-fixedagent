@@ -113,6 +113,18 @@ test("two approved browser sessions scan independently, auto bind and cannot ste
   assert("nudged" in duplicateNudge&&duplicateNudge.nudged===0,"a window should be nudged once");
   assert.equal(sent.length,deliveredBeforeNudge+1);
   assert.match(sent.at(-1)!.text,/请随便回一句/);
+  const [nudgedRow]=await sql<{keepalive_nudged_at:Date|null}[]>`SELECT keepalive_nudged_at FROM member_ilink_accounts WHERE user_id=${ids[0]!}`;
+  assert(nudgedRow!.keepalive_nudged_at,"a sent reminder must be recorded on the account");
+  const [skippedRow]=await sql<{keepalive_nudged_at:Date|null}[]>`SELECT keepalive_nudged_at FROM member_ilink_accounts WHERE user_id=${ids[1]!}`;
+  assert.equal(skippedRow!.keepalive_nudged_at,null,"a skipped account is not marked as nudged");
+  await sql`UPDATE member_ilink_accounts SET last_inbound_at=now()-interval '1 hour',keepalive_nudged_at=NULL WHERE user_id=${ids[0]!}`;
+  const freshNudge=await nudgeNearExpiryIlinkChannels();
+  assert("nudged" in freshNudge&&freshNudge.nudged===0,"an inbound window below the threshold is not reminded");
+  assert.equal(sent.length,deliveredBeforeNudge+1);
+  await sql`UPDATE member_ilink_accounts SET last_inbound_at=now()-interval '21 hours',keepalive_nudged_at=NULL WHERE user_id=${ids[0]!}`;
+  const secondWindowNudge=await nudgeNearExpiryIlinkChannels();
+  assert("nudged" in secondWindowNudge&&secondWindowNudge.nudged===1,"a newer inbound window may be reminded again");
+  assert.equal(sent.length,deliveredBeforeNudge+2);
   delete process.env.P3_DELIVERY_ENABLED;
   const unbind=await app.inject({method:"POST",url:"/api/v1/membership/weixin/unbind",headers:{...origin,cookie:cookies[1]!}});
   assert.equal(unbind.statusCode,200);

@@ -30,3 +30,40 @@
 
 - 已知限制／缺失依赖：渠道可能在约定阈值前停止接受主动消息；提醒仅在仍可发送时尝试，用户仍需主动回复以刷新上下文。不能保证消息送达。
 - 下一步：推送分支并开 PR；描述中列出迁移及发布后验证步骤，不合并、不部署。部署后先确认迁移列、开关与 worker 运行，再用测试账号验证阈值内不发送、阈值后 active 账号收到最多一条、回复后新窗口可再次提醒、失效状态跳过，并核对 outbox/账号状态和手机实际收件。
+
+## 复核与修补（PR #142 第二次提交）
+
+- Agent：Pi（MiniMax-M3.1-Flash），接续 Codex 因额度中断的任务
+- 对应任务：同上；仍是代码修补，未合并、未部署
+- 完成状态：代码、测试与文档已修补并推送至 PR #142；仍待 PR 评审、部署和真实微信验证
+
+### 复核发现的问题
+
+- 落库标记会失效：原 `UPDATE ... AND last_inbound_at=${row.last_inbound_at}` 用相等比较回写标记，而 Postgres 的 `now()` 是微秒精度、postgres.js 只解析到毫秒，相等比较永远不成立，`keepalive_nudged_at` 写不进去，提醒会在每分钟重复发送。行锁（`FOR UPDATE ... SKIP LOCKED`）已经保证窗口在事务内不变，因此去掉相等条件。
+- 时间类型：把 `last_inbound_at` 读成 `::text` 后，`keepaliveNudgeId` 对字符串调用 `toISOString()` 会抛错，被 `catch` 吞掉，提醒永远发不出去。改为统一用 `toDate` 归一（Date／字符串／非法值），`keepaliveNudgeEligible` 与 `keepaliveNudgeId` 都接受 `Date|string`；SQL 继续读 timestamptz 列。
+- 阈值与 SQL 取整：`make_interval(hours => $1)` 遇到小数阈值会被 Postgres 当整数解析而报错；改为在应用侧算好截止时刻再作为 timestamptz 参数传入，查询与资格判断共用同一时刻。阈值只接受 1–23 的整数小时，越界回落到 20。
+- 失败风暴：提醒发送失败时若渠道明确返回会话失效或需用户互动，账号状态随之改写，下一分钟不再重复尝试；其它失败沿用同一发送 ID 重试。提醒本身抛错不再中断同一轮的入站轮询。
+
+### 修改文件
+
+- `modules/membership/notifications/inbox.ts`、`modules/membership/tests/ilink-keepalive.standalone.test.ts`、`modules/membership/tests/ilink-binding.test.ts`、`.env.example`、`docs/P3-OPERATIONS.md`、`docs/P3-ILINK-QR-DESIGN.md`
+
+### 最小验证
+
+- `node --import ./tests/standalone.ts --test modules/membership/tests/ilink-keepalive.standalone.test.ts`：5/5 通过（新增阈值边界、字符串时间与发送 ID 稳定性）。
+- `node --import ./tests/standalone.ts --test --test-concurrency=6 "modules/membership/tests/*.standalone.test.ts"`：206/206 通过。
+- `npm run typecheck`：通过（修补前未提交改动会在 `inbox.ts(119,40)` 报 `string` 不能赋给 `Date`）。
+- `node --import ./tests/standalone.ts --test --test-skip-pattern='every table and column' tests/architecture.test.ts`：13/13 通过。
+- `npm run test:standalone`：441 项中 425 通过、16 失败；与本次改动前的基线（439 项、16 失败）失败项完全相同，均为既有的 public-methods 用例，不涉及本功能。
+- `node scripts/check-doc-links.ts`：550 个本地 Markdown 链接通过；`git diff --check` 通过。
+- 新迁移仍单独通过 `migrationPlan`（transaction）；完整 `check-migrations.ts --base=origin/main` 在此 Windows checkout 依旧把全部旧迁移报为不可变（`core.autocrlf=true` 的 CRLF/LF 比较问题，从 `0001_core.sql` 起即如此），需在 Linux PR CI 复核。
+
+### 未验证与风险
+
+- `ilink-binding.test.ts` 的数据库断言（记录标记、阈值内不提醒、新窗口可再提醒）本机未运行：无 `DATABASE_URL`、无隔离 PostgreSQL、无 Docker；由 PR CI 的 postgres-integration 执行。
+- 提醒可能打扰已暂停接收通知的成员：当前暂停（`paused_until`）不影响提醒，只影响资讯／GP 推送，本次未改。
+- 渠道可能在阈值前就停止接受主动消息；提醒只在仍可发送时尝试，不能保证送达。
+
+### 下一步
+
+- PR #142 已更新，等待评审；不合并、不部署。发布后按 PR 描述核对迁移列、开关、worker 运行与手机实际收件。
