@@ -64,6 +64,11 @@
 - 提醒可能打扰已暂停接收通知的成员：当前暂停（`paused_until`）不影响提醒，只影响资讯／GP 推送，本次未改。
 - 渠道可能在阈值前就停止接受主动消息；提醒只在仍可发送时尝试，不能保证送达。
 
+### CI 结果（PR #142）
+
+- 上一提交 `50ace74` 的 CI（run 40296548868）失败，两处失败正是本次修补的内容：`ilink-binding.test.ts` 报 “only the active account with context should receive a nudge”（实际 false），因为微秒/毫秒差使回写标记的行数为 0；`tests/architecture.test.ts` 报 `P3_ILINK_KEEPALIVE_AFTER_HOURS` 已读取但未列入 `.env.example`。
+- `9b565f6` 的 CI（run 40298707446）全部通过：`quality`（含 Linux 上的 `check-migrations.ts --base=origin/main` → “migration history and online safety checked”、typecheck、standalone 用例、docker build）、`postgres-integration`（含 `ilink-binding.test.ts` 与 `ilink-scan.test.ts`）、`links`。
+
 ### 下一步
 
 - PR #142 已更新，等待评审；不合并、不部署。发布后按 PR 描述核对迁移列、开关、worker 运行与手机实际收件。
