@@ -49,7 +49,7 @@ test("announcement adapter maps fixture list records, applies title/date filters
   const requests: URL[] = [];
   const fetchFixture: typeof fetch = async (url) => {
     const parsed = new URL(String(url)); requests.push(parsed);
-    return new Response(JSON.stringify({ data: { total_pages: 1, list: [
+    return new Response(JSON.stringify({ data: { page_index: 1, page_size: 30, total_hits: 3, list: [
       { title: "关于参与设立产业基金的公告", art_code: "a-1", notice_date: "2024-06-13 00:00:00" },
       { title: "关于参与设立产业基金的公告", art_code: "a-2", notice_date: "2025-01-02 00:00:00" },
       { title: "年度审计报告", art_code: "a-3", notice_date: "2024-06-13 00:00:00" },
@@ -65,6 +65,37 @@ test("announcement adapter maps fixture list records, applies title/date filters
   assert.equal(items[0]!.announcementId, "a-1");
   assert.equal(items[0]!.url, "https://pdf.dfcfw.com/pdf/H2_a-1_1.pdf");
   assert.ok(ANNOUNCEMENT_KEYWORDS.some((keyword) => items[0]!.title.includes(keyword)));
+});
+
+test("announcement adapter derives pages from total_hits, recognizes Zhejiang participation titles, and stops before older pages", async () => {
+  const input = parseListedFundInput({ region: "浙江省", startDate: "2024-01-01", endDate: "2024-12-31", maxAnnouncements: 10 });
+  const requests: URL[] = [];
+  const pages: Record<number, unknown[]> = {
+    1: [
+      { title: "证券投资基金年度报告", art_code: "noise", notice_date: "2025-02-01" },
+    ],
+    2: [
+      { title_ch: "关于参与设立投资基金的公告", art_code: "participate", notice_date: "2024-08-01" },
+      { title: "关于发起设立投资基金的公告", art_code: "establish", notice_date: "2024-06-01" },
+      { title: "与私募基金合作投资的公告", art_code: "cooperate", notice_date: "2024-03-01" },
+    ],
+    3: [
+      { title: "参与设立产业基金的公告", art_code: "old", notice_date: "2023-12-31" },
+    ],
+    4: [
+      { title: "关于参与设立投资基金的公告", art_code: "should-not-fetch", notice_date: "2023-01-01" },
+    ],
+  };
+  const fetchFixture: typeof fetch = async (url) => {
+    const parsed = new URL(String(url)); requests.push(parsed);
+    const pageIndex = Number(parsed.searchParams.get("page_index"));
+    return new Response(JSON.stringify({ data: { page_index: pageIndex, page_size: 30, total_hits: 95, list: pages[pageIndex] } }), { status: 200 });
+  };
+  const { items } = await fetchIssuerAnnouncements({ code: "600120", name: "浙江东方集团股份有限公司", region: "杭州市" }, input, { fetch: fetchFixture });
+  assert.deepEqual(requests.map((request) => request.searchParams.get("page_index")), ["1", "2", "3"]);
+  assert.deepEqual(items.map((item) => item.announcementId).sort(), ["cooperate", "establish", "participate"]);
+  assert.equal(items.find((item) => item.announcementId === "participate")!.title, "关于参与设立投资基金的公告");
+  assert.ok(ANNOUNCEMENT_KEYWORDS.includes("投资基金"));
 });
 
 test("announcement adapter separates empty results from list service failures", async () => {

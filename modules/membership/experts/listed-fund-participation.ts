@@ -18,7 +18,7 @@ export const LISTED_ISSUER_SEEDS: ListedIssuer[] = [
 ];
 
 export const LISTED_FUND_DEFAULT_BUDGET = { maxIssuers: 40, maxAnnouncements: 200, maxPdfExtracts: 80 } as const;
-export const ANNOUNCEMENT_KEYWORDS = ["产业基金", "股权投资", "参与出资", "私募基金", "合作投资", "基金合伙", "合伙企业"] as const;
+export const ANNOUNCEMENT_KEYWORDS = ["产业基金", "股权投资", "参与出资", "私募基金", "合作投资", "基金合伙", "合伙企业", "投资基金"] as const;
 const asText = (value: unknown) => typeof value === "string" ? value.trim() : "";
 const norm = (value: string) => value.toLowerCase().replace(/[\s\p{P}\p{S}（）()【】]/gu, "");
 let lastExternalRequestAt = 0;
@@ -117,7 +117,12 @@ function eastmoneyPdfUrl(item: Record<string, unknown>, artCode: string) {
   return /^[\w-]+$/.test(artCode) ? `https://pdf.dfcfw.com/pdf/H2_${artCode}_1.pdf` : "";
 }
 const inDateRange = (date: string | null, input: ListedFundInput) => Boolean(date && date >= input.startDate && date <= input.endDate);
-const hasAnnouncementKeyword = (title: string) => ANNOUNCEMENT_KEYWORDS.some((keyword) => title.includes(keyword));
+const hasAnnouncementKeyword = (title: string) => {
+  if (!ANNOUNCEMENT_KEYWORDS.some((keyword) => title.includes(keyword))) return false;
+  // Keep generic securities-fund notices out unless the title describes a participation or establishment action.
+  if (title.includes("证券投资基金") && !/(?:参与|发起|设立|合作|共同|投资)/.test(title.replace("证券投资基金", ""))) return false;
+  return true;
+};
 
 /** Public per-issuer disclosure adapter. Default tests inject fixtures and never use live HTTP. */
 export async function fetchIssuerAnnouncements(issuer: ListedIssuer, input: ListedFundInput, deps: { fetch?: typeof fetch; beforeRequest?: () => Promise<void> } = {}): Promise<{ items: ListedAnnouncement[]; gaps: string[] }> {
@@ -144,13 +149,17 @@ export async function fetchIssuerAnnouncements(issuer: ListedIssuer, input: List
       break;
     }
     if (!response.ok) { gaps.push(`${issuer.code} 公告检索服务返回 HTTP ${response.status}；未能读取披露列表。`); break; }
-    let payload: { data?: { list?: unknown[]; total_pages?: unknown; total_count?: unknown } };
+    let payload: { data?: { list?: unknown[]; page_size?: unknown; total_hits?: unknown } };
     try { payload = await jsonResponse(response) as typeof payload; }
     catch { gaps.push(`${issuer.code} 公告检索服务响应无法解析；未能读取披露列表。`); break; }
     const data = payload.data;
     if (!data || !Array.isArray(data.list)) { gaps.push(`${issuer.code} 公告检索服务返回的列表结构不可用；未能读取披露列表。`); break; }
     const rows = data.list;
-    totalPages = Math.max(1, Math.min(500, Number(data.total_pages) || 1));
+    const pageSize = Number(data.page_size);
+    const totalHits = Number(data.total_hits);
+    if (Number.isFinite(pageSize) && pageSize > 0 && Number.isFinite(totalHits) && totalHits >= 0) {
+      totalPages = Math.max(1, Math.min(500, Math.ceil(totalHits / pageSize)));
+    }
     for (const raw of rows) {
       if (!raw || typeof raw !== "object") continue;
       const item = raw as Record<string, unknown>;
@@ -163,7 +172,9 @@ export async function fetchIssuerAnnouncements(issuer: ListedIssuer, input: List
       if (!inDateRange(date, input) || !announcementId || !pdfUrl) continue;
       items.push({ issuer, title, date, url: pdfUrl, announcementId, text: null });
     }
-    if (!rows.length || pageIndex >= totalPages || items.length >= input.maxAnnouncements) break;
+    const pageDates = rows.flatMap((raw) => raw && typeof raw === "object" ? [announcementDate(raw as Record<string, unknown>)] : []).filter((date): date is string => Boolean(date));
+    const oldestDate = pageDates.length ? pageDates.reduce((oldest, date) => date < oldest ? date : oldest) : null;
+    if (!rows.length || (oldestDate !== null && oldestDate < input.startDate) || pageIndex >= totalPages || items.length >= input.maxAnnouncements) break;
     pageIndex += 1;
   }
   if (!items.length && !gaps.length) gaps.push(`${issuer.code} 公告检索返回空列表或没有匹配报告期和关键词的公告；本次检索不能确认不存在相关披露。`);
@@ -174,7 +185,7 @@ export async function fetchIssuerAnnouncements(issuer: ListedIssuer, input: List
   return { items: sorted.slice(0, input.maxAnnouncements), gaps };
 }
 
-function item公告Title(item: Record<string, unknown>) { return item.announcementTitle ?? item.title ?? item.announcementName; }
+function item公告Title(item: Record<string, unknown>) { return item.title ?? item.title_ch ?? item.announcementTitle ?? item.announcementName; }
 
 /** Extract disclosure body text from a PDF, with strict byte and character limits. */
 export async function extractAnnouncementText(url: string, deps: { fetch?: typeof fetch; beforeRequest?: () => Promise<void> } = {}): Promise<string> {
