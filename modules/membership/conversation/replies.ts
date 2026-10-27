@@ -1,4 +1,6 @@
 import {sql} from "@aihot/backend/db";
+import {performance} from "node:perf_hooks";
+import {latencyEvent,type LatencyRoute,type LatencyStatus} from "./latency.ts";
 import {listedCondition} from "@aihot/backend/publication/scope";
 import {enqueueOn} from "@aihot/backend/jobs/queue";
 import {decryptSecret,ilinkConfigured,ilinkErrorKind,sendIlinkText} from "../notifications/ilink.ts";
@@ -75,6 +77,8 @@ async function answer(row:Inbound,help:string):Promise<ReadingAnswer>{
 
 export async function processReadingInbound(id:string):Promise<void>{
   if(process.env.P3_ILINK_READING_REPLIES_ENABLED!=="true")return;
+  const claimStarted=performance.now();
+  let claimDurationMs:number|null=null,route:LatencyRoute="unknown",claimStatus:LatencyStatus="claimed";
   const [owner]=await sql<{user_id:string}[]>`SELECT user_id FROM member_ilink_inbound_messages WHERE id=${id}`;
   if(!owner)return;
   let produced=false;
@@ -83,12 +87,14 @@ export async function processReadingInbound(id:string):Promise<void>{
     const [row]=await tx<Inbound[]>`SELECT id,user_id,binding_version,body,status FROM member_ilink_inbound_messages
       WHERE id=${id} AND expires_at>now() FOR UPDATE SKIP LOCKED`;
     if(!row||row.status!=="pending")return;
+    claimDurationMs=performance.now()-claimStarted;
     const [valid]=await tx`SELECT 1 FROM member_ilink_accounts a JOIN member_weixin_bindings b ON b.user_id=a.user_id AND b.status='active'
       AND b.recipient_id=a.recipient_id AND b.channel_account_id=a.channel_account_id
       JOIN member_notification_settings s ON s.user_id=a.user_id
       WHERE a.user_id=${row.user_id} AND s.binding_version=${row.binding_version}`;
-    if(!valid){await tx`UPDATE member_ilink_inbound_messages SET status='cancelled' WHERE id=${id}`;return;}
+    if(!valid){claimStatus="cancelled";await tx`UPDATE member_ilink_inbound_messages SET status='cancelled' WHERE id=${id}`;return;}
     const intent=readingIntent(row.body);
+    route="reading";
     const needsHelp=!row.body||row.body.length>1000||intent.kind==="help"||intent.kind==="unknown"||intent.kind==="ping";
     const capabilities=needsHelp?await currentIlinkCapabilities(tx,row.user_id,row.binding_version):null;
     const help=capabilities?capabilitiesHelp(capabilities):"";
@@ -102,6 +108,7 @@ export async function processReadingInbound(id:string):Promise<void>{
     }
     const kbIntent=intent.kind==="unknown"&&kbEnabled()?parseKnowledgeIntent(row.body):null;
     if(kbIntent){
+      route="knowledge";
       if(await admitKnowledgeRun(tx,row,kbIntent)){
         await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
         return;
@@ -112,12 +119,14 @@ export async function processReadingInbound(id:string):Promise<void>{
       produced=true;return;
     }
     if(intent.kind==="unknown"&&kbEnabled()&&isKnowledgeCommand(row.body)){
+      route="knowledge";
       await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body)
         VALUES(${id},${id},${row.user_id},${row.binding_version},${(capabilities?.knowledge?'请用“查知识库：问题”“搜知识库：关键词”或“知识库”查看库列表。':'知识库暂时不可用，请检查微信授权。')+help}) ON CONFLICT DO NOTHING`;
       await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
       produced=true;return;
     }
     if(intent.kind==="unknown"&&expertsEnabled()&&(parseExpertIntent(row.body)||isExpertCommand(row.body))){
+      route="expert";
       const expertIntent=parseExpertIntent(row.body);
       const result=expertIntent?await handleExpertInbound(tx,row,expertIntent):
         capabilities?.experts?'请用“列专家”“跑同业看板：企业或赛道”“进度 A”“任务 A 选 1”或“取消 A”。':help;
@@ -128,6 +137,7 @@ export async function processReadingInbound(id:string):Promise<void>{
       produced=true;return;
     }
     if(intent.kind==="unknown"&&agentEnabled()){
+      route="agent";
       const admission=await admitAgentRun(tx,row);
       if(admission==="queued"){
         await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
@@ -147,6 +157,7 @@ export async function processReadingInbound(id:string):Promise<void>{
     await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
     produced=true;
   });
+  if(claimDurationMs!==null)latencyEvent({correlationId:id,stage:"route_claim",route,status:claimStatus,durationMs:claimDurationMs});
   if(produced)await dispatchReadingReply(id);
 }
 
@@ -196,17 +207,26 @@ export async function dispatchReadingReply(id:string):Promise<void>{
       await tx`UPDATE member_ilink_reply_outbox SET status='cancelled',error_code='channel_unavailable' WHERE id=${id}`;return;
     }
     await tx`UPDATE member_ilink_reply_outbox SET status='sending',attempts=attempts+1,lease_expires_at=now()+interval '2 minutes' WHERE id=${id}`;
+    const route:LatencyRoute=reply.agent_run_id?"agent":reply.kb_run_id?"knowledge":reply.expert_grant_id?"expert":"reading";
+    let sendStartedAt:Date|null=null,sendStarted:number|null=null;
     try{
-      await sendIlinkText({botId:recipient.channel_account_id,recipientId:recipient.recipient_id,
+      const account={botId:recipient.channel_account_id,recipientId:recipient.recipient_id,
         token:decryptSecret(recipient.token_ciphertext),base:recipient.api_url,
-        contextToken:decryptSecret(recipient.context_ciphertext)},reply.body,id);
-      await tx`UPDATE member_ilink_reply_outbox SET status='accepted',lease_expires_at=NULL,error_code=NULL WHERE id=${id}`;
+        contextToken:decryptSecret(recipient.context_ciphertext)};
+      sendStartedAt=new Date();sendStarted=performance.now();
+      await sendIlinkText(account,reply.body,id);
+      const acceptedAt=new Date(),durationMs=performance.now()-sendStarted;
+      await tx`UPDATE member_ilink_reply_outbox SET status='accepted',send_started_at=${sendStartedAt},
+        accepted_at=${acceptedAt},lease_expires_at=NULL,error_code=NULL WHERE id=${id}`;
+      latencyEvent({correlationId:id,stage:"send",route,status:"accepted",durationMs});
     }catch(error){
       const kind=ilinkErrorKind(error);
+      if(sendStarted!==null)latencyEvent({correlationId:id,stage:"send",route,status:kind==='unknown'?"unknown":"failed",durationMs:performance.now()-sendStarted});
       if(kind==='rate_limited')await tx`UPDATE member_ilink_reply_outbox SET status='failed',lease_expires_at=NULL,
-        next_attempt_at=now()+interval '1 minute',error_code='rate_limited' WHERE id=${id}`;
+        send_started_at=${sendStartedAt},next_attempt_at=now()+interval '1 minute',error_code='rate_limited' WHERE id=${id}`;
       else{
-        await tx`UPDATE member_ilink_reply_outbox SET status=${kind==='unknown'?'unknown':'cancelled'},lease_expires_at=NULL,error_code=${kind} WHERE id=${id}`;
+        await tx`UPDATE member_ilink_reply_outbox SET status=${kind==='unknown'?'unknown':'cancelled'},
+          send_started_at=${sendStartedAt},lease_expires_at=NULL,error_code=${kind} WHERE id=${id}`;
         if(kind==='requires_rebind'||kind==='needs_interaction')await tx`UPDATE member_ilink_accounts SET channel_state=${kind} WHERE user_id=${reply.user_id}`;
       }
     }

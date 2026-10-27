@@ -1,4 +1,5 @@
 import {sql,type Tx} from "@aihot/backend/db";
+import {latencyEvent} from "./latency.ts";
 import {enqueueOn} from "@aihot/backend/jobs/queue";
 import {authorized,agentEnabled} from "./authorization.ts";
 import {dispatchReadingReply} from "./replies.ts";
@@ -98,7 +99,8 @@ export async function processKnowledgeRun(id:string){
         const found=await searchKnowledgePages(actor,baseId,run.query,"",3,0);
         body=found.pages.length?`找到的知识页：\n${found.pages.map((p,i)=>`${i+1}. ${p.targetName??p.slug}\n${link(String(p.slug))}`).join("\n")}`:words.knowledge_no_coverage;
       }else{
-        const answer=await answerKnowledgeQuestion(actor,baseId,run.query,{short:true});
+        const answer=await answerKnowledgeQuestion(actor,baseId,run.query,{short:true,
+          onModelTiming:(durationMs,status)=>latencyEvent({correlationId:id,stage:"model",route:"knowledge",status,durationMs})});
         answerId=answer.id;
         if(answer.citations.length>3)throw new KnowledgeError("knowledge_answer_unverified");
         const sourceLines=answer.citations.slice(0,3).map((c,i)=>`${i+1}. ${(c.documentTitle??"材料标题未知").slice(0,80)} · ${c.publishedOn??"日期未知"}\n${link(c.pageSlug)}`).join("\n");
