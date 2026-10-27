@@ -40,6 +40,9 @@ test("one compact message represents a hundred long sources and keeps a stable o
   assert.deepEqual(readingIntent("深度1"),{kind:"detail",number:1});
   assert.deepEqual(readingIntent("深度 3"),{kind:"detail",number:3});
   assert.equal(readingIntent("深度6").kind,"unknown");
+  assert.equal(readingIntent("你好").kind,"unknown");
+  assert.equal(readingIntent("嗨").kind,"unknown");
+  assert.deepEqual(readingIntent("在"),{kind:"ping"});
   assert.deepEqual(readingIntent("主题：储能"),{kind:"topic",topic:"储能"});
 });
 
