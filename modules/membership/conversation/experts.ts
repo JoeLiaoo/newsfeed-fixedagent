@@ -15,13 +15,19 @@ const schema=z.discriminatedUnion('action',[
 export type ExpertIntent=z.infer<typeof schema>;
 export function validateExpertAction(value:unknown):ExpertIntent|null{const parsed=schema.safeParse(value);return parsed.success?parsed.data:null;}
 const unsafeInput=(input:string)=>/https?:\/\/|(?:^|\s)(?:SELECT|DROP|INSERT)\s|\.\.\/|\/etc\/|API_KEY|token=/i.test(input);
-export const isExpertCommand=(body:string)=>/^(列专家|专家列表|跑|创建专家任务|进度\s|取消\s|任务\s|跟踪任务\s|停止任务\s)/.test(body.trim());
+// Employees type polite prefixes ("帮我跑…", "请帮我跑…", "麻烦跑…") around the fixed grammar; the prefix is optional everywhere.
+const POLITE='(?:请?帮我|请|麻烦)?\\s*';
+const LIST=new RegExp(`^${POLITE}(列专家|专家列表)$`);
+const NATURAL=new RegExp(`^${POLITE}跑一个(.{2,80})赛道同业看板[。.]?$`);
+const CREATE=new RegExp(`^${POLITE}跑\\s*(全景图|对外投资全景图|同业看板|赛道同业竞争看板|前沿播客)\\s*[:：]\\s*(.{2,200})$`);
+const COMMAND=new RegExp(`^${POLITE}(列专家|专家列表|跑|创建专家任务|进度\\s|取消\\s|任务\\s|跟踪任务\\s|停止任务\\s)`);
+export const isExpertCommand=(body:string)=>COMMAND.test(body.trim());
 export function parseExpertIntent(body:string):ExpertIntent|null{
   const text=body.trim();if(text.length>230)return null;
-  if(/^(列专家|专家列表)$/.test(text))return {action:'experts.list'};
-  const natural=/^帮我跑一个(.{2,80})赛道同业看板[。.]?$/.exec(text);
+  if(LIST.test(text))return {action:'experts.list'};
+  const natural=NATURAL.exec(text);
   if(natural)return unsafeInput(natural[1]!)?null:validateExpertAction({action:'expert.create',slug:WECHAT_EXPERT_SLUGS[1],input:natural[1]!.trim()});
-  const create=/^跑\s*(全景图|对外投资全景图|同业看板|赛道同业竞争看板|前沿播客)\s*[:：]\s*(.{2,200})$/.exec(text);
+  const create=CREATE.exec(text);
   if(create){if(unsafeInput(create[2]!))return null;const slug=create[1]!.includes('全景')?WECHAT_EXPERT_SLUGS[0]:create[1]!.includes('同业')?WECHAT_EXPERT_SLUGS[1]:WECHAT_EXPERT_SLUGS[2];return validateExpertAction({action:'expert.create',slug,input:create[2]!.trim()});}
   const confirm=/^任务\s+([A-Z]{1,4})\s+选\s*([1-9]|10)$/.exec(text);
   if(confirm)return validateExpertAction({action:'expert.confirm_entity',task:confirm[1],selection:Number(confirm[2])});

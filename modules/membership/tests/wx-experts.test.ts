@@ -60,6 +60,15 @@ test('WX-C2 creates once, isolates owners, confirms stored entity and recovers u
   const [otherWatch]=await sql<{task_id:string}[]>`SELECT task_id FROM member_ilink_task_watches WHERE created_inbound_id=${otherCreate}`;
   await inbound(users[1]!,'取消 A');
   assert.equal((await sql<{state:string}[]>`SELECT state FROM member_expert_tasks WHERE id=${otherWatch!.task_id}`)[0]!.state,'cancelled');
+  const politeCreate=await inbound(users[1]!,'帮我跑同业看板：宁德时代');
+  const [politeWatch]=await sql<{task_id:string;alias:string}[]>`SELECT task_id,alias FROM member_ilink_task_watches WHERE created_inbound_id=${politeCreate}`;
+  assert.equal(politeWatch!.alias,'B');
+  assert.match((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${politeCreate}`)[0]!.body,/任务 B 已创建/);
+  const [politeTask]=await sql<{expert_slug:string;input:{query:string}}[]>`SELECT expert_slug,input FROM member_expert_tasks WHERE id=${politeWatch!.task_id}`;
+  assert.equal(politeTask!.expert_slug,'sector-peer-landscape');
+  assert.equal(politeTask!.input.query,'宁德时代');
+  const politeList=await inbound(users[1]!,'请列专家');
+  assert.match((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${politeList}`)[0]!.body,/同业/);
   const bare=await inbound(users[0]!,'2');assert.equal((await sql<{state:string}[]>`SELECT state FROM member_expert_tasks WHERE id=${watch!.task_id}`)[0]!.state,'queued');
   assert.equal((await sql`SELECT 1 FROM member_ilink_reply_outbox WHERE id=${bare}`).length,1);
   await sql`UPDATE member_expert_tasks SET state='waiting_input',stage='choose_entity',result=${sql.json({candidates:[{id:'company-1',name:'企业一'},{id:'company-2',name:'企业二'}]})},updated_at=now()+interval '1 second' WHERE id=${watch!.task_id}`;
