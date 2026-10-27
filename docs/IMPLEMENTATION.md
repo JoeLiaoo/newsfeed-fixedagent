@@ -160,7 +160,9 @@ P2 已交付专家导入、依赖状态、私有任务材料、持久化队列�
 
 2026-10-27 [P1-A 微信队列接续](logs/2026-10-27-P3-04-wx-latency-p1a.md)已随 [PR #166](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/166) 合并（`f09e487`）：微信业务队列和入站 cron 领取显式为 1 秒；Agent 独立领取、按入站批次位置排队，并可通过默认关闭的 wake 开关在完成事务内唤醒其他有待处理消息的员工。分钟恢复仍在，模型并发及调用预算不变；真实手机延迟和 P3-04 验收未完成，保持 `[ ]`。
 
-2026-10-27 [P1-B iLink 入站短事务租约](logs/2026-10-27-P3-04-wx-latency-p1b.md)在每个 Bot 上以 owner／generation／绑定版本围住 60 秒租约，网络轮询移出数据库事务，提交时原子写入入站、cursor、context 和业务队列；分钟调度及 P1-A 顺序和唤醒行为不变。代码与本地并发验证不代表已合并、已发布或真实手机验收；P3-04 保持 `[ ]`。
+2026-10-27 [P1-B iLink 入站短事务租约](logs/2026-10-27-P3-04-wx-latency-p1b.md)已随 [PR #168](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/168) 合并（`2869973`）：每个 Bot 以 owner／generation／绑定版本围住 60 秒租约，网络轮询移出数据库事务，原子写入入站、cursor、context 和业务队列。生产发布及真实手机验收仍待核对；P3-04 保持 `[ ]`。
+
+2026-10-27 [P1-C 逐 Bot 快速轮询](logs/2026-10-27-P3-04-wx-latency-p1c.md)新增默认关闭的逐账号持续 pg-boss 轮询、显式员工灰度名单、分钟补漏及独立小时保活；短事务租约、入站去重、P1-A 排序／唤醒和模型预算保持原约束。代码及本地合成验证不代表已合并、已发布或真机延迟达标；P3-04 保持 `[ ]`。
 
 P3 的 GP 管理、快照证据、AI 分类审核、微信绑定与持久化 outbox **已在 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并至 `main`**（合并提交 `3048ef48`）；全仓审查整改及通知分片、退订／解绑并发修复 **已在 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并**（合并提交 `2c98e53`）。PR #15 的独立员工扫码授权、多账号 iLink 推送与恢复代码已部署。2026-10-22 按用户指示启用扫码、GP 同步、通知生成与投递四项开关。PR #22（`8a84319`）已部署：二维码新标签页、明确扫码反馈和入站消息状态框已上线。2026-10-23 对两个已绑定账号各发送一条连通性测试通知，outbox 显示 `accepted=2`；用户已确认两台手机均收到。跨日投递和失效恢复仍待验证，并需完成 GP 主体与事件核验及实际同步。P3-01～P3-04 保持 `[ ]`。详情见[双用户抽测日志](logs/2026-10-23-P3-04-live-push-smoke.md)、[手机端收件确认记录](logs/2026-10-23-P3-04-handset-receipt.md)、[开关启用记录](logs/2026-10-22-P3-flags-enabled.md)及[联调和上线闸门](P3-OPERATIONS.md)。
 
