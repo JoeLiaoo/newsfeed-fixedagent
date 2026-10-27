@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
 import {createIlinkQr,decryptSecret,encryptSecret,ilinkErrorKind,pollIlinkInbox,pollIlinkQr,
- sendIlinkText,trustedIlinkBase} from "../notifications/ilink.ts";
+ parseIlinkInbound,sendIlinkText,trustedIlinkBase} from "../notifications/ilink.ts";
 
 test("iLink provider boundary encrypts tokens and rejects origin redirects",async()=>{
   const before=process.env.P3_ILINK_CREDENTIAL_KEY;
@@ -15,6 +15,14 @@ test("iLink provider boundary encrypts tokens and rejects origin redirects",asyn
     assert.throws(()=>trustedIlinkBase("http://ilinkai.weixin.qq.com"));
     assert.throws(()=>trustedIlinkBase("https://ilinkai.weixin.qq.com:4444"));
   }finally{if(before===undefined)delete process.env.P3_ILINK_CREDENTIAL_KEY;else process.env.P3_ILINK_CREDENTIAL_KEY=before;}
+});
+test("iLink batch keeps only complete user text with reliable IDs",()=>{
+  const text=(id:unknown,from="user-A",state=2)=>({message_id:id,seq:"12",from_user_id:from,to_user_id:"bot-A",
+    message_type:2,message_state:state,item_list:[{type:1,text_item:{text:"深读 2"}}],context_token:"ctx"});
+  const messages=parseIlinkInbound([text("m1"),text("m2"),text("echo","bot-A"),text("partial","user-A",1),
+    text(Number.MAX_SAFE_INTEGER+2),{...text("media"),item_list:[{type:2}]}],{botId:"bot-A",recipientId:"user-A"});
+  assert.deepEqual(messages.map(message=>message.id),["m1","m2","media"]);
+  assert.equal(messages[2]!.text,"");
 });
 test("iLink QR auth and notification transport route to exactly one member",async()=>{
   const calls:Array<{url:string;headers:Headers;body:any}>=[];

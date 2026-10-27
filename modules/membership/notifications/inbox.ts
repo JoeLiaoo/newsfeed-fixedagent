@@ -1,7 +1,9 @@
 // One bounded inbound poll per iLink bot. PgBoss runs this as a singleton; row locks
 // additionally serialize polls with unbind and prevent two workers consuming one cursor.
-import {createHash} from "node:crypto";
+import {createHash,randomUUID} from "node:crypto";
 import {sql,type Tx} from "@aihot/backend/db";
+import {enqueueOn} from "@aihot/backend/jobs/queue";
+import {READING_QUEUE} from "../conversation/queue.ts";
 import {decryptSecret,encryptSecret,ilinkConfigured,ilinkErrorKind,pollIlinkInbox,sendIlinkText} from "./ilink.ts";
 
 const GREETING_TEXT="已连接，之后会在这里推送。";
@@ -9,6 +11,7 @@ const KEEPALIVE_TEXT="【News Feed】推送通道即将失效。请随便回一�
 type AccountRow={
   user_id:string;recipient_id:string;channel_account_id:string;token_ciphertext:string;
   api_url:string;cursor_ciphertext:string|null;greeted_at:Date|null;
+  binding_version:number;
 };
 /** One confirmation per account; the same key makes a retry after a failed send the same message. */
 const greetingId=(userId:string)=>"ilink-greet-"+createHash("sha256").update(userId).digest("hex").slice(0,32);
@@ -68,8 +71,10 @@ export async function pollMemberIlinkInboxes() {
   let checked=0,recovered=0,greeted=0;
   for(let start=0;start<accounts.length;start+=5){
     await Promise.all(accounts.slice(start,start+5).map(async account=>sql.begin(async tx=>{
-      const [row]=await tx<AccountRow[]>`SELECT a.user_id,a.recipient_id,a.channel_account_id,a.token_ciphertext,a.api_url,a.cursor_ciphertext,a.greeted_at
-        FROM member_ilink_accounts a WHERE a.user_id=${account.user_id} FOR UPDATE SKIP LOCKED`;
+      const [row]=await tx<AccountRow[]>`SELECT a.user_id,a.recipient_id,a.channel_account_id,a.token_ciphertext,a.api_url,a.cursor_ciphertext,a.greeted_at,
+        COALESCE(s.binding_version,1) AS binding_version
+        FROM member_ilink_accounts a LEFT JOIN member_notification_settings s ON s.user_id=a.user_id
+        WHERE a.user_id=${account.user_id} FOR UPDATE OF a SKIP LOCKED`;
       if(!row)return;
       checked++;
       try{
@@ -77,6 +82,13 @@ export async function pollMemberIlinkInboxes() {
           botId:row.channel_account_id,recipientId:row.recipient_id,token:decryptSecret(row.token_ciphertext),
           base:row.api_url,cursor:row.cursor_ciphertext?decryptSecret(row.cursor_ciphertext):null,
         });
+        for(const message of result.messages){
+          const readingEnabled=process.env.P3_ILINK_READING_REPLIES_ENABLED==="true";
+          const [inserted]=await tx<{id:string}[]>`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,seq,body,status)
+            VALUES(${randomUUID()},${row.user_id},${row.binding_version},${row.channel_account_id},${message.id},${message.seq},${message.text.slice(0,4096)},${readingEnabled?'pending':'ignored'})
+            ON CONFLICT(bot_id,upstream_id) DO NOTHING RETURNING id`;
+          if(inserted&&readingEnabled)await enqueueOn(READING_QUEUE,{inboundId:inserted.id},{singletonKey:inserted.id},tx);
+        }
         if(result.hadInbound && result.contextToken){
           recovered++;
           await tx`UPDATE member_ilink_accounts SET
@@ -87,7 +99,7 @@ export async function pollMemberIlinkInboxes() {
           // Only formerly blocked, recent messages are eligible; outbox expiry is enforced by dispatcher.
           await tx`UPDATE member_notification_outbox SET status='failed',next_attempt_at=now(),error_code=NULL
             WHERE user_id=${row.user_id} AND status='failed' AND error_code='needs_interaction'`;
-          if(await confirmConnection(tx,row,result.contextToken))greeted++;
+          if(process.env.P3_ILINK_READING_REPLIES_ENABLED!=="true"&&await confirmConnection(tx,row,result.contextToken))greeted++;
         }else{
           await tx`UPDATE member_ilink_accounts SET cursor_ciphertext=${result.cursor?encryptSecret(result.cursor):null},
             updated_at=now() WHERE user_id=${row.user_id}`;
@@ -132,6 +144,15 @@ export async function nudgeNearExpiryIlinkChannels(now=new Date()):Promise<{nudg
       if(!row||!keepaliveNudgeEligible({channelState:row.channel_state,hasContext:!!row.context_ciphertext,
         lastInboundAt:row.last_inbound_at,nudgedAt:row.keepalive_nudged_at,now,thresholdHours,
         deliveryEnabled:process.env.P3_DELIVERY_ENABLED==="true"}))return false;
+      if(process.env.P3_NEWS_COMPACT_ENABLED==="true"){
+        const [paused]=await tx`SELECT 1 FROM member_notification_settings
+          WHERE user_id=${row.user_id} AND paused_until>now()`;
+        if(paused)return false;
+        const [recent]=await tx`SELECT 1 FROM member_notification_outbox o
+          JOIN member_news_compact_editions e ON e.outbox_id=o.id
+          WHERE o.user_id=${row.user_id} AND o.status='accepted' AND o.accepted_at>${new Date(now.getTime()-30*60*1000)} LIMIT 1`;
+        if(recent)return false;
+      }
       try{
         await sendIlinkText({botId:row.channel_account_id,recipientId:row.recipient_id,token:decryptSecret(row.token_ciphertext),
           base:row.api_url,contextToken:decryptSecret(row.context_ciphertext)},KEEPALIVE_TEXT,

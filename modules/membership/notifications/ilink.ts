@@ -85,6 +85,27 @@ export async function pollIlinkQr(code:string,base=ILINK_ROOT,verifyCode?:string
     redirectHost:typeof result.redirect_host==="string"?result.redirect_host:""};
 }
 export type IlinkAccount={botId:string;recipientId:string;token:string;base:string;contextToken?:string|null;cursor?:string|null};
+export type IlinkInbound={id:string;seq:string|null;text:string;contextToken:string};
+const reliableId=(value:unknown)=>typeof value==="string"&&value.length>0&&value.length<=200?value:
+  typeof value==="number"&&Number.isSafeInteger(value)?String(value):"";
+export function parseIlinkInbound(messages:unknown[],account:Pick<IlinkAccount,"botId"|"recipientId">):IlinkInbound[]{
+  const parsed:IlinkInbound[]=[];
+  for(const raw of messages){
+    const msg=obj(raw);
+    if(msg.from_user_id!==account.recipientId||msg.to_user_id!==account.botId||
+      msg.message_type!==2||msg.message_state!==2)continue;
+    const id=reliableId(msg.message_id);
+    if(!id)continue;
+    const items=Array.isArray(msg.item_list)?msg.item_list:[];
+    if(items.length!==1)continue;
+    const item=obj(items[0]);
+    const rawText=obj(item.text_item).text;
+    if(item.type===1&&(typeof rawText!=="string"||!rawText.length))continue;
+    parsed.push({id,seq:reliableId(msg.seq)||null,text:item.type===1?(rawText as string).slice(0,4096):"",
+      contextToken:str(msg.context_token,8192)});
+  }
+  return parsed;
+}
 export async function sendIlinkText(account:IlinkAccount,text:string,id:string,fetcher?:typeof fetch) {
   if(!text||text.length>1600||!account.token||!account.recipientId||!account.botId)throw new Error("invalid_ilink_send");
   const response=await ilinkRequest(account.base,"/ilink/bot/sendmessage",{
@@ -101,9 +122,11 @@ export async function pollIlinkInbox(account:IlinkAccount,fetcher?:typeof fetch)
     payload:{get_updates_buf:account.cursor??"",base_info:baseInfo},
   });
   const messages=Array.isArray(response.msgs)?response.msgs.map(obj):[];
+  const inbound=parseIlinkInbound(messages,account);
   const latest=messages.filter(m=>m.from_user_id===account.recipientId&&m.to_user_id===account.botId)
     .map(m=>str(m.context_token,8192)).filter(Boolean).at(-1);
-  return {cursor:str(response.get_updates_buf,16384)||account.cursor||"",contextToken:latest??null,hadInbound:messages.some(m=>m.from_user_id===account.recipientId&&m.to_user_id===account.botId)};
+  return {cursor:str(response.get_updates_buf,16384)||account.cursor||"",contextToken:latest??null,
+    hadInbound:messages.some(m=>m.from_user_id===account.recipientId&&m.to_user_id===account.botId),messages:inbound};
 }
 export function ilinkErrorKind(error:unknown):"needs_interaction"|"requires_rebind"|"rate_limited"|"unknown"{
   const x=error as {ret?:number;errcode?:number;message?:string};

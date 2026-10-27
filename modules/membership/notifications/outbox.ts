@@ -5,6 +5,7 @@ import { beijingDate, beijingTime } from "@aihot/contracts/time";
 import { dueNotificationKinds, offDay } from "../gp/core.ts";
 import { employeeSource } from "../gp/source.ts";
 import { getDailyDigest, type DigestItem } from "./digest.ts";
+import {compactItems,compactSourceHash,renderCompactNewsDigest,type CompactItem} from "./presentation.ts";
 import {decryptSecret,ilinkConfigured,ilinkErrorKind,sendIlinkText} from "./ilink.ts";
 
 const sha256=(value:string)=>createHash("sha256").update(value).digest("hex");
@@ -93,6 +94,7 @@ export async function generateDueNotifications(now=new Date()) {
       let digestPreferenceVersion:number|null=null;
       const subscriptionVersion=kind==="news"?user.news_version:user.gp_version;
       let candidates:Candidate[]=[];
+      let digestItems:DigestItem[]=[];
       if(kind==="gp"){
         const [cursor]=await sql<{last_at:Date|null}[]>`SELECT max(window_end_at) AS last_at FROM member_notification_outbox
           WHERE user_id=${user.id} AND kind='gp' AND binding_version=${user.binding_version} AND subscription_version=${subscriptionVersion}`;
@@ -109,6 +111,7 @@ export async function generateDueNotifications(now=new Date()) {
       }else{
         const digest=await getDailyDigest(user.id,day,now);
         if(!digest) continue;
+        digestItems=digest.items;
         editionCutoff=digest.cutoff_at;
         digestPreferenceVersion=digest.preference_version;
         for(const item of digest.items as DigestItem[]) candidates.push({
@@ -126,12 +129,21 @@ export async function generateDueNotifications(now=new Date()) {
           WHERE user_id=${user.id} AND kind=${kind} AND source_key=ANY(${tx.array(candidates.map(item=>item.seenKey))}::text[])`:[];
         const seenSet=new Set(seenRows.map(row=>row.source_key));
         const available=candidates.filter(item=>!seenSet.has(item.seenKey));
-        const currentParts=splitNotificationParts(headline,available);
+        const compact=kind==="news"&&process.env.P3_NEWS_COMPACT_ENABLED==="true";
+        const displayed=compact?compactItems(digestItems.filter(item=>available.some(candidate=>candidate.key===item.source_key))):[];
+        const currentParts=compact?[{payload:renderCompactNewsDigest(day,available.length,displayed,
+          process.env.P3_ILINK_READING_REPLIES_ENABLED==="true"),sources:[]}]:splitNotificationParts(headline,available);
         for(let index=0;index<currentParts.length;index++){
           const part=currentParts[index]!;
           const id=randomUUID();
           await tx`INSERT INTO member_notification_outbox(id,user_id,kind,local_date,binding_version,subscription_version,part_index,payload,payload_sha256,window_end_at,digest_preference_version,sources_tracked)
             VALUES(${id},${user.id},${kind},${day}::date,${user.binding_version},${subscriptionVersion},${index},${part.payload},${sha256(part.payload)},${editionCutoff},${digestPreferenceVersion},true)`;
+          if(compact)await tx`INSERT INTO member_news_compact_editions(outbox_id,user_id,binding_version,local_date,preference_version,total_count,displayed_items)
+            VALUES(${id},${user.id},${user.binding_version},${day}::date,${digestPreferenceVersion},${available.length},${tx.json(displayed as never)})`;
+          if(compact){
+            for(const item of displayed)await tx`INSERT INTO member_notification_seen(user_id,kind,source_key,outbox_id)
+              VALUES(${user.id},'news',${item.key},${id}) ON CONFLICT DO NOTHING`;
+          }
           for(const [segmentIndex,source] of part.sources.entries()){
             await tx`INSERT INTO member_notification_outbox_sources(outbox_id,segment_index,source_key,source_start,source_end)
               VALUES(${id},${segmentIndex},${source.key},${source.start},${source.end}) ON CONFLICT DO NOTHING`;
@@ -185,6 +197,31 @@ async function cancelAndRelease(id:string,errorCode:string,db?:Db):Promise<void>
 
 export async function revalidatePayload(job:OutboxRow):Promise<string|null>{
   if(!job.sources_tracked){await cancelAndRelease(job.id,"legacy_source_untracked");return null;}
+  if(job.kind==="news"){
+    const [edition]=await sql<{displayed_items:CompactItem[];total_count:number}[]>`SELECT displayed_items,total_count FROM member_news_compact_editions WHERE outbox_id=${job.id}`;
+    if(edition){
+      const displayed:CompactItem[]=[];
+      for(const item of edition.displayed_items){
+        const [current]=await sql<{title:string;summary:string|null;url:string;source_name:string;tags:string[];timeline_at:Date}[]>`SELECT p.title,p.summary,p.url,s.name AS source_name,p.tags,p.timeline_at
+          FROM publications p JOIN sources s ON s.id=p.source_id
+          WHERE COALESCE('story:'||p.story_id::text,'fact:'||p.fact_id::text,'article:'||p.article_id)=${item.key}
+            AND ${listedCondition(new Date())}
+            AND EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${job.user_id} AND t.tag=ANY(p.tags))
+          ORDER BY p.timeline_at DESC LIMIT 1`;
+        if(current)displayed.push({...item,title:current.title,summary:current.summary,url:current.url,source:current.source_name,
+          tags:current.tags,timeline:current.timeline_at.toISOString(),sourceHash:compactSourceHash({...current,source:current.source_name})});
+        else await sql`DELETE FROM member_notification_seen WHERE outbox_id=${job.id} AND source_key=${item.key}`;
+      }
+      if(edition.displayed_items.length&&!displayed.length){await cancelAndRelease(job.id,"source_no_longer_visible");return null;}
+      const payload=renderCompactNewsDigest(job.local_date,Math.max(0,edition.total_count-edition.displayed_items.length+displayed.length),displayed,
+        process.env.P3_ILINK_READING_REPLIES_ENABLED==="true");
+      const [updated]=await sql<{id:string}[]>`UPDATE member_notification_outbox SET payload=${payload},payload_sha256=${sha256(payload)}
+        WHERE id=${job.id} AND status='sending' RETURNING id`;
+      if(updated)await sql`UPDATE member_news_compact_editions SET displayed_items=${sql.json(displayed as never)},
+        total_count=${Math.max(0,edition.total_count-edition.displayed_items.length+displayed.length)} WHERE outbox_id=${job.id}`;
+      return updated?payload:null;
+    }
+  }
   const sources=await sql<{segment_index:number;source_key:string;source_start:number;source_end:number}[]>`SELECT segment_index,source_key,source_start,source_end
     FROM member_notification_outbox_sources WHERE outbox_id=${job.id} ORDER BY segment_index`;
   if(!sources.length) return job.payload;
@@ -314,6 +351,12 @@ export async function dispatchOutbox({revalidate=revalidatePayload,post=fetch}:D
           const result=await response.json() as {accepted?:boolean;messageId?:string};
           if(result.accepted!==true) throw new Error("ambiguous_bridge_receipt");
           await tx`UPDATE member_notification_outbox SET status='accepted',lease_expires_at=NULL,accepted_at=now(),channel_message_id=${result.messageId??null},error_code=NULL WHERE id=${job.id}`;
+          if(job.kind==="news"){
+            const [edition]=await tx`SELECT outbox_id FROM member_news_compact_editions WHERE outbox_id=${job.id}`;
+            if(edition)await tx`INSERT INTO member_ilink_conversations(user_id,binding_version,outbox_id)
+              VALUES(${job.user_id},${job.binding_version},${job.id}) ON CONFLICT(user_id) DO UPDATE
+              SET binding_version=EXCLUDED.binding_version,outbox_id=EXCLUDED.outbox_id,page=0,updated_at=now()`;
+          }
           return true;
         }else {
           // A 5xx may happen after the channel accepted the message. Do not auto-retry.
@@ -330,6 +373,9 @@ export async function dispatchOutbox({revalidate=revalidatePayload,post=fetch}:D
 }
 
 export async function cleanupP3Data() {
-  // Legacy hand-entered binding challenge tables are removed by migration.
+  // Retain message IDs longer than text, so a delayed duplicate cannot create a new reply.
+  await sql`DELETE FROM member_ilink_reply_outbox WHERE created_at<now()-interval '7 days'`;
+  await sql`UPDATE member_ilink_inbound_messages SET body='' WHERE expires_at<now() AND body<>''`;
+  await sql`DELETE FROM member_ilink_inbound_messages WHERE created_at<now()-interval '30 days'`;
   return {legacyWeixinBindingDisabled:true};
 }
