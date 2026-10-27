@@ -2,6 +2,7 @@ import {createHash,randomBytes} from "node:crypto";
 import {sql,type Db,type Tx} from "@aihot/backend/db";
 import {enqueueOn} from "@aihot/backend/jobs/queue";
 import {EXPERT_QUEUE} from "./queue.ts";
+import {enqueueExpertTaskEventWake} from "../conversation/task-events.ts";
 import {PANORAMA_EXPERT_SLUG,SECTOR_PEER_EXPERT_SLUG,FRONTIER_PODCAST_EXPERT_SLUG,EXPERT_SLUG,LISTED_FUND_PARTICIPATION_EXPERT_SLUG,XINHUA_ALLOWED_TOOLS,XINHUA_BASE_TOOLS,COMING_SOON_EXPERT_STATUS,HIDDEN_EXPERT_STATUS} from "./catalog.ts";
 import {seedBuiltinExperts} from "./seed.ts";
 
@@ -93,18 +94,22 @@ export async function confirmExpertEntity(actor:ExpertActor,id:string,companyId:
     if(opts.expectedVersion&&task.updated_at.getTime()!==opts.expectedVersion.getTime())throw new ExpertServiceError('entity_version_changed');
     const entity=task.result?.candidates?.find(candidate=>candidate.id===companyId);
     if(!entity)throw new ExpertServiceError('task_or_entity_not_found');
-    if(task.confirmed_attempts>=3){await tx`UPDATE member_expert_tasks SET state='failed',stage='failed',error_code='expert_retry_exhausted',error_message='确认后的执行次数已用尽，请重新提交。',finished_at=now(),updated_at=now() WHERE id=${id}`;return {id,state:'failed'};}
+    if(task.confirmed_attempts>=3){await tx`UPDATE member_expert_tasks SET state='failed',stage='failed',error_code='expert_retry_exhausted',error_message='确认后的执行次数已用尽，请重新提交。',finished_at=now(),updated_at=now() WHERE id=${id}`;await enqueueExpertTaskEventWake(id,tx);return {id,state:'failed'};}
     await tx`UPDATE member_expert_tasks SET selected_entity=${tx.json(entity)},state='queued',stage='queued',result=NULL,updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${id}`;
     await enqueueOn(EXPERT_QUEUE,{taskId:id},{singletonKey:id},tx);
     return {id,state:'queued'};
   };
   return opts.tx?work(opts.tx):sql.begin(work);
 }
-export async function cancelExpertTask(actor:ExpertActor,id:string,db:Db|Tx=sql){
-  await checkExpertActor(actor,db);
-  const rows=await db`UPDATE member_expert_tasks SET state='cancelled',stage='cancelled',updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${id} AND user_id=${actor.userId} AND state IN ('queued','waiting_input','running') RETURNING id`;
-  if(!rows.length)throw new ExpertServiceError('task_not_cancellable');
-  return {id,state:'cancelled'};
+export async function cancelExpertTask(actor:ExpertActor,id:string,tx?:Tx){
+  const work=async(tx:Tx)=>{
+    await checkExpertActor(actor,tx);
+    const rows=await tx`UPDATE member_expert_tasks SET state='cancelled',stage='cancelled',updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${id} AND user_id=${actor.userId} AND state IN ('queued','waiting_input','running') RETURNING id`;
+    if(!rows.length)throw new ExpertServiceError('task_not_cancellable');
+    await enqueueExpertTaskEventWake(id,tx);
+    return {id,state:'cancelled'};
+  };
+  return tx?work(tx):sql.begin(work);
 }
 function aliasFor(sequence:number){let n=sequence,s='';do{s=String.fromCharCode(65+n%26)+s;n=Math.floor(n/26)-1;}while(n>=0);return s;}
 export async function watchExpertTask(actor:ExpertActor,id:string,inboundId:string,tx:Tx){
