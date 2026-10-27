@@ -73,3 +73,20 @@ test("iLink QR auth and notification transport route to exactly one member",asyn
   assert.equal(ilinkErrorKind({ret:-2,message:"session not ready"}),"needs_interaction");
   assert.equal(ilinkErrorKind({ret:-2,message:"rate limited"}),"rate_limited");
 });
+
+test("iLink getupdates aborts when its worker shuts down",async()=>{
+  const shutdown=new AbortController();
+  let started!:()=>void;
+  const requestStarted=new Promise<void>(resolve=>{started=resolve;});
+  const fetcher:typeof fetch=async(_input,init)=>{
+    started();
+    return new Promise<Response>((_resolve,reject)=>{
+      init!.signal!.addEventListener("abort",()=>reject(init!.signal!.reason),{once:true});
+    });
+  };
+  const pending=pollIlinkInbox({botId:"bot-A",recipientId:"user-A",token:"fixture",
+    base:"https://ilinkai.weixin.qq.com"},fetcher,shutdown.signal);
+  await requestStarted;
+  shutdown.abort(new Error("worker shutdown"));
+  await assert.rejects(pending,/worker shutdown/);
+});

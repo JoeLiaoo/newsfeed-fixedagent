@@ -1,0 +1,1 @@
+ALTER TABLE member_ilink_accounts ADD COLUMN poll_lease_expires_at timestamptz;

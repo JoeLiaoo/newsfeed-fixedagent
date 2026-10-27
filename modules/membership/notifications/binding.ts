@@ -41,7 +41,8 @@ export async function completeIlinkBinding(userId:string,sessionHash:string,scan
       VALUES(${userId},${identity.recipientId},${identity.channelAccountId},${encryptSecret(identity.botToken)},${identity.base},'needs_interaction')
       ON CONFLICT(user_id) DO UPDATE SET recipient_id=EXCLUDED.recipient_id,channel_account_id=EXCLUDED.channel_account_id,
       token_ciphertext=EXCLUDED.token_ciphertext,api_url=EXCLUDED.api_url,channel_state='needs_interaction',
-      context_ciphertext=NULL,cursor_ciphertext=NULL,greeted_at=NULL,last_inbound_at=NULL,updated_at=now()`;
+      context_ciphertext=NULL,cursor_ciphertext=NULL,greeted_at=NULL,last_inbound_at=NULL,
+      poll_lease_owner=NULL,poll_lease_expires_at=NULL,updated_at=now()`;
     await tx`INSERT INTO member_weixin_bindings(user_id,recipient_id,channel_account_id)
       VALUES(${userId},${identity.recipientId},${identity.channelAccountId})
       ON CONFLICT(user_id) DO UPDATE SET recipient_id=EXCLUDED.recipient_id,channel_account_id=EXCLUDED.channel_account_id,status='active',bound_at=now()`;

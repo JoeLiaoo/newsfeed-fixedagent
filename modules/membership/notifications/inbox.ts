@@ -1,9 +1,9 @@
-// One bounded inbound poll per iLink bot. PgBoss runs this as a singleton; row locks
-// additionally serialize polls with unbind and prevent two workers consuming one cursor.
+// Each bot has one database-fenced poll lease. Network I/O never holds a database transaction.
 import {createHash,randomUUID} from "node:crypto";
 import {performance} from "node:perf_hooks";
-import {sql,type Tx} from "@aihot/backend/db";
+import {sql} from "@aihot/backend/db";
 import {enqueueOn} from "@aihot/backend/jobs/queue";
+import {shutdownSignal} from "@aihot/backend/jobs/queue";
 import {READING_QUEUE} from "../conversation/queue.ts";
 import {latencyEvent} from "../conversation/latency.ts";
 import {decryptSecret,encryptSecret,ilinkConfigured,ilinkErrorKind,pollIlinkInbox,sendIlinkText} from "./ilink.ts";
@@ -14,7 +14,11 @@ type AccountRow={
   user_id:string;recipient_id:string;channel_account_id:string;token_ciphertext:string;
   api_url:string;cursor_ciphertext:string|null;greeted_at:Date|null;
   binding_version:number;
+  poll_lease_generation:number;
 };
+type PollLease={row:AccountRow;owner:string;generation:number};
+type PollResult=Awaited<ReturnType<typeof pollIlinkInbox>>;
+const POLL_LEASE_SECONDS=60; // 39s client timeout plus 21s for response parsing and commit.
 /** One confirmation per account; the same key makes a retry after a failed send the same message. */
 const greetingId=(userId:string)=>"ilink-greet-"+createHash("sha256").update(userId).digest("hex").slice(0,32);
 /** Postgres hands a timestamptz over as a Date; a text column or a JSON round-trip may bring a string. */
@@ -49,8 +53,16 @@ export function keepaliveNudgeId(userId:string,lastInboundAt:Date|string):string
  * without the bot having to hold a conversation. Only the connection is confirmed; no other
  * message is answered, and the delivery switch governs every send to the channel.
  */
-async function confirmConnection(tx:Tx,row:AccountRow,contextToken:string){
+async function confirmConnection(row:AccountRow,contextToken:string){
   if(process.env.P3_DELIVERY_ENABLED!=="true"||row.greeted_at)return false;
+  const [valid]=await sql`SELECT 1 FROM member_ilink_accounts a
+    JOIN member_notification_settings s ON s.user_id=a.user_id
+    JOIN member_weixin_bindings b ON b.user_id=a.user_id AND b.status='active'
+    WHERE a.user_id=${row.user_id} AND s.binding_version=${row.binding_version}
+      AND a.channel_account_id=${row.channel_account_id} AND a.recipient_id=${row.recipient_id}
+      AND b.channel_account_id=a.channel_account_id AND b.recipient_id=a.recipient_id
+      AND a.greeted_at IS NULL`;
+  if(!valid)return false;
   try{
     await sendIlinkText({
       botId:row.channel_account_id,recipientId:row.recipient_id,token:decryptSecret(row.token_ciphertext),
@@ -60,71 +72,128 @@ async function confirmConnection(tx:Tx,row:AccountRow,contextToken:string){
     // The confirmation is retried with the next inbound message; nothing else is sent.
     return false;
   }
-  await tx`UPDATE member_ilink_accounts SET greeted_at=now() WHERE user_id=${row.user_id}`;
-  return true;
+  const updated=await sql`UPDATE member_ilink_accounts a SET greeted_at=clock_timestamp()
+    FROM member_notification_settings s,member_weixin_bindings b
+    WHERE a.user_id=${row.user_id} AND s.user_id=a.user_id AND b.user_id=a.user_id
+      AND s.binding_version=${row.binding_version} AND b.status='active'
+      AND b.channel_account_id=${row.channel_account_id} AND b.recipient_id=${row.recipient_id}
+      AND a.channel_account_id=${row.channel_account_id} AND a.recipient_id=${row.recipient_id}
+      AND a.greeted_at IS NULL RETURNING a.user_id`;
+  return updated.length>0;
+}
+
+/** Binding writers take the same advisory lock before changing settings/account rows. */
+export async function claimIlinkPoll(userId:string):Promise<PollLease|null>{
+  if(shutdownSignal.signal.aborted)return null;
+  return sql.begin(async tx=>{
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${userId}))`;
+    await tx`INSERT INTO member_notification_settings(user_id) VALUES(${userId}) ON CONFLICT DO NOTHING`;
+    const [settings]=await tx<{binding_version:number}[]>`SELECT binding_version FROM member_notification_settings WHERE user_id=${userId} FOR UPDATE`;
+    const [row]=await tx<(AccountRow&{lease_live:boolean})[]>`
+      SELECT a.user_id,a.recipient_id,a.channel_account_id,a.token_ciphertext,a.api_url,
+        a.cursor_ciphertext,a.greeted_at,a.poll_lease_generation,
+        (a.poll_lease_expires_at>clock_timestamp()) AS lease_live,
+        COALESCE(${settings?.binding_version??1},1)::integer AS binding_version
+      FROM member_ilink_accounts a
+      JOIN member_weixin_bindings b ON b.user_id=a.user_id AND b.status='active'
+        AND b.recipient_id=a.recipient_id AND b.channel_account_id=a.channel_account_id
+      JOIN member_users u ON u.id=a.user_id AND u.status='active'
+      WHERE a.user_id=${userId} FOR UPDATE OF a`;
+    if(!row||row.lease_live)return null;
+    const owner=randomUUID();
+    const [claimed]=await tx<{poll_lease_generation:number}[]>`UPDATE member_ilink_accounts
+      SET poll_lease_owner=${owner}::uuid,poll_lease_generation=poll_lease_generation+1,
+        poll_lease_expires_at=clock_timestamp()+${POLL_LEASE_SECONDS}*interval '1 second'
+      WHERE user_id=${userId} RETURNING poll_lease_generation`;
+    return {row,owner,generation:claimed!.poll_lease_generation};
+  });
+}
+
+/** A stale response changes nothing, including the cursor and business queue. */
+export async function settleIlinkPoll(lease:PollLease,result?:PollResult,error?:unknown):Promise<{recovered:boolean;greeting:string|null;committed:boolean}>{
+  const {row,owner,generation}=lease;
+  return sql.begin(async tx=>{
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${row.user_id}))`;
+    const [settings]=await tx<{binding_version:number}[]>`SELECT binding_version FROM member_notification_settings WHERE user_id=${row.user_id} FOR UPDATE`;
+    const [current]=await tx<{user_id:string}[]>`SELECT a.user_id FROM member_ilink_accounts a
+      JOIN member_weixin_bindings b ON b.user_id=a.user_id AND b.status='active'
+        AND b.recipient_id=a.recipient_id AND b.channel_account_id=a.channel_account_id
+      JOIN member_users u ON u.id=a.user_id AND u.status='active'
+      WHERE a.user_id=${row.user_id} AND a.channel_account_id=${row.channel_account_id}
+        AND a.recipient_id=${row.recipient_id} AND a.poll_lease_owner=${owner}::uuid
+        AND a.poll_lease_generation=${generation} AND a.poll_lease_expires_at>clock_timestamp()
+      FOR UPDATE OF a`;
+    if(!current||settings?.binding_version!==row.binding_version)return {recovered:false,greeting:null,committed:false};
+    let greeting:string|null=null;
+    if(result){
+      for(const [pollPosition,message] of result.messages.entries()){
+        const readingEnabled=process.env.P3_ILINK_READING_REPLIES_ENABLED==="true";
+        const [inserted]=await tx<{id:string}[]>`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,seq,body,status,received_at,poll_position)
+          VALUES(${randomUUID()},${row.user_id},${row.binding_version},${row.channel_account_id},${message.id},${message.seq},${message.text.slice(0,4096)},${readingEnabled?'pending':'ignored'},${result.receivedAt},${pollPosition})
+          ON CONFLICT(bot_id,upstream_id) DO NOTHING RETURNING id`;
+        if(inserted&&readingEnabled)await enqueueOn(READING_QUEUE,{inboundId:inserted.id},{singletonKey:inserted.id},tx);
+      }
+      if(result.hadInbound&&result.contextToken){
+        await tx`UPDATE member_ilink_accounts SET
+          cursor_ciphertext=${result.cursor?encryptSecret(result.cursor):null},
+          context_ciphertext=${encryptSecret(result.contextToken)},channel_state='active',
+          last_inbound_at=${result.receivedAt},updated_at=clock_timestamp()
+          WHERE user_id=${row.user_id}`;
+        await tx`UPDATE member_notification_outbox SET status='failed',next_attempt_at=now(),error_code=NULL
+          WHERE user_id=${row.user_id} AND status='failed' AND error_code='needs_interaction'`;
+        if(process.env.P3_ILINK_READING_REPLIES_ENABLED!=="true"&&!row.greeted_at)greeting=result.contextToken;
+      }else{
+        await tx`UPDATE member_ilink_accounts SET cursor_ciphertext=${result.cursor?encryptSecret(result.cursor):null},
+          updated_at=clock_timestamp() WHERE user_id=${row.user_id}`;
+      }
+    }else if(ilinkErrorKind(error)==="requires_rebind"){
+      await tx`UPDATE member_ilink_accounts SET channel_state='requires_rebind',updated_at=clock_timestamp()
+        WHERE user_id=${row.user_id}`;
+    }
+    const released=await tx`UPDATE member_ilink_accounts SET last_polled_at=clock_timestamp(),
+      poll_lease_owner=NULL,poll_lease_expires_at=NULL
+      WHERE user_id=${row.user_id} AND poll_lease_owner=${owner}::uuid
+        AND poll_lease_generation=${generation} AND poll_lease_expires_at>clock_timestamp()
+      RETURNING user_id`;
+    if(!released.length)throw new Error("ilink_poll_lease_expired_before_commit");
+    return {recovered:!!result?.hadInbound&&!!result.contextToken,greeting,committed:true};
+  });
 }
 
 export async function pollMemberIlinkInboxes() {
-  if(!ilinkConfigured())return {disabled:true};
+  if(!ilinkConfigured()||shutdownSignal.signal.aborted)return {disabled:true};
   const accounts=await sql<{user_id:string}[]>`SELECT a.user_id FROM member_ilink_accounts a
     JOIN member_weixin_bindings b ON b.user_id=a.user_id AND b.status='active'
     JOIN member_users u ON u.id=a.user_id AND u.status='active'
     ORDER BY a.last_polled_at NULLS FIRST,a.user_id LIMIT 20`;
   let checked=0,recovered=0,greeted=0;
   for(let start=0;start<accounts.length;start+=20){
-    await Promise.all(accounts.slice(start,start+20).map(async account=>sql.begin(async tx=>{
-      const [row]=await tx<AccountRow[]>`SELECT a.user_id,a.recipient_id,a.channel_account_id,a.token_ciphertext,a.api_url,a.cursor_ciphertext,a.greeted_at,
-        COALESCE(s.binding_version,1) AS binding_version
-        FROM member_ilink_accounts a LEFT JOIN member_notification_settings s ON s.user_id=a.user_id
-        WHERE a.user_id=${account.user_id} FOR UPDATE OF a SKIP LOCKED`;
-      if(!row)return;
+    await Promise.all(accounts.slice(start,start+20).map(async account=>{
+      const lease=await claimIlinkPoll(account.user_id);
+      if(!lease)return;
+      const {row}=lease;
       checked++;
       const pollId=randomUUID();
       const pollStarted=performance.now();
-      let pollReturned=false;
       try{
         const result=await pollIlinkInbox({
           botId:row.channel_account_id,recipientId:row.recipient_id,token:decryptSecret(row.token_ciphertext),
           base:row.api_url,cursor:row.cursor_ciphertext?decryptSecret(row.cursor_ciphertext):null,
-        });
-        pollReturned=true;
+        },undefined,shutdownSignal.signal);
         latencyEvent({correlationId:pollId,stage:"poll",route:"inbox",status:"returned",durationMs:result.pollDurationMs});
-        for(const [pollPosition,message] of result.messages.entries()){
-          const readingEnabled=process.env.P3_ILINK_READING_REPLIES_ENABLED==="true";
-          const [inserted]=await tx<{id:string}[]>`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,seq,body,status,received_at,poll_position)
-            VALUES(${randomUUID()},${row.user_id},${row.binding_version},${row.channel_account_id},${message.id},${message.seq},${message.text.slice(0,4096)},${readingEnabled?'pending':'ignored'},${result.receivedAt},${pollPosition})
-            ON CONFLICT(bot_id,upstream_id) DO NOTHING RETURNING id`;
-          if(inserted&&readingEnabled)await enqueueOn(READING_QUEUE,{inboundId:inserted.id},{singletonKey:inserted.id},tx);
-        }
-        if(result.hadInbound && result.contextToken){
-          recovered++;
-          await tx`UPDATE member_ilink_accounts SET
-            cursor_ciphertext=${result.cursor?encryptSecret(result.cursor):null},
-            context_ciphertext=${encryptSecret(result.contextToken)},
-            channel_state='active',last_inbound_at=${result.receivedAt},updated_at=clock_timestamp()
-            WHERE user_id=${row.user_id}`;
-          // Only formerly blocked, recent messages are eligible; outbox expiry is enforced by dispatcher.
-          await tx`UPDATE member_notification_outbox SET status='failed',next_attempt_at=now(),error_code=NULL
-            WHERE user_id=${row.user_id} AND status='failed' AND error_code='needs_interaction'`;
-          if(process.env.P3_ILINK_READING_REPLIES_ENABLED!=="true"&&await confirmConnection(tx,row,result.contextToken))greeted++;
-        }else{
-          await tx`UPDATE member_ilink_accounts SET cursor_ciphertext=${result.cursor?encryptSecret(result.cursor):null},
-            updated_at=now() WHERE user_id=${row.user_id}`;
-        }
+        const settled=await settleIlinkPoll(lease,result);
+        if(settled.recovered)recovered++;
+        if(settled.greeting&&await confirmConnection(row,settled.greeting))greeted++;
       }catch(error){
-        // A failed poll has no response boundary and cannot establish received_at.
-        if(!pollReturned)latencyEvent({correlationId:pollId,stage:"poll",route:"inbox",status:"failed",durationMs:performance.now()-pollStarted});
-        if(ilinkErrorKind(error)==="requires_rebind")
-          await tx`UPDATE member_ilink_accounts SET channel_state='requires_rebind',updated_at=now() WHERE user_id=${row.user_id}`;
-        // No raw API response or account credentials in logs.
-      }finally{
-        await tx`UPDATE member_ilink_accounts SET last_polled_at=now() WHERE user_id=${row.user_id}`;
+        latencyEvent({correlationId:pollId,stage:"poll",route:"inbox",status:"failed",durationMs:performance.now()-pollStarted});
+        // If commit failed, the lease expires; a retry replays the same cursor and deduplicates IDs.
+        await settleIlinkPoll(lease,undefined,error).catch(()=>{});
       }
-    })));
+    }));
   }
   // A failing reminder must not stop the inbound poll; the next minute tries again.
   let nudged=0;
-  try{nudged=(await nudgeNearExpiryIlinkChannels()).nudged;}
+  try{if(!shutdownSignal.signal.aborted)nudged=(await nudgeNearExpiryIlinkChannels()).nudged;}
   catch{
     // The reminder is retried with the next run; the inbound messages above are already recorded.
   }

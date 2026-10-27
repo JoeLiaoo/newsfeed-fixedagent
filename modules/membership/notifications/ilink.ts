@@ -39,6 +39,7 @@ export function trustedIlinkBase(value:unknown):string{
 function uin(){return Buffer.from(String(randomBytes(4).readUInt32BE())).toString("base64");}
 export async function ilinkRequest(base:string,path:string,options:{
   method?:"GET"|"POST";token?:string;payload?:ObjectValue;timeoutMs?:number;fetcher?:typeof fetch;
+  signal?:AbortSignal;
 }={}):Promise<ObjectValue>{
   const root=trustedIlinkBase(base);
   const fetcher=options.fetcher??fetch;
@@ -52,7 +53,7 @@ export async function ilinkRequest(base:string,path:string,options:{
   const response=await fetcher(root+path,{
     method:options.method??"POST",headers,
     body:options.method==="GET"?undefined:JSON.stringify(options.payload??{}),
-    redirect:"error",signal:AbortSignal.timeout(options.timeoutMs??12000)
+    redirect:"error",signal:options.signal?AbortSignal.any([AbortSignal.timeout(options.timeoutMs??12000),options.signal]):AbortSignal.timeout(options.timeoutMs??12000)
   });
   if(!response.ok)throw new Error("ilink_http_"+response.status);
   const raw=await response.text();
@@ -119,10 +120,10 @@ export async function sendIlinkText(account:IlinkAccount,text:string,id:string,f
   });
   return {accepted:true,messageId:str(response.client_id,200)||id};
 }
-export async function pollIlinkInbox(account:IlinkAccount,fetcher?:typeof fetch){
+export async function pollIlinkInbox(account:IlinkAccount,fetcher?:typeof fetch,signal?:AbortSignal){
   const started=performance.now();
   const response=await ilinkRequest(account.base,"/ilink/bot/getupdates",{
-    token:account.token,fetcher,timeoutMs:39000,
+    token:account.token,fetcher,timeoutMs:39000,signal,
     payload:{get_updates_buf:account.cursor??"",base_info:baseInfo},
   });
   // Capture at the response boundary, before parsing or any database work.
