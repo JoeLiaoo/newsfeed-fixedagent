@@ -47,6 +47,8 @@ npm run typecheck
 
 WX-A 为新闻微信首推增加一条短摘要和按已推送版次的阅读追问，两个新开关默认关闭；完整日报仍在网页，GP 汇总格式不变。本地实现与验收边界见 [WX-A 工作日志](docs/logs/2026-10-27-WX-A-short-digest-reading.md)。
 
+WX-B 为已授权员工的微信自由文本增加经宿主机隔离 Hermes CLI 的简短回复，默认关闭；“深读 N”等仍按 WX-A 的确定性路由处理。部署边界与剩余验收见 [WX-B 工作日志](docs/logs/2026-10-27-WX-B-hermes-headless.md)及 [runner 说明](deploy/hermes-headless-runner/README.md)。
+
 「赛道同业竞争看板」公开资料检索已随 PR #100 合并并部署：每个任务固定执行 4 次公开网页检索，至多抓取 3 个来源页，再整理为带来源链接与可得日期的 HTML 看板；没有可靠证据时保留“未披露／未检索到”提示。2026-10-26 首次员工试用发现模型 JSON 请求被拒，修复与验收边界见[故障记录](docs/logs/2026-10-26-P2-06-sector-peer-model-reject.md)；同日第二个任务又因模型回答里一条结论引用 5 个来源被结构上限拒绝而整份失败，改为宽松读取、保留来源边界的修复见[故障记录](docs/logs/2026-10-26-P2-06-sector-peer-output-invalid.md)。两次修复都尚未部署，不能视为真实业务验收通过。
 
 「前沿播客」已随 [PR #93](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/93) 合并：员工提交中文或英文话题，平台用双语检索词读取公开播客文字库，优先展示标题直接提及话题的节目；宁德时代/CATL、机器人/具身智能等常见中英别名会扩展检索。英文源节目使用该库中文版，缺少中文版的集数跳过。网页摘要为单文件静态 HTML（按 beautiful-article / reacticle 的 press 主题排版），并提供 Markdown 产物；要点与摘要标明是该库的整理稿且平台未逐条核验。检索排序增强已随 [PR #104](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/104) 合并（`281ac12`），尚未部署或做真实员工验收。员工摘要调整与全部可用匹配节目的展示另见[本轮实施记录](docs/logs/2026-10-26-P2-frontier-podcast-ux.md)；检索探测、验证与限制见[检索排序改进记录](docs/logs/2026-10-26-P2-frontier-podcast-search-quality.md)和[双语改进记录](docs/logs/2026-10-25-P2-frontier-podcast-bilingual.md)。

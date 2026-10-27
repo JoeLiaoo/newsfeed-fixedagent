@@ -21,6 +21,8 @@ services:
       - /opt/citic-newsfeed/shared/credentials:/run/credentials:ro
   worker:
     image: citic-newsfeed:${RELEASE_ID:?set RELEASE_ID to the release commit}
+    environment:
+      DATABASE_POOL_MAX: "24"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     build:

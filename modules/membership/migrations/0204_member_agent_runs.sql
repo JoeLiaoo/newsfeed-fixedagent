@@ -1,0 +1,21 @@
+CREATE TABLE member_agent_runs (
+  id text PRIMARY KEY,
+  inbound_id text NOT NULL UNIQUE REFERENCES member_ilink_inbound_messages(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES member_users(id) ON DELETE CASCADE,
+  binding_version integer NOT NULL,
+  grant_id uuid NOT NULL,
+  status text NOT NULL CHECK(status IN ('pending','running','succeeded','failed','unknown','cancelled','expired')),
+  answer text,
+  api_calls integer,
+  total_tokens integer,
+  model text,
+  provider text,
+  cost_status text,
+  estimated_cost_usd numeric,
+  error_code text,
+  started_at timestamptz,
+  lease_expires_at timestamptz,
+  finished_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL DEFAULT now()+interval '10 minutes'
+);

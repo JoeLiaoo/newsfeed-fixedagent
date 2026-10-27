@@ -67,10 +67,10 @@ export async function pollMemberIlinkInboxes() {
   const accounts=await sql<{user_id:string}[]>`SELECT a.user_id FROM member_ilink_accounts a
     JOIN member_weixin_bindings b ON b.user_id=a.user_id AND b.status='active'
     JOIN member_users u ON u.id=a.user_id AND u.status='active'
-    ORDER BY a.updated_at LIMIT 20`;
+    ORDER BY a.last_polled_at NULLS FIRST,a.user_id LIMIT 20`;
   let checked=0,recovered=0,greeted=0;
-  for(let start=0;start<accounts.length;start+=5){
-    await Promise.all(accounts.slice(start,start+5).map(async account=>sql.begin(async tx=>{
+  for(let start=0;start<accounts.length;start+=20){
+    await Promise.all(accounts.slice(start,start+20).map(async account=>sql.begin(async tx=>{
       const [row]=await tx<AccountRow[]>`SELECT a.user_id,a.recipient_id,a.channel_account_id,a.token_ciphertext,a.api_url,a.cursor_ciphertext,a.greeted_at,
         COALESCE(s.binding_version,1) AS binding_version
         FROM member_ilink_accounts a LEFT JOIN member_notification_settings s ON s.user_id=a.user_id
@@ -108,6 +108,8 @@ export async function pollMemberIlinkInboxes() {
         if(ilinkErrorKind(error)==="requires_rebind")
           await tx`UPDATE member_ilink_accounts SET channel_state='requires_rebind',updated_at=now() WHERE user_id=${row.user_id}`;
         // No raw API response or account credentials in logs.
+      }finally{
+        await tx`UPDATE member_ilink_accounts SET last_polled_at=now() WHERE user_id=${row.user_id}`;
       }
     })));
   }
