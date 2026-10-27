@@ -125,9 +125,12 @@ export async function pollIlinkInbox(account:IlinkAccount,fetcher?:typeof fetch)
   });
   const messages=Array.isArray(response.msgs)?response.msgs.map(obj):[];
   const inbound=parseIlinkInbound(messages,account);
-  const userMessages=messages.filter(m=>m.from_user_id===account.recipientId&&m.to_user_id===account.botId&&
-    m.message_type===1&&m.message_state===2);
-  const latest=userMessages
+  // Recovery needs the employee's own traffic to this bot, and context-only envelopes carry no
+  // message_type/message_state, so the type and state filter stays inside parseIlinkInbound.
+  // A type 2 message is the Bot's own outbound shape: it never overrides the employee's context.
+  const userMessages=messages.filter(m=>m.from_user_id===account.recipientId&&m.to_user_id===account.botId);
+  const contextMessages=userMessages.filter(m=>m.message_type!==2);
+  const latest=(contextMessages.length?contextMessages:userMessages)
     .map(m=>str(m.context_token,8192)).filter(Boolean).at(-1);
   return {cursor:str(response.get_updates_buf,16384)||account.cursor||"",contextToken:latest??null,
     hadInbound:userMessages.length>0,messages:inbound};
