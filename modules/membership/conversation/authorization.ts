@@ -1,6 +1,5 @@
 import {sql,type Tx} from "@aihot/backend/db";
 
-export const AGENT_UNAVAILABLE="对话服务暂时不可用。你仍可回复“深读 2”展开日报，或在网站查看完整内容。";
 export function agentEnabled():boolean{
   return process.env.P3_ILINK_AGENT_ENABLED==="true"&&process.env.P3_DELIVERY_ENABLED==="true"&&process.env.MODEL_CALLS_ENABLED==="true";
 }

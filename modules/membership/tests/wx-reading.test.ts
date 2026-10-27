@@ -125,9 +125,9 @@ test("WX-A compact edition stays short through revalidation and replies use the 
     assert.match(String(input),/getupdates/);
     return new Response(JSON.stringify({ret:0,get_updates_buf:"cursor-next",msgs:[
       {message_id:"batch-1",seq:"1",from_user_id:"recipient-"+suffix,to_user_id:"bot-"+suffix,
-        message_type:2,message_state:2,context_token:"ctx",item_list:[{type:1,text_item:{text:"其他"}}]},
+        message_type:1,message_state:2,context_token:"ctx",item_list:[{type:1,text_item:{text:"其他"}}]},
       {message_id:"batch-2",seq:"2",from_user_id:"recipient-"+suffix,to_user_id:"bot-"+suffix,
-        message_type:2,message_state:2,context_token:"ctx",item_list:[{type:1,text_item:{text:"全部"}}]},
+        message_type:1,message_state:2,context_token:"ctx",item_list:[{type:1,text_item:{text:"全部"}}]},
       {message_id:"echo",from_user_id:"bot-"+suffix,to_user_id:"recipient-"+suffix,
         message_type:2,message_state:2,item_list:[{type:1,text_item:{text:"忽略"}}]},
     ]}),{status:200});

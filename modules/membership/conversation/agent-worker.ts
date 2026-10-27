@@ -1,6 +1,7 @@
 import {sql,type Tx} from "@aihot/backend/db";
 import {enqueueOn} from "@aihot/backend/jobs/queue";
-import {agentEnabled,authorized,AGENT_UNAVAILABLE} from "./authorization.ts";
+import {agentEnabled,authorized} from "./authorization.ts";
+import {agentUnavailableHelp} from "./help.ts";
 import {askHermes} from "./hermes.ts";
 import {withinBudget,type AgentUsage} from "./usage.ts";
 import {AGENT_QUEUE} from "./agent-queue.ts";
@@ -74,7 +75,7 @@ export async function processAgentRun(id:string):Promise<void>{
     // A pending run already reserves two calls in counts; do not reserve it twice.
     if(!withinBudget(budget.hour-2,budget.day-2,budget.global_day-2)){
       await tx`UPDATE member_agent_runs SET status='failed',error_code='budget_exhausted',finished_at=now() WHERE id=${id}`;
-      await reply(tx,run,AGENT_UNAVAILABLE);
+      await reply(tx,run,await agentUnavailableHelp(tx,run.user_id,run.binding_version));
       return "budget";
     }
     if(budget.running>=2)return null;
@@ -92,7 +93,7 @@ export async function processAgentRun(id:string):Promise<void>{
     WHERE r.user_id=${claimed.user_id} AND r.binding_version=${claimed.binding_version}
       AND r.grant_id=${claimed.grant_id} AND r.status='succeeded' AND r.id<>${id}
     ORDER BY r.created_at DESC LIMIT 6`;
-  let answer=AGENT_UNAVAILABLE,usage:AgentUsage|null=null;
+  let answer="",usage:AgentUsage|null=null;
   let errorCode:string|null=null;
   try{
     const result=await askHermes(promptFor(history,inbound.body));
@@ -110,7 +111,7 @@ export async function processAgentRun(id:string):Promise<void>{
       model=${usage?.model??null},provider=${usage?.provider??null},
       cost_status=${usage?.costStatus??null},estimated_cost_usd=${usage?.estimatedCostUsd??null},
       error_code=${errorCode},finished_at=now(),lease_expires_at=NULL WHERE id=${id}`;
-    if(allowed)await reply(tx,claimed,answer);
+    if(allowed)await reply(tx,claimed,errorCode?await agentUnavailableHelp(tx,claimed.user_id,claimed.binding_version):answer);
     return allowed;
   });
   if(shouldSend)await dispatchReadingReply(id);
