@@ -9,17 +9,19 @@ import {pollMemberIlinkInboxes} from "@citic/membership/notifications-inbox";
 import {confirmPendingIlinkBindings} from "@citic/membership/notifications-scan";
 import {READING_QUEUE,recoverReadingReplies} from "@citic/membership/conversation-queue";
 import {AGENT_QUEUE,recoverAgentRuns} from "@citic/membership/conversation-agent-queue";
+import {KB_QUEUE,recoverKnowledgeRuns} from "@citic/membership/conversation-knowledge-queue";
 
 export const SERVER_MODULES: readonly ServerModule[] = [{
   name: "membership",
   http: registerMembership,
-  queues: [EXPERT_QUEUE, GP_QUEUE, WIKI_QUEUE, READING_QUEUE, AGENT_QUEUE],
+  queues: [EXPERT_QUEUE, GP_QUEUE, WIKI_QUEUE, READING_QUEUE, AGENT_QUEUE, KB_QUEUE],
   schedules: [
     {name: "membership.notifications-generate",cron:"0 9-23 * * *",missed:"once",run:generateDueNotifications,when:()=>process.env.P3_NOTIFICATIONS_ENABLED==="true"},
     {name: "membership.notifications-dispatch",cron:"*/5 * * * *",run:dispatchOutbox,when:()=>process.env.P3_DELIVERY_ENABLED==="true"},
     {name: "membership.ilink-inbound",cron:"* * * * *",run:pollMemberIlinkInboxes,when:()=>process.env.P3_ILINK_BINDING_ENABLED==="true"},
     {name: "membership.ilink-reading-recover",cron:"* * * * *",run:recoverReadingReplies,when:()=>process.env.P3_ILINK_READING_REPLIES_ENABLED==="true"},
     {name: "membership.ilink-agent-recover",cron:"* * * * *",run:recoverAgentRuns,when:()=>process.env.P3_ILINK_AGENT_ENABLED==="true"},
+    {name: "membership.ilink-kb-recover",cron:"* * * * *",run:recoverKnowledgeRuns,when:()=>process.env.P3_ILINK_KB_ENABLED==="true"},
     // The page may be hidden while the phone confirms the QR; the server finishes the scan itself.
     {name: "membership.ilink-scan",cron:"* * * * *",run:confirmPendingIlinkBindings,when:()=>process.env.P3_ILINK_BINDING_ENABLED==="true"},
     { name: "membership.gp-sync", cron: "0 * * * *", when: () => process.env.P3_GP_SYNC_ENABLED === "true", run: syncAllGps },
