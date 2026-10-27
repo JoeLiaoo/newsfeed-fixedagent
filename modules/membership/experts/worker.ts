@@ -1,3 +1,4 @@
+import {resultSummary} from "../conversation/task-summary.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { chatJson } from "@aihot/backend/providers/llm";
@@ -447,7 +448,7 @@ async function runPanoramaExpert(task: TaskRow, leaseToken: string, options: { b
     narrative,
     narrativeNote,
   });
-  return { markdown: rendered.markdown, incomplete: run.stats.incomplete, gapCount: run.gaps.length, limits: run.stats.limits };
+  return { markdown: rendered.markdown, incomplete: run.stats.incomplete, gapCount: run.gaps.length, limits: run.stats.limits, coverage: {depth:run.stats.depth,nodes:run.stats.nodes,calls:run.stats.calls,untreated:run.stats.untreated} };
 }
 
 /** The model writes the words; the tables and the gaps stay with the runner. */
@@ -580,7 +581,7 @@ export async function runExpertTask(taskId: string) {
     let podcastStatus: { episodes: number; partial: boolean } | null = null;
     const isSectorPeer = task.expert_slug === SECTOR_PEER_EXPERT_SLUG;
     const isFrontierPodcast = task.expert_slug === FRONTIER_PODCAST_EXPERT_SLUG;
-    let panoramaStatus: { incomplete: boolean; gapCount: number; limits: string[] } | null = null;
+    let panoramaStatus: { incomplete: boolean; gapCount: number; limits: string[]; coverage?: {depth:number;nodes:number;calls:number;untreated:number} } | null = null;
     const experts = await sql<{ manifest: { tools?: string[] }; status: string }[]>`SELECT manifest,status FROM member_experts WHERE slug=${task.expert_slug}`;
     // The one-layer builtin still runs historical tasks after hiding. The retired sentiment slug
     // never had a runner, so even a hand-queued old task must not fall through to the text model.
@@ -613,13 +614,13 @@ export async function runExpertTask(taskId: string) {
       const panorama = await runPanoramaExpert(task, leaseToken);
       report = panorama.markdown;
       panoramaHtml = renderPanoramaHtml(report);
-      panoramaStatus = { incomplete: panorama.incomplete, gapCount: panorama.gapCount, limits: panorama.limits };
+      panoramaStatus = { incomplete: panorama.incomplete, gapCount: panorama.gapCount, limits: panorama.limits, coverage: panorama.coverage };
     } else {
       const custom = await runCustom(task, leaseToken);
       if (typeof custom === "string") report = custom;
       else {
         report = custom.markdown;
-        panoramaStatus = { incomplete: custom.incomplete, gapCount: custom.gapCount, limits: custom.limits };
+        panoramaStatus = { incomplete: custom.incomplete, gapCount: custom.gapCount, limits: custom.limits, coverage: custom.coverage };
       }
     }
     const body = Buffer.from(report, "utf8");
@@ -628,7 +629,7 @@ export async function runExpertTask(taskId: string) {
       const active = await tx`SELECT id FROM member_expert_tasks WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} AND lease_expires_at > now() FOR UPDATE`;
       if (!active.length) return;
       await tx`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256) VALUES (${taskId},${task.user_id},${`expert-${taskId}.${isSectorPeer ? "html" : "md"}`},${isSectorPeer ? "text/html; charset=utf-8" : "text/markdown; charset=utf-8"},${body},${digest}) ON CONFLICT(task_id) DO NOTHING`;
-      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json(isSectorPeer ? { html: report, format: "html" } : isFrontierPodcast ? { html: previewHtml, format: "html", podcast: podcastStatus } : task.expert_slug === PANORAMA_EXPERT_SLUG ? { html: panoramaHtml, format: "html", panorama: panoramaStatus } : task.expert_slug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG ? { html: listedFundHtml, format: "html", listedFund: listedFundStatus } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) })},updated_at=now(),finished_at=now(),expires_at=GREATEST(expires_at,(SELECT expires_at FROM member_expert_artifacts WHERE task_id=${taskId})),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
+      await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json({...(isSectorPeer ? { html: report, format: "html" } : isFrontierPodcast ? { html: previewHtml, format: "html", podcast: podcastStatus } : task.expert_slug === PANORAMA_EXPERT_SLUG ? { html: panoramaHtml, format: "html", panorama: panoramaStatus } : task.expert_slug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG ? { html: listedFundHtml, format: "html", listedFund: listedFundStatus } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) }),summary:resultSummary(task.expert_slug,task.input,panoramaStatus,podcastStatus)})},updated_at=now(),finished_at=now(),expires_at=GREATEST(expires_at,(SELECT expires_at FROM member_expert_artifacts WHERE task_id=${taskId})),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
     });
   } catch (error) {
     const detail = errorText(error);
