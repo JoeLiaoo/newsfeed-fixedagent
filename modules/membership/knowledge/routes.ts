@@ -6,8 +6,7 @@ import { sql, type Db } from "@aihot/backend/db";
 import { enqueueOn } from "@aihot/backend/jobs/queue";
 import type { MemberSession } from "../server.ts";
 import { WIKI_QUEUE } from "./queue.ts";
-import { answerQuestion } from "./answer.ts";
-import { routePages, type RoutableCitation, type RoutablePage } from "./routing.ts";
+import {answerKnowledgeQuestion,knowledgeActor,listKnowledgeBases,searchKnowledgePages,KnowledgeError} from "./service.ts";
 import { FORMAT_MEDIA_TYPES, freshnessTier, FRESHNESS_LABELS, FIGURE_LIMITS, MAX_WIKI_ATTEMPTS, TASK_ERRORS, maxFileBytes } from "./catalog.ts";
 import { enrichAllCitations, enrichCitations, readCitations, readCoverage, readFreshness, readPages, toAnswerCitation, type AnswerRecord } from "./history.ts";
 import { DEFAULT_BASE_ID, MAX_BASES, baseSlugOf, ensureDefaultBase, newBaseId, resolveBase } from "./bases.ts";
@@ -122,16 +121,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     noStore(reply);
     const user = await authenticate(req);
     if (!user) return reply.code(401).send({ error: "login_required" });
-    await ensureDefaultBase();
-    const bases = await sql`
-      SELECT b.id, b.name, b.description, b.status, b.created_at AS "createdAt", b.updated_at AS "updatedAt",
-        (SELECT count(*)::int FROM member_wiki_documents d WHERE d.base_id = b.id AND d.status = 'active') AS documents,
-        (SELECT count(*)::int FROM member_wiki_pages p WHERE p.base_id = b.id AND p.status = 'published') AS pages,
-        (SELECT count(*)::int FROM member_wiki_tasks t JOIN member_wiki_documents d ON d.id = t.document_id WHERE d.base_id = b.id AND t.state IN ('queued','running')) AS building,
-        (SELECT count(*)::int FROM member_wiki_tasks t JOIN member_wiki_documents d ON d.id = t.document_id WHERE d.base_id = b.id AND t.state = 'failed') AS failed
-      FROM member_wiki_bases b
-      WHERE b.status = 'active'
-      ORDER BY (b.id = ${DEFAULT_BASE_ID}) DESC, b.created_at`;
+    const bases = await listKnowledgeBases(knowledgeActor(user.id));
     return { bases };
   });
 
@@ -493,24 +483,15 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     const query = typeof req.query === "object" && req.query && "query" in req.query ? String((req.query as { query?: unknown }).query ?? "").trim() : "";
     const type = typeof req.query === "object" && req.query && "type" in req.query ? String((req.query as { type?: unknown }).type ?? "") : "";
     const window = pageWindow(req);
-    const pages = await sql`
-      SELECT p.slug, p.page_type AS "pageType", p.target_type AS "targetType", p.target_name AS "targetName", p.track, p.status, p.updated_at AS "updatedAt",
-        r.revision, r.coverage, r.published_at AS "publishedAt",
-        (SELECT count(*)::int FROM member_wiki_citations c WHERE c.page_id = p.id AND c.revision = r.revision) AS "citationCount",
-        (SELECT count(*)::int FROM member_wiki_quality_issues q WHERE q.page_id = p.id AND q.status='open') AS "issueCount"
-      FROM member_wiki_pages p
-      JOIN member_wiki_page_revisions r ON r.page_id = p.id AND r.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = p.id)
-      WHERE p.status='published' AND p.base_id = ${base.id} AND (${type} = '' OR p.page_type = ${type}) AND (${query} = '' OR p.slug ILIKE ${`%${query}%`} OR p.target_name ILIKE ${`%${query}%`} OR r.body_md ILIKE ${`%${query}%`})
-      ORDER BY r.published_at DESC, p.slug LIMIT ${window.limit + 1} OFFSET ${window.offset}`;
-    const hasMore = pages.length > window.limit;
+    const {pages,hasMore,nextOffset}=await searchKnowledgePages(knowledgeActor(user.id),base.id,query,type,window.limit,window.offset);
     return {
-      pages: pages.slice(0, window.limit).map(page => ({
+      pages: pages.map(page => ({
         ...page,
         freshness: freshnessTier(page.coverage?.last_report ?? null),
         freshnessLabel: FRESHNESS_LABELS[freshnessTier(page.coverage?.last_report ?? null)],
       })),
       hasMore,
-      nextOffset: hasMore ? window.offset + window.limit : null,
+      nextOffset,
     };
   });
 
@@ -668,100 +649,12 @@ export function registerKnowledgeRoutes(app: FastifyInstance, authenticate: Auth
     if (!question || question.length < 2) return reply.code(400).send({ error: "knowledge_question_required", message: "请输入要问的问题。" });
     const base = await resolveBase(text(body(req).baseId, 64));
     if (!base) return reply.code(404).send({ error: "knowledge_base_not_found" });
-    const rows = await sql<{ id: string; slug: string; page_type: string; target_name: string | null; track: string | null; body_md: string; coverage: Record<string, unknown> | null; revision_id: string }[]>`
-      SELECT p.id, p.slug, p.page_type, p.target_name, p.track, r.body_md, r.coverage, r.id AS revision_id
-      FROM member_wiki_pages p JOIN member_wiki_page_revisions r ON r.page_id = p.id
-        AND r.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = p.id)
-      WHERE p.status='published' AND p.base_id = ${base.id}`;
-    const citationRows = await sql<{ id: string; page_id: string; label: string; anchor: string | null; analyst: string | null; organization: string | null; published_on: Date | null; source_title: string | null; version_id: string; document_id: string; document_title: string; file_name: string }[]>`
-      SELECT c.id, c.page_id, c.label, c.anchor, c.analyst, c.organization, c.published_on, c.source_title, c.version_id,
-        d.id AS document_id, d.title AS document_title, v.file_name AS file_name
-      FROM member_wiki_citations c
-      JOIN member_wiki_pages p ON p.id = c.page_id
-      JOIN member_wiki_document_versions v ON v.id = c.version_id
-      JOIN member_wiki_documents d ON d.id = v.document_id
-      WHERE p.status='published' AND p.base_id = ${base.id}
-        AND c.revision = (SELECT max(revision) FROM member_wiki_page_revisions WHERE page_id = c.page_id)`;
-    const byPage = new Map<string, RoutableCitation[]>();
-    for (const row of citationRows) {
-      const list = byPage.get(row.page_id) ?? [];
-      list.push({
-        id: row.id,
-        label: row.label,
-        analyst: row.analyst,
-        organization: row.organization,
-        publishedOn: dateText(row.published_on),
-        anchor: row.anchor,
-        sourceTitle: row.source_title,
-        versionId: row.version_id,
-        documentId: row.document_id,
-        documentTitle: row.document_title,
-        fileName: row.file_name,
-      });
-      byPage.set(row.page_id, list);
+    try { return {answer: await answerKnowledgeQuestion(knowledgeActor(user.id), base.id, question)}; }
+    catch(error){
+      const code=error instanceof KnowledgeError?error.code:"knowledge_answer_failed";
+      const status=code==="knowledge_base_not_found"?404:code==="knowledge_answer_conflict"?409:code==="knowledge_no_coverage"||code==="knowledge_answer_unverified"?422:502;
+      return reply.code(status).send({error:code,message:code==="knowledge_answer_conflict"?"知识页已更新或撤回，请重新提问。":TASK_ERRORS[code as keyof typeof TASK_ERRORS]});
     }
-    const candidates: RoutablePage[] = rows.map(row => ({
-      slug: row.slug,
-      title: row.slug,
-      pageType: row.page_type,
-      targetName: row.target_name,
-      track: row.track,
-      bodyMd: row.body_md,
-      revisionId: row.revision_id,
-      citations: byPage.get(row.id) ?? [],
-      coverage: {
-        analysts: Number(row.coverage?.analysts ?? 0),
-        firms: Number(row.coverage?.firms ?? 0),
-        reports: Number(row.coverage?.reports ?? 0),
-        first_report: (row.coverage?.first_report as string | null) ?? null,
-        last_report: (row.coverage?.last_report as string | null) ?? null,
-      },
-    }));
-    const routed = routePages(question, candidates);
-    if (!routed.length) return reply.code(422).send({ error: "knowledge_no_coverage", message: TASK_ERRORS.knowledge_no_coverage });
-    let answer;
-    try { answer = await answerQuestion(question, routed.map(entry => entry.page)); }
-    catch (error) {
-      const code = error instanceof Error && error.message === "knowledge_answer_unverified" ? "knowledge_answer_unverified" : "knowledge_answer_failed";
-      // An answer the library cannot check is not an upstream failure: the request was understood, the
-      // answer was refused. A model that could not be reached stays a gateway failure.
-      return reply.code(code === "knowledge_answer_unverified" ? 422 : 502).send({ error: code, message: TASK_ERRORS[code] });
-    }
-    const citations = answer.citations;
-    // An answer that rests on nothing the library can show is not an answer: it is refused.
-    if (!citations.length) return reply.code(422).send({ error: "knowledge_answer_unverified", message: TASK_ERRORS.knowledge_answer_unverified });
-    let bodyText = answer.answer;
-    const usedPages = new Set(citations.map(citation => citation.pageSlug));
-    for (const citation of citations) {
-      const needle = `[^${citation.label}]`;
-      const replacement = `[${citation.label}](/knowledge/targets/${citation.pageSlug})`;
-      bodyText = bodyText.replaceAll(needle, () => replacement);
-    }
-    const id = randomUUID();
-    // Model calls may outlive a withdrawal or a new publication. Lock the same documents before
-    // pages as publishing/withdrawal do, then verify the exact revisions before recording an answer.
-    const saved = await sql.begin(async tx => {
-      const versionIds = [...new Set(citations.map(citation => citation.versionId))];
-      const documents = await tx<{ id: string; status: string }[]>`
-        SELECT d.id, d.status FROM member_wiki_documents d
-        WHERE d.id IN (SELECT document_id FROM member_wiki_document_versions WHERE id IN ${tx(versionIds)})
-        ORDER BY d.id FOR SHARE`;
-      if (!documents.length || documents.some(document => document.status !== "active")) return false;
-      const current = await tx<{ slug: string; status: string }[]>`SELECT slug, status FROM member_wiki_pages WHERE slug IN ${tx([...usedPages])} ORDER BY slug FOR SHARE`;
-      if (current.length !== usedPages.size || current.some(page => page.status !== "published")) return false;
-      for (const entry of routed.filter(entry => usedPages.has(entry.page.slug))) {
-        const revisions = await tx<{ id: string }[]>`SELECT r.id FROM member_wiki_page_revisions r JOIN member_wiki_pages p ON p.id=r.page_id WHERE p.slug=${entry.page.slug} ORDER BY r.revision DESC LIMIT 1`;
-        if (revisions[0]?.id !== entry.page.revisionId) return false;
-      }
-      await tx`INSERT INTO member_wiki_answers(id, question, answer_md, citations, coverage, freshness, pages, asked_by) VALUES (${id}, ${question}, ${bodyText}, ${tx.json(citations as never)}, ${tx.json(answer.coverage as never)}, ${tx.json(answer.freshness as never)}, ${tx.json([...usedPages])}, ${user.id})`;
-      await tx`INSERT INTO member_wiki_audit_events(id, actor_id, event_type, detail) VALUES (${randomUUID()}, ${user.id}, 'knowledge.answer.created', ${tx.json({ question: question.slice(0, 200), pages: [...usedPages] })})`;
-      return true;
-    });
-    if (!saved) return reply.code(409).send({ error: "knowledge_answer_unverified", message: "知识页已更新或撤回，请重新提问。" });
-    return {
-      // The citations carry the material they may be read in, so a fresh answer and an answer read
-      // back from the history offer the same way back to the evidence.
-      answer: { id, question, answerMd: bodyText, citations: await enrichCitations(citations.map(toAnswerCitation)), coverage: answer.coverage, freshness: answer.freshness, pages: [...usedPages], references: routed.map(entry => ({ slug: entry.page.slug, score: entry.score })) },
-    };
+
   });
 }
