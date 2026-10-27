@@ -17,6 +17,8 @@ export interface Scheduled {
   cron: string;
   run: () => Promise<unknown>;
   missed?: "skip" | "once";
+  /** Override the normal 15-second cron job pickup for this schedule only. */
+  pollingIntervalSeconds?: number;
   /** Read when the worker starts, after the modules are installed: false removes the schedule and its execution queue; run history remains. */
   when?: () => boolean;
 }

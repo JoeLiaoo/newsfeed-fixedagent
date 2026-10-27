@@ -19,7 +19,7 @@ export const SERVER_MODULES: readonly ServerModule[] = [{
   schedules: [
     {name: "membership.notifications-generate",cron:"0 9-23 * * *",missed:"once",run:generateDueNotifications,when:()=>process.env.P3_NOTIFICATIONS_ENABLED==="true"},
     {name: "membership.notifications-dispatch",cron:"*/5 * * * *",run:dispatchOutbox,when:()=>process.env.P3_DELIVERY_ENABLED==="true"},
-    {name: "membership.ilink-inbound",cron:"* * * * *",run:pollMemberIlinkInboxes,when:()=>process.env.P3_ILINK_BINDING_ENABLED==="true"},
+    {name: "membership.ilink-inbound",cron:"* * * * *",pollingIntervalSeconds:1,run:pollMemberIlinkInboxes,when:()=>process.env.P3_ILINK_BINDING_ENABLED==="true"},
     {name: "membership.ilink-reading-recover",cron:"* * * * *",run:recoverReadingReplies,when:()=>process.env.P3_ILINK_READING_REPLIES_ENABLED==="true"},
     {name: "membership.ilink-agent-recover",cron:"* * * * *",run:recoverAgentRuns,when:()=>process.env.P3_ILINK_AGENT_ENABLED==="true"},
     {name: "membership.ilink-kb-recover",cron:"* * * * *",run:recoverKnowledgeRuns,when:()=>process.env.P3_ILINK_KB_ENABLED==="true"},

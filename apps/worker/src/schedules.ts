@@ -69,7 +69,7 @@ export async function registerSchedules(boss: PgBoss) {
     await ensureQueue(queue, { policy: "singleton", retryLimit: 1, expireInSeconds: 3600 });
     await boss.schedule(queue, s.cron, {}, { tz: "Asia/Shanghai", missed: s.missed ?? "skip" });
     // Schedules fire at minute boundaries; a 15 s pickup keeps them on time with a third of the polling.
-    await boss.work(queue, { pollingIntervalSeconds: 15 }, async () => recordRun(s.name, s.run));
+    await boss.work(queue, { pollingIntervalSeconds: s.pollingIntervalSeconds ?? 15 }, async () => recordRun(s.name, s.run));
   }
   // Retired or disabled timers must leave no queued work behind, including queues an earlier release
   // already unscheduled. pg-boss deletes the queue's jobs and schedules; job_runs retains its audit.

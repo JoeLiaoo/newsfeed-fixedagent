@@ -9,7 +9,7 @@ import {withinBudget,type AgentUsage} from "./usage.ts";
 import {AGENT_QUEUE} from "./agent-queue.ts";
 import {dispatchReadingReply} from "./replies.ts";
 
-type Run={id:string;inbound_id:string;user_id:string;binding_version:number;grant_id:string;created_at:Date};
+type Run={id:string;inbound_id:string;user_id:string;binding_version:number;grant_id:string;created_at:Date;expires_at:Date};
 type Count={hour:number;day:number;global_day:number;running:number};
 
 async function counts(tx:Tx,userId:string):Promise<Count>{
@@ -57,44 +57,77 @@ function promptFor(history:Array<{body:string;answer:string}>,question:string):s
   return lines.join("\n\n");
 }
 
+function wakeEnabled():boolean{return process.env.P3_ILINK_AGENT_WAKE_ENABLED==="true";}
+
+/** The completed job is still active in pg-boss. Its successor needs a different singleton key. */
+async function wakePendingUsers(tx:Tx,completedId:string):Promise<void>{
+  if(!wakeEnabled()||!agentEnabled())return;
+  const due=await tx<{id:string}[]>`SELECT DISTINCT ON (r.user_id) r.id
+    FROM member_agent_runs r
+    JOIN member_ilink_inbound_messages i ON i.id=r.inbound_id
+    JOIN member_agent_grants g ON g.user_id=r.user_id AND g.grant_id=r.grant_id
+    JOIN member_users u ON u.id=r.user_id AND u.status='active'
+    JOIN member_weixin_bindings b ON b.user_id=r.user_id AND b.status='active'
+    JOIN member_ilink_accounts a ON a.user_id=r.user_id AND a.recipient_id=b.recipient_id
+      AND a.channel_account_id=b.channel_account_id
+    JOIN member_notification_settings s ON s.user_id=r.user_id AND s.binding_version=r.binding_version
+    WHERE r.status='pending' AND r.expires_at>now()
+      AND NOT EXISTS(SELECT 1 FROM member_agent_runs active WHERE active.user_id=r.user_id AND active.status='running')
+    ORDER BY r.user_id,COALESCE(i.received_at,i.created_at),i.poll_position NULLS LAST,i.created_at,i.seq NULLS LAST`;
+  for(const run of due)await enqueueOn(AGENT_QUEUE,{runId:run.id},{singletonKey:`wake:${completedId}:${run.id}`},tx);
+}
+
 export async function processAgentRun(id:string):Promise<void>{
   if(!agentEnabled())return;
-  const [candidate]=await sql<Run[]>`SELECT id,inbound_id,user_id,binding_version,grant_id,created_at
+  const [candidate]=await sql<Pick<Run,"user_id">[]>`SELECT user_id
     FROM member_agent_runs WHERE id=${id} AND status='pending'`;
   if(!candidate)return;
   const claimed=await sql.begin(async tx=>{
     await tx`SELECT pg_advisory_xact_lock(1480112026)`;
-    const [run]=await tx<Run[]>`SELECT id,inbound_id,user_id,binding_version,grant_id,created_at
-      FROM member_agent_runs WHERE id=${id} AND status='pending' FOR UPDATE SKIP LOCKED`;
-    if(!run)return null;
-    if(!await authorized(tx,run.user_id,run.binding_version,run.grant_id)){
-      await tx`UPDATE member_agent_runs SET status='cancelled',finished_at=now() WHERE id=${id}`;return null;
-    }
-    if(run.created_at.getTime()<Date.now()-600_000){
-      await tx`UPDATE member_agent_runs SET status='expired',finished_at=now() WHERE id=${id}`;return null;
+    // One inbound poll can insert several rows with identical timestamps. poll_position
+    // records their upstream order; the job's UUID and pg-boss pickup order do not.
+    let run:Run|undefined;
+    while(true){
+      [run]=await tx<Run[]>`SELECT r.id,r.inbound_id,r.user_id,r.binding_version,r.grant_id,r.created_at,r.expires_at
+        FROM member_agent_runs r JOIN member_ilink_inbound_messages i ON i.id=r.inbound_id
+        WHERE r.user_id=${candidate.user_id} AND r.status='pending'
+        ORDER BY COALESCE(i.received_at,i.created_at),i.poll_position NULLS LAST,i.created_at,i.seq NULLS LAST
+        LIMIT 1 FOR UPDATE OF r`;
+      if(!run)return null;
+      if(run.expires_at.getTime()<=Date.now()){
+        await tx`UPDATE member_agent_runs SET status='expired',finished_at=now() WHERE id=${run.id}`;
+        continue;
+      }
+      if(!await authorized(tx,run.user_id,run.binding_version,run.grant_id)){
+        await tx`UPDATE member_agent_runs SET status='cancelled',finished_at=now() WHERE id=${run.id}`;
+        continue;
+      }
+      break;
     }
     const budget=await counts(tx,run.user_id);
     // A pending run already reserves two calls in counts; do not reserve it twice.
     if(!withinBudget(budget.hour-2,budget.day-2,budget.global_day-2)){
-      await tx`UPDATE member_agent_runs SET status='failed',error_code='budget_exhausted',finished_at=now() WHERE id=${id}`;
+      await tx`UPDATE member_agent_runs SET status='failed',error_code='budget_exhausted',finished_at=now() WHERE id=${run.id}`;
       await reply(tx,run,await agentUnavailableHelp(tx,run.user_id,run.binding_version));
-      return "budget";
+      await wakePendingUsers(tx,run.id);
+      return {run,budget:true};
     }
     if(budget.running>=2)return null;
     const [sameUser]=await tx`SELECT 1 FROM member_agent_runs WHERE user_id=${run.user_id} AND status='running'`;
     if(sameUser)return null;
-    await tx`UPDATE member_agent_runs SET status='running',started_at=now(),lease_expires_at=now()+interval '55 seconds' WHERE id=${id}`;
-    return run;
+    await tx`UPDATE member_agent_runs SET status='running',started_at=now(),lease_expires_at=now()+interval '55 seconds' WHERE id=${run.id}`;
+    return {run,budget:false};
   });
-  if(claimed==="budget"){await dispatchReadingReply(id);return;}
   if(!claimed)return;
-  const [inbound]=await sql<{body:string}[]>`SELECT body FROM member_ilink_inbound_messages WHERE id=${claimed.inbound_id}`;
+  if(claimed.budget){await dispatchReadingReply(claimed.run.id);return;}
+  const active=claimed.run;
+  const [inbound]=await sql<{body:string}[]>`SELECT body FROM member_ilink_inbound_messages WHERE id=${active.inbound_id}`;
   if(!inbound)return;
   const history=await sql<{body:string;answer:string}[]>`SELECT i.body,r.answer FROM member_agent_runs r
     JOIN member_ilink_inbound_messages i ON i.id=r.inbound_id
-    WHERE r.user_id=${claimed.user_id} AND r.binding_version=${claimed.binding_version}
-      AND r.grant_id=${claimed.grant_id} AND r.status='succeeded' AND r.id<>${id}
-    ORDER BY r.created_at DESC LIMIT 6`;
+    WHERE r.user_id=${active.user_id} AND r.binding_version=${active.binding_version}
+      AND r.grant_id=${active.grant_id} AND r.status='succeeded' AND r.id<>${active.id}
+    ORDER BY COALESCE(i.received_at,i.created_at) DESC,i.poll_position DESC NULLS LAST,i.created_at DESC LIMIT 6`;
   let answer="",usage:AgentUsage|null=null;
   let errorCode:string|null=null;
   const modelStarted=performance.now();
@@ -104,22 +137,23 @@ export async function processAgentRun(id:string):Promise<void>{
     answer=result.answer.length>900?result.answer.slice(0,890)+"…（回答已截短）":result.answer;
     answer=answer.slice(0,1400);
   }catch(error){errorCode=error instanceof Error?error.message:"runner_failed";}
-  latencyEvent({correlationId:id,stage:"model",route:"agent",status:errorCode?"failed":"processed",
+  latencyEvent({correlationId:active.id,stage:"model",route:"agent",status:errorCode?"failed":"processed",
     durationMs:performance.now()-modelStarted,apiCalls:usage?.apiCalls,totalTokens:usage?.totalTokens});
   const shouldSend=await sql.begin(async tx=>{
-    await tx`SELECT pg_advisory_xact_lock(hashtext(${claimed.user_id}))`;
-    const [live]=await tx`SELECT 1 FROM member_agent_runs WHERE id=${id} AND status='running' FOR UPDATE`;
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${active.user_id}))`;
+    const [live]=await tx`SELECT 1 FROM member_agent_runs WHERE id=${active.id} AND status='running' FOR UPDATE`;
     if(!live)return false;
-    const allowed=await authorized(tx,claimed.user_id,claimed.binding_version,claimed.grant_id);
+    const allowed=await authorized(tx,active.user_id,active.binding_version,active.grant_id);
     await tx`UPDATE member_agent_runs SET status=${allowed?(errorCode?'failed':'succeeded'):'cancelled'},
       answer=${allowed?answer:null},api_calls=${usage?.apiCalls??null},total_tokens=${usage?.totalTokens??null},
       model=${usage?.model??null},provider=${usage?.provider??null},
       cost_status=${usage?.costStatus??null},estimated_cost_usd=${usage?.estimatedCostUsd??null},
-      error_code=${errorCode},finished_at=now(),lease_expires_at=NULL WHERE id=${id}`;
-    if(allowed)await reply(tx,claimed,errorCode?await agentUnavailableHelp(tx,claimed.user_id,claimed.binding_version):answer);
+      error_code=${errorCode},finished_at=now(),lease_expires_at=NULL WHERE id=${active.id}`;
+    if(allowed)await reply(tx,active,errorCode?await agentUnavailableHelp(tx,active.user_id,active.binding_version):answer);
+    await wakePendingUsers(tx,active.id);
     return allowed;
   });
-  if(shouldSend)await dispatchReadingReply(id);
+  if(shouldSend)await dispatchReadingReply(active.id);
 }
 
 export async function recoverAgentRuns():Promise<{queued:number}>{
@@ -128,7 +162,8 @@ export async function recoverAgentRuns():Promise<{queued:number}>{
   await sql`UPDATE member_agent_runs SET status='unknown',error_code='lease_expired',finished_at=now(),lease_expires_at=NULL
     WHERE status='running' AND lease_expires_at<now()`;
   await sql`UPDATE member_agent_runs SET status='expired',finished_at=now() WHERE status='pending' AND expires_at<now()`;
-  const due=await sql<{id:string}[]>`SELECT id FROM member_agent_runs WHERE status='pending' ORDER BY created_at LIMIT 100`;
+  const due=await sql<{id:string}[]>`SELECT r.id FROM member_agent_runs r JOIN member_ilink_inbound_messages i ON i.id=r.inbound_id
+    WHERE r.status='pending' ORDER BY COALESCE(i.received_at,i.created_at),i.poll_position NULLS LAST,i.created_at LIMIT 100`;
   for(const run of due)await enqueueOn(AGENT_QUEUE,{runId:run.id},{singletonKey:run.id});
   return {queued:due.length};
 }
