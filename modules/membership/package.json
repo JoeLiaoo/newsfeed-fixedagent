@@ -16,7 +16,8 @@
     "./notifications-scan": "./notifications/scan.ts",
     "./conversation-queue": "./conversation/queue.ts",
     "./conversation-agent-queue": "./conversation/agent-queue.ts",
-    "./conversation-knowledge-queue": "./conversation/knowledge-queue.ts"
+    "./conversation-knowledge-queue": "./conversation/knowledge-queue.ts",
+    "./conversation-task-events": "./conversation/task-events.ts"
   },
   "dependencies": {
     "@aihot/backend": "*",

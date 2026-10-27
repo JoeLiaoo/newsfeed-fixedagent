@@ -8,6 +8,8 @@ import {READING_QUEUE} from "./queue.ts";
 import {agentEnabled,AGENT_UNAVAILABLE,authorized} from "./authorization.ts";
 import {admitAgentRun} from "./agent-worker.ts";
 import {kbEnabled,parseKnowledgeIntent,admitKnowledgeRun,knowledgeReplyVisible,isKnowledgeCommand} from "./knowledge.ts";
+import {expertsEnabled,parseExpertIntent,isExpertCommand,handleExpertInbound} from "./experts.ts";
+import {ilinkExpertActor,checkExpertActor} from "../experts/service.ts";
 
 type Inbound={id:string;user_id:string;binding_version:number;body:string;status:string};
 type SnapshotItem={source_key:string;title:string;tags:string[]};
@@ -104,6 +106,15 @@ export async function processReadingInbound(id:string):Promise<void>{
       await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
       produced=true;return;
     }
+    if(intent.kind==="unknown"&&expertsEnabled()&&(parseExpertIntent(row.body)||isExpertCommand(row.body))){
+      const expertIntent=parseExpertIntent(row.body);
+      const result=expertIntent?await handleExpertInbound(tx,row,expertIntent):'请用“列专家”“跑同业看板：企业或赛道”“进度 A”“任务 A 选 1”或“取消 A”。';
+      const expertGrant=await tx<{grant_id:string}[]>`SELECT grant_id FROM member_agent_grants WHERE user_id=${row.user_id}`;
+      await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body,task_watch_id,expert_grant_id)
+        VALUES(${id},${id},${row.user_id},${row.binding_version},${typeof result==='string'?result:result.body},${typeof result==='string'?null:result.watchId??null},${expertGrant[0]?.grant_id??null}::uuid) ON CONFLICT DO NOTHING`;
+      await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
+      produced=true;return;
+    }
     if(intent.kind==="unknown"&&agentEnabled()){
       const admission=row.body.length>2000?"unavailable":await admitAgentRun(tx,row);
       if(admission==="queued"){
@@ -133,7 +144,7 @@ export async function dispatchReadingReply(id:string):Promise<void>{
   if(!owner)return;
   await sql.begin(async tx=>{
     await tx`SELECT pg_advisory_xact_lock(hashtext(${owner.user_id}))`;
-    const [reply]=await tx<{id:string;user_id:string;binding_version:number;body:string;status:string;agent_run_id:string|null;kb_run_id:string|null}[]>`SELECT id,user_id,binding_version,body,status,agent_run_id,kb_run_id
+    const [reply]=await tx<{id:string;user_id:string;binding_version:number;body:string;status:string;agent_run_id:string|null;kb_run_id:string|null;expert_grant_id:string|null;task_watch_id:string|null}[]>`SELECT id,user_id,binding_version,body,status,agent_run_id,kb_run_id,expert_grant_id,task_watch_id
       FROM member_ilink_reply_outbox WHERE id=${id} AND status IN ('pending','failed') AND next_attempt_at<=now() FOR UPDATE SKIP LOCKED`;
     if(!reply)return;
     if(reply.agent_run_id){
@@ -147,6 +158,17 @@ export async function dispatchReadingReply(id:string):Promise<void>{
     if(reply.kb_run_id&&!await knowledgeReplyVisible(tx,reply.kb_run_id)){
       await tx`UPDATE member_ilink_reply_outbox SET status='cancelled',error_code='kb_source_or_grant_changed' WHERE id=${id}`;
       return;
+    }
+    if(reply.expert_grant_id){
+      try{await checkExpertActor(ilinkExpertActor(reply.user_id,reply.binding_version,reply.expert_grant_id),tx);
+        if(reply.task_watch_id){const [watch]=await tx`SELECT 1 FROM member_ilink_task_watches w JOIN member_expert_tasks t ON t.id=w.task_id AND t.user_id=w.user_id
+          WHERE w.task_id=${reply.task_watch_id} AND w.user_id=${reply.user_id} AND w.binding_version=${reply.binding_version} AND w.grant_id=${reply.expert_grant_id}::uuid AND t.expires_at>now()`;
+          if(!watch)throw Error('watch_revoked');
+          const [event]=await tx`SELECT 1 FROM member_ilink_task_events WHERE id=${id}`;
+          if(event){const [enabled]=await tx`SELECT 1 FROM member_ilink_task_watches WHERE task_id=${reply.task_watch_id} AND reminders_enabled=true`;
+            if(!enabled)throw Error('reminders_disabled');}
+        }
+      }catch{await tx`UPDATE member_ilink_reply_outbox SET status='cancelled',error_code='expert_grant_or_binding_changed' WHERE id=${id}`;return;}
     }
     const [recipient]=await tx<{recipient_id:string;channel_account_id:string;token_ciphertext:string;api_url:string;context_ciphertext:string|null;channel_state:string}[]>`
       SELECT a.recipient_id,a.channel_account_id,a.token_ciphertext,a.api_url,a.context_ciphertext,a.channel_state
