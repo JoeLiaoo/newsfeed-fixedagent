@@ -93,6 +93,13 @@ test("WX-A compact edition stays short through revalidation and replies use the 
   const replies=await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE inbound_id=${inboundId}`;
   assert.equal(replies.length,1);
   assert.match(replies[0]!.body,new RegExp(edition!.displayed_items[1]!.title));
+  const depthId=randomUUID();
+  await sql`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,body)
+    VALUES(${depthId},${userId},1,${"bot-"+suffix},'message-depth','深度1')`;
+  await processReadingInbound(depthId);
+  const depthReplies=await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE inbound_id=${depthId}`;
+  assert.equal(depthReplies.length,1);
+  assert.match(depthReplies[0]!.body,new RegExp(edition!.displayed_items[0]!.title));
   await sql`UPDATE member_notification_settings SET binding_version=2 WHERE user_id=${userId}`;
   const staleId=randomUUID();
   await sql`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,body)
