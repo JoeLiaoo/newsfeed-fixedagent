@@ -5,7 +5,8 @@ import {decryptSecret,ilinkConfigured,ilinkErrorKind,sendIlinkText} from "../not
 import type {CompactItem} from "../notifications/presentation.ts";
 import {readingIntent} from "./intent.ts";
 import {READING_QUEUE} from "./queue.ts";
-import {agentEnabled,AGENT_UNAVAILABLE,authorized} from "./authorization.ts";
+import {agentEnabled,authorized} from "./authorization.ts";
+import {agentUnavailableHelp,capabilitiesHelp,currentIlinkCapabilities} from "./help.ts";
 import {admitAgentRun} from "./agent-worker.ts";
 import {kbEnabled,parseKnowledgeIntent,admitKnowledgeRun,knowledgeReplyVisible,isKnowledgeCommand} from "./knowledge.ts";
 import {expertsEnabled,parseExpertIntent,isExpertCommand,handleExpertInbound} from "./experts.ts";
@@ -13,12 +14,11 @@ import {ilinkExpertActor,checkExpertActor} from "../experts/service.ts";
 
 type Inbound={id:string;user_id:string;binding_version:number;body:string;status:string};
 type SnapshotItem={source_key:string;title:string;tags:string[]};
-const help="可回复“深读 1”“其他”“全部”“下一页”或“主题：储能”，查看本期已收录资料。";
 function siteHome(){const value=process.env.SITE_URL??"";try{return new URL(value).origin+"/";}catch{return "请登录网站首页查看。";}}
 type ReadingAnswer=string|{body:string;page:number;editionId:string};
-async function answer(row:Inbound):Promise<ReadingAnswer>{
-  if(!row.body)return "当前支持文字阅读指令。可回复“帮助”查看可用操作。";
-  if(row.body.length>1000)return "消息较长，请缩短到 1000 字以内。可回复“帮助”查看阅读操作。";
+async function answer(row:Inbound,help:string):Promise<ReadingAnswer>{
+  if(!row.body)return `当前支持文字消息。${help}`;
+  if(row.body.length>1000)return `消息较长，请缩短到 1000 字以内。${help}`;
   const intent=readingIntent(row.body);
   if(intent.kind==="help")return help;
   if(intent.kind==="unknown")return help;
@@ -89,6 +89,17 @@ export async function processReadingInbound(id:string):Promise<void>{
       WHERE a.user_id=${row.user_id} AND s.binding_version=${row.binding_version}`;
     if(!valid){await tx`UPDATE member_ilink_inbound_messages SET status='cancelled' WHERE id=${id}`;return;}
     const intent=readingIntent(row.body);
+    const needsHelp=!row.body||row.body.length>1000||intent.kind==="help"||intent.kind==="unknown"||intent.kind==="ping";
+    const capabilities=needsHelp?await currentIlinkCapabilities(tx,row.user_id,row.binding_version):null;
+    const help=capabilities?capabilitiesHelp(capabilities):"";
+    if(!row.body||intent.kind==="help"||row.body.length>2000||row.body.length>1000&&!agentEnabled()){
+      const result=await answer(row,help);
+      const body=(typeof result==="string"?result:result.body).slice(0,1500);
+      await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body)
+        VALUES(${id},${id},${row.user_id},${row.binding_version},${body}) ON CONFLICT DO NOTHING`;
+      await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
+      produced=true;return;
+    }
     const kbIntent=intent.kind==="unknown"&&kbEnabled()?parseKnowledgeIntent(row.body):null;
     if(kbIntent){
       if(await admitKnowledgeRun(tx,row,kbIntent)){
@@ -96,19 +107,20 @@ export async function processReadingInbound(id:string):Promise<void>{
         return;
       }
       await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body)
-        VALUES(${id},${id},${row.user_id},${row.binding_version},'知识库暂时不可用，请检查微信授权。') ON CONFLICT DO NOTHING`;
+        VALUES(${id},${id},${row.user_id},${row.binding_version},${'知识库暂时不可用，请检查微信授权。'+help}) ON CONFLICT DO NOTHING`;
       await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
       produced=true;return;
     }
     if(intent.kind==="unknown"&&kbEnabled()&&isKnowledgeCommand(row.body)){
       await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body)
-        VALUES(${id},${id},${row.user_id},${row.binding_version},'请用“查知识库：问题”“搜知识库：关键词”或“知识库”查看库列表。') ON CONFLICT DO NOTHING`;
+        VALUES(${id},${id},${row.user_id},${row.binding_version},${(capabilities?.knowledge?'请用“查知识库：问题”“搜知识库：关键词”或“知识库”查看库列表。':'知识库暂时不可用，请检查微信授权。')+help}) ON CONFLICT DO NOTHING`;
       await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
       produced=true;return;
     }
     if(intent.kind==="unknown"&&expertsEnabled()&&(parseExpertIntent(row.body)||isExpertCommand(row.body))){
       const expertIntent=parseExpertIntent(row.body);
-      const result=expertIntent?await handleExpertInbound(tx,row,expertIntent):'请用“列专家”“跑同业看板：企业或赛道”“进度 A”“任务 A 选 1”或“取消 A”。';
+      const result=expertIntent?await handleExpertInbound(tx,row,expertIntent):
+        capabilities?.experts?'请用“列专家”“跑同业看板：企业或赛道”“进度 A”“任务 A 选 1”或“取消 A”。':help;
       const expertGrant=await tx<{grant_id:string}[]>`SELECT grant_id FROM member_agent_grants WHERE user_id=${row.user_id}`;
       await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body,task_watch_id,expert_grant_id)
         VALUES(${id},${id},${row.user_id},${row.binding_version},${typeof result==='string'?result:result.body},${typeof result==='string'?null:result.watchId??null},${expertGrant[0]?.grant_id??null}::uuid) ON CONFLICT DO NOTHING`;
@@ -116,17 +128,17 @@ export async function processReadingInbound(id:string):Promise<void>{
       produced=true;return;
     }
     if(intent.kind==="unknown"&&agentEnabled()){
-      const admission=row.body.length>2000?"unavailable":await admitAgentRun(tx,row);
+      const admission=await admitAgentRun(tx,row);
       if(admission==="queued"){
         await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
         return;
       }
       await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body)
-        VALUES(${id},${id},${row.user_id},${row.binding_version},${AGENT_UNAVAILABLE}) ON CONFLICT DO NOTHING`;
+        VALUES(${id},${id},${row.user_id},${row.binding_version},${await agentUnavailableHelp(tx,row.user_id,row.binding_version)}) ON CONFLICT DO NOTHING`;
       await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
       produced=true;return;
     }
-    const result=await answer(row);
+    const result=await answer(row,help);
     const body=(typeof result==="string"?result:result.body).slice(0,1500);
     await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body)
       VALUES(${id},${id},${row.user_id},${row.binding_version},${body}) ON CONFLICT DO NOTHING`;

@@ -29,10 +29,15 @@ test('WX-C2 creates once, isolates owners, confirms stored entity and recovers u
     await sql`INSERT INTO member_agent_grants(user_id) VALUES(${user!.id})`;
   }
   async function inbound(userId:string,body:string){const id=randomUUID();await sql`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,body) VALUES(${id},${userId},1,${`bot-${userId}`},${id},${body})`;await processReadingInbound(id);return id;}
+  const helpOff=await inbound(users[0]!,'帮助');
+  assert.doesNotMatch((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${helpOff}`)[0]!.body,/专家任务/);
   const off=await inbound(users[0]!,'跑同业看板：机器人赛道');
   assert.equal((await sql`SELECT 1 FROM member_expert_tasks WHERE user_id=${users[0]}`).length,0);
   assert.match((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${off}`)[0]!.body,/深读/);
   process.env.P3_ILINK_EXPERTS_ENABLED='true';
+  const helpOn=await inbound(users[0]!,'帮助');
+  assert.match((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${helpOn}`)[0]!.body,/列专家/);
+  assert.doesNotMatch((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${helpOn}`)[0]!.body,/自由聊/);
   const list=await inbound(users[0]!,'列专家');assert.match((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${list}`)[0]!.body,/同业/);
   const create=await inbound(users[0]!,'跑全景图：测试企业');await processReadingInbound(create);
   const [watch]=await sql<{task_id:string;alias:string}[]>`SELECT task_id,alias FROM member_ilink_task_watches WHERE created_inbound_id=${create}`;
@@ -76,6 +81,8 @@ test('WX-C2 creates once, isolates owners, confirms stored entity and recovers u
   await recoverExpertTaskEvents();
   assert.equal((await sql<{count:number}[]>`SELECT count(*)::int AS count FROM member_ilink_task_events WHERE task_id=${watch!.task_id}`)[0]!.count,2,'mute stops further events');
   await sql`DELETE FROM member_agent_grants WHERE user_id=${users[0]}`;
+  const helpRevoked=await inbound(users[0]!,'帮助');
+  assert.doesNotMatch((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${helpRevoked}`)[0]!.body,/专家任务/);
   await assert.rejects(checkExpertActor(ilinkExpertActor(users[0]!,1,grant!.grant_id)),/expert_forbidden/);
   await sql`UPDATE member_expert_tasks SET state='failed',stage='failed',updated_at=now()+interval '3 second' WHERE id=${secondWatch!.task_id}`;
   await recoverExpertTaskEvents();
