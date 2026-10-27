@@ -1,9 +1,25 @@
 import {createHash} from 'node:crypto';
-import {sql} from '@aihot/backend/db';
+import {sql,type Tx} from '@aihot/backend/db';
+import {enqueueOn} from '@aihot/backend/jobs/queue';
 import {ilinkExpertActor,checkExpertActor} from '../experts/service.ts';
 import {taskSummary} from './task-summary.ts';
 import {dispatchReadingReply} from './replies.ts';
 import {expertsEnabled} from './experts.ts';
+import {EXPERT_EVENT_QUEUE} from './task-event-queue.ts';
+
+/** The job and the status change share a commit; the minute scan remains the fallback. */
+export async function enqueueExpertTaskEventWake(taskId:string,tx:Tx){
+  if(process.env.P3_ILINK_EXPERT_EVENT_WAKE_ENABLED!=='true')return;
+  const [watch]=await tx<{state:string;updated_at:Date}[]>`SELECT t.state,t.updated_at FROM member_ilink_task_watches w JOIN member_expert_tasks t ON t.id=w.task_id WHERE w.task_id=${taskId} AND w.reminders_enabled=true`;
+  if(watch)await enqueueOn(EXPERT_EVENT_QUEUE,{taskId},{singletonKey:`${taskId}:${watch.state}:${watch.updated_at.toISOString()}`},tx);
+}
+
+export async function processExpertTaskEvent(taskId:string){
+  if(!expertsEnabled())return false;
+  const [watch]=await sql<{task_id:string;user_id:string}[]>`SELECT task_id,user_id FROM member_ilink_task_watches WHERE task_id=${taskId}`;
+  if(!watch)return false;
+  return emitExpertTaskEvent(watch);
+}
 
 export async function recoverExpertTaskEvents(){
   if(!expertsEnabled())return {events:0};
@@ -14,7 +30,13 @@ export async function recoverExpertTaskEvents(){
   ) ORDER BY t.updated_at LIMIT 100`;
   let events=0;
   for(const watch of watches){
-    const id=await sql.begin(async tx=>{
+    if(await emitExpertTaskEvent(watch))events++;
+  }
+  return {events};
+}
+
+async function emitExpertTaskEvent(watch:{task_id:string;user_id:string}){
+  const id=await sql.begin(async tx=>{
       await tx`SELECT pg_advisory_xact_lock(hashtext(${watch.user_id}))`;
       const [row]=await tx<{task_id:string;user_id:string;binding_version:number;grant_id:string;alias:string;last_event_version:Date|null;long_notice_sent:boolean;reminders_enabled:boolean;created_at:Date;state:string;stage:string;result:Record<string,unknown>|null;error_code:string|null;updated_at:Date;expires_at:Date;expert_slug:string;input:Record<string,unknown>;id:string}[]>`
         SELECT w.task_id,w.user_id,w.binding_version,w.grant_id,w.alias,w.last_event_version,w.long_notice_sent,w.created_at,w.reminders_enabled,t.id,t.state,t.stage,t.result,t.error_code,t.updated_at,t.expires_at,t.expert_slug,t.input
@@ -40,8 +62,7 @@ export async function recoverExpertTaskEvents(){
         VALUES(${eventId},${eventId},${row.user_id},${row.binding_version},${body},${row.id},${row.grant_id}::uuid,${row.expires_at}) ON CONFLICT DO NOTHING`;
       await tx`UPDATE member_ilink_task_watches SET last_event_version=${version},long_notice_sent=long_notice_sent OR ${long} WHERE task_id=${row.id}`;
       return eventId;
-    });
-    if(id){events++;await dispatchReadingReply(id);}
-  }
-  return {events};
+  });
+  if(id)await dispatchReadingReply(id);
+  return Boolean(id);
 }

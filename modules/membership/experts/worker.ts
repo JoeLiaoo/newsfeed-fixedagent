@@ -1,4 +1,5 @@
 import {resultSummary} from "../conversation/task-summary.ts";
+import {enqueueExpertTaskEventWake} from "../conversation/task-events.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { chatJson } from "@aihot/backend/providers/llm";
@@ -559,10 +560,12 @@ export async function runExpertTask(taskId: string) {
   const tasks = await sql<TaskRow[]>`UPDATE member_expert_tasks SET state='running', stage='processing', updated_at=now(), lease_token=${leaseToken}, lease_expires_at=now() + interval '5 minutes', execution_attempts=execution_attempts+1,confirmed_attempts=confirmed_attempts+CASE WHEN selected_entity IS NULL THEN 0 ELSE 1 END,last_attempt_at=now(),error_code=NULL,error_message=NULL WHERE id=${taskId} AND state='queued' AND expires_at > now() AND (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END) < 3 RETURNING id,user_id,expert_slug,input,selected_entity,execution_attempts`;
   const task = tasks[0];
   if (!task) {
-    await sql`UPDATE member_expert_tasks SET state='failed',stage='failed',error_code='expert_retry_exhausted',
+    await sql.begin(async tx=>{const failed=await tx`UPDATE member_expert_tasks SET state='failed',stage='failed',error_code='expert_retry_exhausted',
       error_message='任务执行次数已用尽，请重新提交。',finished_at=now(),updated_at=now()
       WHERE id=${taskId} AND state='queued' AND expires_at>now()
-        AND (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END)>=3`;
+        AND (CASE WHEN selected_entity IS NULL THEN execution_attempts ELSE confirmed_attempts END)>=3 RETURNING id`;
+      if(failed.length)await enqueueExpertTaskEventWake(taskId,tx);
+    });
     return;
   }
   let leaseLost = false;
@@ -593,7 +596,10 @@ export async function runExpertTask(taskId: string) {
       const { candidates, approximate } = await companyCandidates(name);
       await assertRunning(taskId, leaseToken);
       if (!candidates.length) throw new ExpertProviderError("xinhua_no_candidates");
-      await sql`UPDATE member_expert_tasks SET state='waiting_input',stage='choose_entity',result=${sql.json({ candidates, approximate, query: name })},updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
+      await sql.begin(async tx=>{
+        const waiting=await tx`UPDATE member_expert_tasks SET state='waiting_input',stage='choose_entity',result=${tx.json({ candidates, approximate, query: name })},updated_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`;
+        if(waiting.length)await enqueueExpertTaskEventWake(taskId,tx);
+      });
       return;
     }
     if (isSectorPeer) report = await runSectorPeer(task, leaseToken);
@@ -630,10 +636,14 @@ export async function runExpertTask(taskId: string) {
       if (!active.length) return;
       await tx`INSERT INTO member_expert_artifacts(task_id,user_id,filename,content_type,body,sha256) VALUES (${taskId},${task.user_id},${`expert-${taskId}.${isSectorPeer ? "html" : "md"}`},${isSectorPeer ? "text/html; charset=utf-8" : "text/markdown; charset=utf-8"},${body},${digest}) ON CONFLICT(task_id) DO NOTHING`;
       await tx`UPDATE member_expert_tasks SET state='succeeded',stage='complete',result=${tx.json({...(isSectorPeer ? { html: report, format: "html" } : isFrontierPodcast ? { html: previewHtml, format: "html", podcast: podcastStatus } : task.expert_slug === PANORAMA_EXPERT_SLUG ? { html: panoramaHtml, format: "html", panorama: panoramaStatus } : task.expert_slug === LISTED_FUND_PARTICIPATION_EXPERT_SLUG ? { html: listedFundHtml, format: "html", listedFund: listedFundStatus } : { preview: report.slice(0, 6000), ...(panoramaStatus ? { panorama: panoramaStatus } : {}) }),summary:resultSummary(task.expert_slug,task.input,panoramaStatus,podcastStatus)})},updated_at=now(),finished_at=now(),expires_at=GREATEST(expires_at,(SELECT expires_at FROM member_expert_artifacts WHERE task_id=${taskId})),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId}`;
+      await enqueueExpertTaskEventWake(taskId,tx);
     });
   } catch (error) {
     const detail = errorText(error);
-    if (!leaseLost) await sql`UPDATE member_expert_tasks SET state='failed',stage='failed',error_code=${detail.code},error_message=${detail.message},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken}`;
+    if (!leaseLost) await sql.begin(async tx=>{
+      const failed=await tx`UPDATE member_expert_tasks SET state='failed',stage='failed',error_code=${detail.code},error_message=${detail.message},updated_at=now(),finished_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=${taskId} AND state='running' AND lease_token=${leaseToken} RETURNING id`;
+      if(failed.length)await enqueueExpertTaskEventWake(taskId,tx);
+    });
   } finally {
     clearInterval(heartbeat);
   }
@@ -664,6 +674,8 @@ export async function recoverExpertTasks(enqueue: (taskId: string, tx: Db) => Pr
       ) UPDATE member_expert_tasks t SET state='failed',stage='failed',error_code='expert_retry_exhausted',
         error_message='任务执行次数已用尽，请重新提交。',finished_at=now(),updated_at=now()
         FROM pending WHERE t.id=pending.id RETURNING t.id`;
+    for(const row of stale.filter(row=>row.state==='failed'))await enqueueExpertTaskEventWake(row.id,tx);
+    for(const row of exhaustedQueued)await enqueueExpertTaskEventWake(row.id,tx);
     const queued = stale.filter(row => row.state === "queued");
     for (const row of queued) await enqueue(row.id, tx);
     for (const row of legacy) await enqueue(row.id, tx);

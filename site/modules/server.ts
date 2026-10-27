@@ -12,6 +12,7 @@ import {READING_QUEUE,recoverReadingReplies} from "@citic/membership/conversatio
 import {AGENT_QUEUE,recoverAgentRuns} from "@citic/membership/conversation-agent-queue";
 import {KB_QUEUE,recoverKnowledgeRuns} from "@citic/membership/conversation-knowledge-queue";
 import {recoverExpertTaskEvents} from "@citic/membership/conversation-task-events";
+import {EXPERT_EVENT_QUEUE} from "@citic/membership/conversation-expert-event-queue";
 
 const fastPollCanaries=new Set((process.env.P3_ILINK_FAST_POLL_USER_IDS??"").split(",").map(id=>id.trim()).filter(Boolean));
 const fastPollQueue={...FAST_POLL_QUEUE,worker:{...FAST_POLL_QUEUE.worker,
@@ -21,6 +22,7 @@ export const SERVER_MODULES: readonly ServerModule[] = [{
   name: "membership",
   http: registerMembership,
   queues: [EXPERT_QUEUE, GP_QUEUE, WIKI_QUEUE, READING_QUEUE, AGENT_QUEUE, KB_QUEUE,
+    ...(process.env.P3_ILINK_EXPERT_EVENT_WAKE_ENABLED==="true"?[EXPERT_EVENT_QUEUE]:[]),
     ...(process.env.P3_ILINK_FAST_POLL_ENABLED==="true" && fastPollCanaries.size?[fastPollQueue]:[])],
   schedules: [
     {name: "membership.notifications-generate",cron:"0 9-23 * * *",missed:"once",run:generateDueNotifications,when:()=>process.env.P3_NOTIFICATIONS_ENABLED==="true"},
