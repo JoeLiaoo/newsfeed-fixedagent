@@ -1,7 +1,7 @@
 # 分步骤实施计划
 
 需求基线日期：2026-10-21（Asia/Shanghai） · 状态核对：2026-10-26
-依据：`docs/PLAN.md` v0.92；当前使用 DeepSeek API 与新华财经 MCP。
+依据：`docs/PLAN.md` v0.93；当前使用 DeepSeek API 与新华财经 MCP。
 
 阶段勾选的阅读视图见[项目进度汇报](PROGRESS-REPORT.md)；本文件仍是任务状态的唯一依据。
 
@@ -143,6 +143,8 @@ P2 已交付专家导入、依赖状态、私有任务材料、持久化队列�
 | [ ] | P3-04 | 仅管理员批准注册的平台用户可以在「个人设置→绑定微信」获取短期专属 iLink 二维码；员工扫码并在微信确认后自动绑定，不输入网页绑定码或二次确认。每人可使用独立 bot；允许会话窗口失效后主动发消息恢复订阅。新账号资讯和 GP 订阅默认开启、可分别退订；普通聊天须单独授权。先验证双员工独立 bot 和主动送达，再完成扫码绑定、退订、跨日恢复与权限隔离 | [代码施工（待外部验收）](logs/2026-10-22-P3-implementation.md)、[Hermes 网关部署](logs/2026-10-22-P4-hermes-gateway.md)、[历史 bridge 部署记录](logs/2026-10-22-P3-wechat-flow.md)、[PR #15 代码与治理检查](logs/2026-10-22-pr15-docs-governance.md)、[服务端确认绑定修复](logs/2026-10-22-P3-04-server-side-binding.md)、[双用户推送抽测](logs/2026-10-23-P3-04-live-push-smoke.md)、[扫码绑定与聊天运维手册](P3-OPERATIONS.md#员工扫码绑定与聊天) |
 
 2026-10-26 [iLink 近失效保活提醒](logs/2026-10-26-P3-ilink-keepalive-nudge.md)为最近一次入站互动满 20 小时且会话仍 active 的绑定账号增加单次提醒，阈值可调；不代表官方窗口时限或真实业务验收。P3-04 继续保持 `[ ]`。
+
+2026-10-27 [WX-A 短摘要与阅读追问](logs/2026-10-27-WX-A-short-digest-reading.md)新增默认关闭的新闻短摘要和确定性阅读回复、入站去重与独立回复队列。仅合成 fixture 与本地测试通过；真实双员工、跨日和手机端验收未完成，P3-04 保持 `[ ]`。
 
 P3 的 GP 管理、快照证据、AI 分类审核、微信绑定与持久化 outbox **已在 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/4) 合并至 `main`**（合并提交 `3048ef48`）；全仓审查整改及通知分片、退订／解绑并发修复 **已在 [PR #6](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/6) 合并**（合并提交 `2c98e53`）。PR #15 的独立员工扫码授权、多账号 iLink 推送与恢复代码已部署。2026-10-22 按用户指示启用扫码、GP 同步、通知生成与投递四项开关。PR #22（`8a84319`）已部署：二维码新标签页、明确扫码反馈和入站消息状态框已上线。2026-10-23 对两个已绑定账号各发送一条连通性测试通知，outbox 显示 `accepted=2`；用户已确认两台手机均收到。跨日投递和失效恢复仍待验证，并需完成 GP 主体与事件核验及实际同步。P3-01～P3-04 保持 `[ ]`。详情见[双用户抽测日志](logs/2026-10-23-P3-04-live-push-smoke.md)、[手机端收件确认记录](logs/2026-10-23-P3-04-handset-receipt.md)、[开关启用记录](logs/2026-10-22-P3-flags-enabled.md)及[联调和上线闸门](P3-OPERATIONS.md)。
 

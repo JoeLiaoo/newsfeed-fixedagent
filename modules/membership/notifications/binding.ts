@@ -34,6 +34,9 @@ export async function completeIlinkBinding(userId:string,sessionHash:string,scan
     if(collision.length)return "identity_already_bound";
     await tx`INSERT INTO member_notification_settings(user_id) VALUES(${userId}) ON CONFLICT DO NOTHING`;
     await tx`UPDATE member_notification_settings SET binding_version=binding_version+1,updated_at=now() WHERE user_id=${userId}`;
+    await tx`DELETE FROM member_ilink_conversations WHERE user_id=${userId}`;
+    await tx`UPDATE member_ilink_reply_outbox SET status='cancelled',error_code='binding_changed'
+      WHERE user_id=${userId} AND status IN('pending','failed')`;
     await tx`INSERT INTO member_ilink_accounts(user_id,recipient_id,channel_account_id,token_ciphertext,api_url,channel_state)
       VALUES(${userId},${identity.recipientId},${identity.channelAccountId},${encryptSecret(identity.botToken)},${identity.base},'needs_interaction')
       ON CONFLICT(user_id) DO UPDATE SET recipient_id=EXCLUDED.recipient_id,channel_account_id=EXCLUDED.channel_account_id,
