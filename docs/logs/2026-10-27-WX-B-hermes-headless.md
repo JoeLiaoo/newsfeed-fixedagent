@@ -26,6 +26,7 @@
 - WX-B standalone 2/2：通过；辅助调用计费与未知价格、WX-A 阅读指令优先。
 - 隔离数据库 WX-B + WX-A 2/2：通过；两员工上下文隔离、重复入站唯一、运行中撤权取消回发、runner 故障降级、WX-A 旧行为。iLink 未真实发送。
 - `node scripts/check-doc-links.ts`、`git diff --check`：通过。
+- PR 首次 `postgres-integration` 在现有架构检查中发现 grant 表的 `granted_at` 未被生产代码读取；迁移内改用仓库统一的 `created_at` 行时间戳，并在干净测试库复验。此项为 PR 合并前修复，不改变 grant 行为。
 
 ## 未验证事项与风险
 
