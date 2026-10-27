@@ -14,7 +14,8 @@
     "./notifications-outbox": "./notifications/outbox.ts",
     "./notifications-inbox": "./notifications/inbox.ts",
     "./notifications-scan": "./notifications/scan.ts",
-    "./conversation-queue": "./conversation/queue.ts"
+    "./conversation-queue": "./conversation/queue.ts",
+    "./conversation-agent-queue": "./conversation/agent-queue.ts"
   },
   "dependencies": {
     "@aihot/backend": "*",

@@ -1,0 +1,7 @@
+# Append as the last -f file only when the host runner has been installed.
+services:
+  worker:
+    group_add:
+      - "${HERMES_RUNNER_GID:?set the host newsfeed-hermes group GID}"
+    volumes:
+      - /run/newsfeed-hermes:/run/newsfeed-hermes:ro

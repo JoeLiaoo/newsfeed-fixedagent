@@ -1,0 +1,26 @@
+[Unit]
+Description=Newsfeed isolated Hermes headless runner
+After=network-online.target
+
+[Service]
+Type=simple
+User=newsfeed-hermes
+Group=newsfeed-hermes
+UMask=0007
+EnvironmentFile=/etc/newsfeed-hermes/runner.env
+ExecStart=/usr/bin/python3 /opt/citic-newsfeed/current/deploy/hermes-headless-runner/runner.py
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/newsfeed-hermes /var/lib/newsfeed-hermes
+RuntimeDirectory=newsfeed-hermes
+RuntimeDirectoryMode=0770
+StateDirectory=newsfeed-hermes
+StateDirectoryMode=0700
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

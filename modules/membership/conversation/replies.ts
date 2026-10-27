@@ -5,6 +5,8 @@ import {decryptSecret,ilinkConfigured,ilinkErrorKind,sendIlinkText} from "../not
 import type {CompactItem} from "../notifications/presentation.ts";
 import {readingIntent} from "./intent.ts";
 import {READING_QUEUE} from "./queue.ts";
+import {agentEnabled,AGENT_UNAVAILABLE,authorized} from "./authorization.ts";
+import {admitAgentRun} from "./agent-worker.ts";
 
 type Inbound={id:string;user_id:string;binding_version:number;body:string;status:string};
 type SnapshotItem={source_key:string;title:string;tags:string[]};
@@ -83,6 +85,18 @@ export async function processReadingInbound(id:string):Promise<void>{
       JOIN member_notification_settings s ON s.user_id=a.user_id
       WHERE a.user_id=${row.user_id} AND s.binding_version=${row.binding_version}`;
     if(!valid){await tx`UPDATE member_ilink_inbound_messages SET status='cancelled' WHERE id=${id}`;return;}
+    const intent=readingIntent(row.body);
+    if(intent.kind==="unknown"&&agentEnabled()){
+      const admission=row.body.length>2000?"unavailable":await admitAgentRun(tx,row);
+      if(admission==="queued"){
+        await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
+        return;
+      }
+      await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body)
+        VALUES(${id},${id},${row.user_id},${row.binding_version},${AGENT_UNAVAILABLE}) ON CONFLICT DO NOTHING`;
+      await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
+      produced=true;return;
+    }
     const result=await answer(row);
     const body=(typeof result==="string"?result:result.body).slice(0,1500);
     await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body)
@@ -101,9 +115,17 @@ export async function dispatchReadingReply(id:string):Promise<void>{
   if(!owner)return;
   await sql.begin(async tx=>{
     await tx`SELECT pg_advisory_xact_lock(hashtext(${owner.user_id}))`;
-    const [reply]=await tx<{id:string;user_id:string;binding_version:number;body:string;status:string}[]>`SELECT id,user_id,binding_version,body,status
+    const [reply]=await tx<{id:string;user_id:string;binding_version:number;body:string;status:string;agent_run_id:string|null}[]>`SELECT id,user_id,binding_version,body,status,agent_run_id
       FROM member_ilink_reply_outbox WHERE id=${id} AND status IN ('pending','failed') AND next_attempt_at<=now() FOR UPDATE SKIP LOCKED`;
     if(!reply)return;
+    if(reply.agent_run_id){
+      const [run]=await tx<{grant_id:string}[]>`SELECT grant_id FROM member_agent_runs
+        WHERE id=${reply.agent_run_id} AND status IN ('succeeded','failed')`;
+      if(!run||!await authorized(tx,reply.user_id,reply.binding_version,run.grant_id)){
+        await tx`UPDATE member_ilink_reply_outbox SET status='cancelled',error_code='agent_grant_changed' WHERE id=${id}`;
+        return;
+      }
+    }
     const [recipient]=await tx<{recipient_id:string;channel_account_id:string;token_ciphertext:string;api_url:string;context_ciphertext:string|null;channel_state:string}[]>`
       SELECT a.recipient_id,a.channel_account_id,a.token_ciphertext,a.api_url,a.context_ciphertext,a.channel_state
       FROM member_ilink_accounts a JOIN member_weixin_bindings b ON b.user_id=a.user_id AND b.status='active'
