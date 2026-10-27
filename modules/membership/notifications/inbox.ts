@@ -89,10 +89,10 @@ export async function pollMemberIlinkInboxes() {
         });
         pollReturned=true;
         latencyEvent({correlationId:pollId,stage:"poll",route:"inbox",status:"returned",durationMs:result.pollDurationMs});
-        for(const message of result.messages){
+        for(const [pollPosition,message] of result.messages.entries()){
           const readingEnabled=process.env.P3_ILINK_READING_REPLIES_ENABLED==="true";
-          const [inserted]=await tx<{id:string}[]>`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,seq,body,status,received_at)
-            VALUES(${randomUUID()},${row.user_id},${row.binding_version},${row.channel_account_id},${message.id},${message.seq},${message.text.slice(0,4096)},${readingEnabled?'pending':'ignored'},${result.receivedAt})
+          const [inserted]=await tx<{id:string}[]>`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,seq,body,status,received_at,poll_position)
+            VALUES(${randomUUID()},${row.user_id},${row.binding_version},${row.channel_account_id},${message.id},${message.seq},${message.text.slice(0,4096)},${readingEnabled?'pending':'ignored'},${result.receivedAt},${pollPosition})
             ON CONFLICT(bot_id,upstream_id) DO NOTHING RETURNING id`;
           if(inserted&&readingEnabled)await enqueueOn(READING_QUEUE,{inboundId:inserted.id},{singletonKey:inserted.id},tx);
         }
