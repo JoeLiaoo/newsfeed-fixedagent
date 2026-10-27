@@ -1,0 +1,97 @@
+import assert from "node:assert/strict";
+import {randomUUID} from "node:crypto";
+import {test} from "node:test";
+import {sql,closeDb} from "@aihot/backend/db";
+import {stopBossNow} from "@aihot/backend/jobs/queue";
+import {stub} from "../../../tests/setup.ts";
+import {processReadingInbound} from "../conversation/replies.ts";
+import {processKnowledgeRun,knowledgeReplyVisible,parseKnowledgeIntent,validateKnowledgeAction} from "../conversation/knowledge.ts";
+import {ensureDefaultBase} from "../knowledge/bases.ts";
+
+test("WX-C1 uses the shared answer chain, isolates employees and stops stale replies",async t=>{
+  const keys=["P3_ILINK_KB_ENABLED","P3_ILINK_AGENT_ENABLED","P3_ILINK_READING_REPLIES_ENABLED","P3_DELIVERY_ENABLED","MODEL_CALLS_ENABLED","LLM_BASE_URL","LLM_API_KEY","LLM_MODEL","SITE_URL"];
+  const before=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
+  t.after(async()=>{for(const [key,value] of Object.entries(before))if(value===undefined)delete process.env[key];else process.env[key]=value;await stopBossNow();await closeDb();});
+  assert.equal(parseKnowledgeIntent('查知识库：某公司怎么看')?.action,'knowledge.answer');
+  assert.equal(parseKnowledgeIntent('深读 2'),null);
+  for(const extra of ['user_id','url','sql','path','credential']){
+    assert.equal(validateKnowledgeAction({action:'knowledge.answer',query:'某公司怎么看',[extra]:'untrusted'}),null);
+  }
+  const provider=await stub((_hit,req)=>{
+    const request=JSON.parse(req.body) as {messages:Array<{role:string;content:string}>};
+    const input=JSON.parse(request.messages.find(message=>message.role==='user')!.content) as {availablePages:Array<{slug:string;availableCitations:Array<{citationId:string}>}>};
+    const page=input.availablePages[0]!;
+    return {choices:[{message:{content:JSON.stringify({answer:'某公司维持看好[^1]。',citations:[{label:'1',pageSlug:page.slug,citationId:page.availableCitations[0]!.citationId}]})}}]};
+  });
+  t.after(()=>provider.close());
+  Object.assign(process.env,{P3_ILINK_KB_ENABLED:'true',P3_ILINK_AGENT_ENABLED:'true',P3_ILINK_READING_REPLIES_ENABLED:'true',P3_DELIVERY_ENABLED:'true',MODEL_CALLS_ENABLED:'true',LLM_BASE_URL:`${provider.url}/v1`,LLM_API_KEY:'test-key',LLM_MODEL:'test-model',SITE_URL:'https://site.example.test'});
+  await ensureDefaultBase();
+  const users=[randomUUID(),randomUUID()];
+  for(const [i,userId] of users.entries()){
+    await sql`INSERT INTO member_users(id,username,real_name,password_hash,status) VALUES(${userId},${`wx-kb-${userId}`},${`员工${i}`},'fixture','active')`;
+    await sql`INSERT INTO member_notification_settings(user_id) VALUES(${userId})`;
+    await sql`INSERT INTO member_weixin_bindings(user_id,recipient_id,channel_account_id) VALUES(${userId},${`recipient-${userId}`},${`bot-${userId}`})`;
+    await sql`INSERT INTO member_ilink_accounts(user_id,recipient_id,channel_account_id,token_ciphertext,api_url) VALUES(${userId},${`recipient-${userId}`},${`bot-${userId}`},'fixture','https://example.test')`;
+    await sql`INSERT INTO member_agent_grants(user_id) VALUES(${userId})`;
+  }
+  const document=randomUUID(),version=randomUUID(),page=randomUUID(),citation=randomUUID(),revision=randomUUID();
+  await sql`INSERT INTO member_wiki_documents(id,uploader_id,title,base_id) VALUES(${document},${users[0]!},'某公司研究', 'shared')`;
+  await sql`INSERT INTO member_wiki_document_versions(id,document_id,version_no,uploader_id,file_name,media_type,format,byte_size,sha256,body,extraction_status)
+    VALUES(${version},${document},1,${users[0]!},'research.md','text/markdown','markdown',7,${version},${Buffer.from('fixture')},'available')`;
+  await sql`INSERT INTO member_wiki_pages(id,slug,page_type,target_name,status,base_id) VALUES(${page},'view-wx-kb-company','view','某公司','published','shared')`;
+  await sql`INSERT INTO member_wiki_page_revisions(id,page_id,revision,body_md,coverage) VALUES(${revision},${page},1,'某公司维持看好',${sql.json({analysts:1,firms:1,reports:1})})`;
+  await sql`INSERT INTO member_wiki_citations(id,page_id,revision,version_id,label,analyst,organization,published_on) VALUES(${citation},${page},1,${version},'S1','张三','某券商','2026-06-20')`;
+  async function inbound(userId:string,body:string){
+    const id=randomUUID();
+    await sql`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,body) VALUES(${id},${userId},1,${`bot-${userId}`},${id},${body})`;
+    await processReadingInbound(id);await processReadingInbound(id);
+    return id;
+  }
+  process.env.P3_ILINK_KB_ENABLED='false';
+  const off=await inbound(users[0]!,'查知识库：某公司怎么看');
+  assert.equal((await sql`SELECT 1 FROM member_ilink_kb_runs WHERE id=${off}`).length,0);
+  process.env.P3_ILINK_KB_ENABLED='true';
+  const first=await inbound(users[0]!,'查知识库：某公司怎么看');
+  await processKnowledgeRun(first);await processKnowledgeRun(first);
+  assert.equal(provider.hits(),1,'replay pays once');
+  const [result]=await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${first}`;
+  assert.match(result!.body,/某公司维持看好/);
+  assert.match(result!.body,/https:\/\/site.example.test\/knowledge\/targets\/view-wx-kb-company/);
+  const [stored]=await sql<{asked_by:string}[]>`SELECT asked_by FROM member_wiki_answers WHERE asked_by=${users[0]!}`;
+  assert.equal(stored?.asked_by,users[0]);
+  const second=await inbound(users[1]!,'查知识库：某公司怎么看');
+  await processKnowledgeRun(second);
+  assert.equal(provider.hits(),2);
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_answers WHERE asked_by=${users[0]!}`)[0]?.n,1);
+  assert.equal((await sql`SELECT count(*)::int AS n FROM member_wiki_answers WHERE asked_by=${users[1]!}`)[0]?.n,1);
+  assert.equal(await sql.begin(tx=>knowledgeReplyVisible(tx,first)),true);
+  await sql`UPDATE member_notification_settings SET binding_version=2 WHERE user_id=${users[0]!}`;
+  assert.equal(await sql.begin(tx=>knowledgeReplyVisible(tx,first)),false,'rebinding blocks an old reply');
+  await sql`UPDATE member_notification_settings SET binding_version=1 WHERE user_id=${users[0]!}`;
+  const noCoverage=await inbound(users[0]!,'查知识库：完全无关的新问题');
+  await processKnowledgeRun(noCoverage);
+  assert.equal(provider.hits(),2);
+  assert.match((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${noCoverage}`)[0]!.body,/没有足够材料/);
+  await sql`INSERT INTO member_wiki_bases(id,name,description,status) VALUES('kb-wx-second','第二库','','active')`;
+  await sql`DELETE FROM member_ilink_kb_conversations WHERE user_id=${users[0]!}`;
+  const multiple=await inbound(users[0]!,'查知识库：某公司怎么看');
+  await processKnowledgeRun(multiple);
+  assert.match((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${multiple}`)[0]!.body,/请先选知识库/);
+  assert.equal(provider.hits(),2,'multi-base selection does not pay for an answer');
+  const select=await inbound(users[0]!,'选知识库 2');
+  await processKnowledgeRun(select);
+  await sql`UPDATE member_wiki_bases SET status='archived' WHERE id='kb-wx-second'`;
+  const archived=await inbound(users[0]!,'查知识库：某公司怎么看');
+  await processKnowledgeRun(archived);
+  assert.match((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${archived}`)[0]!.body,/已归档/);
+  assert.equal(provider.hits(),2,'an archived selection never falls back to shared');
+  await sql`DELETE FROM member_agent_grants WHERE user_id=${users[0]!}`;
+  assert.equal(await sql.begin(tx=>knowledgeReplyVisible(tx,first)),false,'grant withdrawal blocks a queued reply');
+  const cancelled=await inbound(users[0]!,'查知识库：某公司怎么看');
+  await processKnowledgeRun(cancelled);
+  assert.equal((await sql`SELECT 1 FROM member_ilink_kb_runs WHERE id=${cancelled}`).length,0,'revoked employee cannot start a run');
+  await sql`INSERT INTO member_wiki_page_revisions(id,page_id,revision,body_md) VALUES(${randomUUID()},${page},2,'修订后的内容')`;
+  assert.equal(await sql.begin(tx=>knowledgeReplyVisible(tx,second)),false,'a new page revision blocks an old citation');
+  await sql`UPDATE member_wiki_pages SET status='withdrawn' WHERE id=${page}`;
+  assert.equal(await sql.begin(tx=>knowledgeReplyVisible(tx,second)),false,'withdrawn page blocks a queued reply');
+});

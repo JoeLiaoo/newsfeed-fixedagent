@@ -49,7 +49,8 @@ export function offeredCitations(pages: RoutablePage[]): OfferedCitation[] {
 }
 
 /** The pages given to the model, with what each of them covers and how current it is. */
-function pagesPayload(pages: RoutablePage[], offered: OfferedCitation[], now = new Date()) {
+function pagesPayload(pages: RoutablePage[], offered: OfferedCitation[], now = new Date(), short = false) {
+  const perPageBodyLimit = short ? Math.floor(24_000 / Math.max(1, pages.length)) : 12_000;
   return pages.map(page => {
     const tier = freshnessTier(page.coverage.last_report, now);
     return {
@@ -80,7 +81,7 @@ function pagesPayload(pages: RoutablePage[], offered: OfferedCitation[], now = n
           sourceTitle: citation.sourceTitle,
         };
       }),
-      body: page.bodyMd.slice(0, 12_000),
+      body: page.bodyMd.slice(0, perPageBodyLimit),
     };
   });
 }
@@ -164,18 +165,19 @@ function claimMarker(claim: { label: string }, entry: OfferedCitation, offered: 
  * this turn offered; the attribution, the coverage and the freshness are read from the library's own
  * records, not from what the model wrote.
  */
-export async function answerQuestion(question: string, pages: RoutablePage[], now = new Date()): Promise<TrustedAnswer> {
+export async function answerQuestion(question: string, pages: RoutablePage[], now = new Date(), options: {memberUserId?: string; short?: boolean} = {}): Promise<TrustedAnswer> {
   const ceiling = aggregateCoverage(pages);
   const offered = offeredCitations(pages);
   const answer = await chatJson({
     model: "default",
     purpose: "knowledge",
-    subject: `wiki:answer:${question.slice(0, 40)}`,
-    promptVersion: "wiki-answer-3",
-    system: ANSWER_SYSTEM,
+    subject: "wiki:answer",
+    memberUserId: options.memberUserId,
+    promptVersion: options.short ? "wiki-answer-wx-1" : "wiki-answer-3",
+    system: options.short ? `${ANSWER_SYSTEM}\n微信回答请简短，最多约 1200 tokens；只保留最关键的 2–3 条引用，不省去必要的覆盖和时效限制。` : ANSWER_SYSTEM,
     user: JSON.stringify({
       question,
-      availablePages: pagesPayload(pages, offered, now),
+      availablePages: pagesPayload(pages, offered, now, options.short),
       coverageCeiling: {
         analysts: ceiling.analysts,
         firms: ceiling.firms,
@@ -191,7 +193,7 @@ export async function answerQuestion(question: string, pages: RoutablePage[], no
     }),
     schema: answerSchema,
     temperature: 0.2,
-    maxTokens: 4000,
+    maxTokens: options.short ? 1200 : 4000,
   });
   try {
     return verifyAnswer(answer.data, pages, now);

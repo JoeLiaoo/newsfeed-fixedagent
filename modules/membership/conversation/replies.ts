@@ -7,6 +7,7 @@ import {readingIntent} from "./intent.ts";
 import {READING_QUEUE} from "./queue.ts";
 import {agentEnabled,AGENT_UNAVAILABLE,authorized} from "./authorization.ts";
 import {admitAgentRun} from "./agent-worker.ts";
+import {kbEnabled,parseKnowledgeIntent,admitKnowledgeRun,knowledgeReplyVisible,isKnowledgeCommand} from "./knowledge.ts";
 
 type Inbound={id:string;user_id:string;binding_version:number;body:string;status:string};
 type SnapshotItem={source_key:string;title:string;tags:string[]};
@@ -86,6 +87,23 @@ export async function processReadingInbound(id:string):Promise<void>{
       WHERE a.user_id=${row.user_id} AND s.binding_version=${row.binding_version}`;
     if(!valid){await tx`UPDATE member_ilink_inbound_messages SET status='cancelled' WHERE id=${id}`;return;}
     const intent=readingIntent(row.body);
+    const kbIntent=intent.kind==="unknown"&&kbEnabled()?parseKnowledgeIntent(row.body):null;
+    if(kbIntent){
+      if(await admitKnowledgeRun(tx,row,kbIntent)){
+        await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
+        return;
+      }
+      await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body)
+        VALUES(${id},${id},${row.user_id},${row.binding_version},'知识库暂时不可用，请检查微信授权。') ON CONFLICT DO NOTHING`;
+      await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
+      produced=true;return;
+    }
+    if(intent.kind==="unknown"&&kbEnabled()&&isKnowledgeCommand(row.body)){
+      await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body)
+        VALUES(${id},${id},${row.user_id},${row.binding_version},'请用“查知识库：问题”“搜知识库：关键词”或“知识库”查看库列表。') ON CONFLICT DO NOTHING`;
+      await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
+      produced=true;return;
+    }
     if(intent.kind==="unknown"&&agentEnabled()){
       const admission=row.body.length>2000?"unavailable":await admitAgentRun(tx,row);
       if(admission==="queued"){
@@ -115,7 +133,7 @@ export async function dispatchReadingReply(id:string):Promise<void>{
   if(!owner)return;
   await sql.begin(async tx=>{
     await tx`SELECT pg_advisory_xact_lock(hashtext(${owner.user_id}))`;
-    const [reply]=await tx<{id:string;user_id:string;binding_version:number;body:string;status:string;agent_run_id:string|null}[]>`SELECT id,user_id,binding_version,body,status,agent_run_id
+    const [reply]=await tx<{id:string;user_id:string;binding_version:number;body:string;status:string;agent_run_id:string|null;kb_run_id:string|null}[]>`SELECT id,user_id,binding_version,body,status,agent_run_id,kb_run_id
       FROM member_ilink_reply_outbox WHERE id=${id} AND status IN ('pending','failed') AND next_attempt_at<=now() FOR UPDATE SKIP LOCKED`;
     if(!reply)return;
     if(reply.agent_run_id){
@@ -125,6 +143,10 @@ export async function dispatchReadingReply(id:string):Promise<void>{
         await tx`UPDATE member_ilink_reply_outbox SET status='cancelled',error_code='agent_grant_changed' WHERE id=${id}`;
         return;
       }
+    }
+    if(reply.kb_run_id&&!await knowledgeReplyVisible(tx,reply.kb_run_id)){
+      await tx`UPDATE member_ilink_reply_outbox SET status='cancelled',error_code='kb_source_or_grant_changed' WHERE id=${id}`;
+      return;
     }
     const [recipient]=await tx<{recipient_id:string;channel_account_id:string;token_ciphertext:string;api_url:string;context_ciphertext:string|null;channel_state:string}[]>`
       SELECT a.recipient_id,a.channel_account_id,a.token_ciphertext,a.api_url,a.context_ciphertext,a.channel_state
