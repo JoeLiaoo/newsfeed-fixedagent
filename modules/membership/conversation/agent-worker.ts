@@ -1,4 +1,6 @@
 import {sql,type Tx} from "@aihot/backend/db";
+import {performance} from "node:perf_hooks";
+import {latencyEvent} from "./latency.ts";
 import {enqueueOn} from "@aihot/backend/jobs/queue";
 import {agentEnabled,authorized} from "./authorization.ts";
 import {agentUnavailableHelp} from "./help.ts";
@@ -95,12 +97,15 @@ export async function processAgentRun(id:string):Promise<void>{
     ORDER BY r.created_at DESC LIMIT 6`;
   let answer="",usage:AgentUsage|null=null;
   let errorCode:string|null=null;
+  const modelStarted=performance.now();
   try{
     const result=await askHermes(promptFor(history,inbound.body));
     usage=result.usage;
     answer=result.answer.length>900?result.answer.slice(0,890)+"…（回答已截短）":result.answer;
     answer=answer.slice(0,1400);
   }catch(error){errorCode=error instanceof Error?error.message:"runner_failed";}
+  latencyEvent({correlationId:id,stage:"model",route:"agent",status:errorCode?"failed":"processed",
+    durationMs:performance.now()-modelStarted,apiCalls:usage?.apiCalls,totalTokens:usage?.totalTokens});
   const shouldSend=await sql.begin(async tx=>{
     await tx`SELECT pg_advisory_xact_lock(hashtext(${claimed.user_id}))`;
     const [live]=await tx`SELECT 1 FROM member_agent_runs WHERE id=${id} AND status='running' FOR UPDATE`;

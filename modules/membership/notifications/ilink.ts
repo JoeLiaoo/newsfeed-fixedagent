@@ -1,6 +1,7 @@
 // Tencent iLink transport. Keep QR status and every bot credential on the server.
 // Protocol reference: https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md
 import { createCipheriv,createDecipheriv,randomBytes,randomUUID } from "node:crypto";
+import {performance} from "node:perf_hooks";
 
 export const ILINK_ROOT="https://ilinkai.weixin.qq.com";
 const baseInfo={channel_version:"2.4.8",bot_agent:"Newsfeed"};
@@ -119,10 +120,13 @@ export async function sendIlinkText(account:IlinkAccount,text:string,id:string,f
   return {accepted:true,messageId:str(response.client_id,200)||id};
 }
 export async function pollIlinkInbox(account:IlinkAccount,fetcher?:typeof fetch){
+  const started=performance.now();
   const response=await ilinkRequest(account.base,"/ilink/bot/getupdates",{
     token:account.token,fetcher,timeoutMs:39000,
     payload:{get_updates_buf:account.cursor??"",base_info:baseInfo},
   });
+  // Capture at the response boundary, before parsing or any database work.
+  const receivedAt=new Date(),pollDurationMs=performance.now()-started;
   const messages=Array.isArray(response.msgs)?response.msgs.map(obj):[];
   const inbound=parseIlinkInbound(messages,account);
   // Recovery needs the employee's own traffic to this bot, and context-only envelopes carry no
@@ -133,6 +137,7 @@ export async function pollIlinkInbox(account:IlinkAccount,fetcher?:typeof fetch)
   const latest=(contextMessages.length?contextMessages:userMessages)
     .map(m=>str(m.context_token,8192)).filter(Boolean).at(-1);
   return {cursor:str(response.get_updates_buf,16384)||account.cursor||"",contextToken:latest??null,
+    receivedAt,pollDurationMs,
     hadInbound:userMessages.length>0,messages:inbound};
 }
 export function ilinkErrorKind(error:unknown):"needs_interaction"|"requires_rebind"|"rate_limited"|"unknown"{

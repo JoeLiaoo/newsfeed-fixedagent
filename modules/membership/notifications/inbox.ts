@@ -1,9 +1,11 @@
 // One bounded inbound poll per iLink bot. PgBoss runs this as a singleton; row locks
 // additionally serialize polls with unbind and prevent two workers consuming one cursor.
 import {createHash,randomUUID} from "node:crypto";
+import {performance} from "node:perf_hooks";
 import {sql,type Tx} from "@aihot/backend/db";
 import {enqueueOn} from "@aihot/backend/jobs/queue";
 import {READING_QUEUE} from "../conversation/queue.ts";
+import {latencyEvent} from "../conversation/latency.ts";
 import {decryptSecret,encryptSecret,ilinkConfigured,ilinkErrorKind,pollIlinkInbox,sendIlinkText} from "./ilink.ts";
 
 const GREETING_TEXT="已连接，之后会在这里推送。";
@@ -77,15 +79,20 @@ export async function pollMemberIlinkInboxes() {
         WHERE a.user_id=${account.user_id} FOR UPDATE OF a SKIP LOCKED`;
       if(!row)return;
       checked++;
+      const pollId=randomUUID();
+      const pollStarted=performance.now();
+      let pollReturned=false;
       try{
         const result=await pollIlinkInbox({
           botId:row.channel_account_id,recipientId:row.recipient_id,token:decryptSecret(row.token_ciphertext),
           base:row.api_url,cursor:row.cursor_ciphertext?decryptSecret(row.cursor_ciphertext):null,
         });
+        pollReturned=true;
+        latencyEvent({correlationId:pollId,stage:"poll",route:"inbox",status:"returned",durationMs:result.pollDurationMs});
         for(const message of result.messages){
           const readingEnabled=process.env.P3_ILINK_READING_REPLIES_ENABLED==="true";
-          const [inserted]=await tx<{id:string}[]>`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,seq,body,status)
-            VALUES(${randomUUID()},${row.user_id},${row.binding_version},${row.channel_account_id},${message.id},${message.seq},${message.text.slice(0,4096)},${readingEnabled?'pending':'ignored'})
+          const [inserted]=await tx<{id:string}[]>`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,seq,body,status,received_at)
+            VALUES(${randomUUID()},${row.user_id},${row.binding_version},${row.channel_account_id},${message.id},${message.seq},${message.text.slice(0,4096)},${readingEnabled?'pending':'ignored'},${result.receivedAt})
             ON CONFLICT(bot_id,upstream_id) DO NOTHING RETURNING id`;
           if(inserted&&readingEnabled)await enqueueOn(READING_QUEUE,{inboundId:inserted.id},{singletonKey:inserted.id},tx);
         }
@@ -94,7 +101,7 @@ export async function pollMemberIlinkInboxes() {
           await tx`UPDATE member_ilink_accounts SET
             cursor_ciphertext=${result.cursor?encryptSecret(result.cursor):null},
             context_ciphertext=${encryptSecret(result.contextToken)},
-            channel_state='active',last_inbound_at=now(),updated_at=now()
+            channel_state='active',last_inbound_at=${result.receivedAt},updated_at=clock_timestamp()
             WHERE user_id=${row.user_id}`;
           // Only formerly blocked, recent messages are eligible; outbox expiry is enforced by dispatcher.
           await tx`UPDATE member_notification_outbox SET status='failed',next_attempt_at=now(),error_code=NULL
@@ -105,6 +112,8 @@ export async function pollMemberIlinkInboxes() {
             updated_at=now() WHERE user_id=${row.user_id}`;
         }
       }catch(error){
+        // A failed poll has no response boundary and cannot establish received_at.
+        if(!pollReturned)latencyEvent({correlationId:pollId,stage:"poll",route:"inbox",status:"failed",durationMs:performance.now()-pollStarted});
         if(ilinkErrorKind(error)==="requires_rebind")
           await tx`UPDATE member_ilink_accounts SET channel_state='requires_rebind',updated_at=now() WHERE user_id=${row.user_id}`;
         // No raw API response or account credentials in logs.

@@ -1,6 +1,7 @@
 import {randomUUID} from "node:crypto";
 import {sql,type Db} from "@aihot/backend/db";
 import {answerQuestion} from "./answer.ts";
+import {performance} from "node:perf_hooks";
 import {routePages,type RoutableCitation,type RoutablePage} from "./routing.ts";
 import {enrichCitations,toAnswerCitation} from "./history.ts";
 import {ensureDefaultBase} from "./bases.ts";
@@ -53,7 +54,8 @@ export async function searchKnowledgePages(actor:KnowledgeActor,baseId:string,qu
   return {pages:pages.slice(0,limit),hasMore:pages.length>limit,nextOffset:pages.length>limit?offset+limit:null};
 }
 function dateText(value:unknown):string|null {return value instanceof Date?value.toISOString().slice(0,10):typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)?value:null;}
-export async function answerKnowledgeQuestion(actor:KnowledgeActor,baseId:string,question:string,options:{short?:boolean}={}){
+export async function answerKnowledgeQuestion(actor:KnowledgeActor,baseId:string,question:string,
+  options:{short?:boolean;onModelTiming?:(durationMs:number,status:"processed"|"failed")=>void}={}){
   if(question.trim().length<2||question.length>500)throw new KnowledgeError("knowledge_question_required");
   await check(actor,baseId);
   const rows = await sql<{ id: string; slug: string; page_type: string; target_name: string | null; track: string | null; body_md: string; coverage: Record<string, unknown> | null; revision_id: string }[]>`
@@ -108,8 +110,11 @@ export async function answerKnowledgeQuestion(actor:KnowledgeActor,baseId:string
     const routed = routePages(question, candidates);
     if (!routed.length) throw new KnowledgeError("knowledge_no_coverage");
     let answer;
-    try { answer = await answerQuestion(question, routed.map(entry => entry.page), new Date(), {memberUserId: actor.userId, short: options.short}); }
-    catch (error) { throw error instanceof Error && error.message === "knowledge_answer_unverified" ? new KnowledgeError("knowledge_answer_unverified") : new KnowledgeError("knowledge_answer_failed"); }
+    const modelStarted=performance.now();
+    try { answer = await answerQuestion(question, routed.map(entry => entry.page), new Date(), {memberUserId: actor.userId, short: options.short});
+      options.onModelTiming?.(performance.now()-modelStarted,"processed"); }
+    catch (error) { options.onModelTiming?.(performance.now()-modelStarted,"failed");
+      throw error instanceof Error && error.message === "knowledge_answer_unverified" ? new KnowledgeError("knowledge_answer_unverified") : new KnowledgeError("knowledge_answer_failed"); }
     const citations = answer.citations;
     // An answer that rests on nothing the library can show is not an answer: it is refused.
     if (!citations.length) throw new KnowledgeError("knowledge_answer_unverified");
