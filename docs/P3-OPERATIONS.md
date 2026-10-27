@@ -53,7 +53,11 @@ WX-A 另有 `P3_ILINK_READING_REPLIES_ENABLED=false`，默认关闭。要开放�
 
 WX-B 的 `P3_ILINK_AGENT_ENABLED=false` 默认关闭，只在阅读路由不识别自由文本时生效；“深读 N／其他／全部／下一页／主题”仍由 WX-A 确定性回答。上线顺序：应用 `0203`–`0208` 迁移；按 [runner 部署说明](../deploy/hermes-headless-runner/README.md)安装受限服务并核对 socket、Hermes 版本及零工具契约；给获准员工在 `member_agent_grants` 插入一行；确认 `P3_ILINK_READING_REPLIES_ENABLED=true`、`P3_DELIVERY_ENABLED=true`、`MODEL_CALLS_ENABLED=true` 后才单独开启 agent flag。撤权删除 grant 行；重授予会生成新的 grant ID，旧 run 和待发 agent 回复不能再用。关 agent flag 时不启动新付费调用，不影响 WX-A；保留 run、用量及去重记录。该路径仅 iLink → 平台 → 宿主机 Hermes CLI → iLink，不接旧 Weixin gateway/bridge，也不包含知识库或专家微信动作。每人最多 3 条待处理、1 条运行；全局 2 条运行；输入 2000 字，历史 6 轮且限量；45 秒 CLI 超时；待处理 10 分钟过期。未知付费结果不自动重试。每人按包含标题生成的总调用数预留 2 次：30 次/小时、100 次/日；全局 2000 次/日。实际超额调用会在下一次准入时阻断；这不是供应商侧硬限额，生产模型出口仍需核对硬预算。价格未知只记录请求数和 token，不估人民币。runner 不可用或预算耗尽使用统一降级文案。生产真实模型和手机收件仍待验证。
 
-iLink inbox worker 每分钟检查一次近失效提醒：最近一次用户入站互动达到 20 小时后，在通道仍为 `active` 且上下文存在时发送一条「请回复任意短消息」提醒。20 小时是为第三方约 24 小时窗口经验预留余量的产品阈值，不是微信/iLink 官方 TTL 或承诺；可用 `P3_ILINK_KEEPALIVE_AFTER_HOURS` 调整（只接受 1–23 的整数小时，默认 20，超出范围回落到 20）。仅在 `P3_DELIVERY_ENABLED=true` 时发送；`needs_interaction`、`requires_rebind`、无上下文、未绑定或非活跃账号均跳过。每个入站窗口最多提醒一次，新入站时间更新后可再提醒；发送 ID 按用户与入站时间确定，失败重试沿用同一 ID。发送失败且渠道明确返回会话失效（`requires_rebind`）或需用户互动（`needs_interaction`）时，账号状态随之改写，下一分钟不再重复尝试该账号；其它失败按同一 ID 重试。提醒本身失败不会中断同一轮入站轮询。
+iLink 近失效提醒由独立的每小时任务检查：最近一次用户入站互动达到 20 小时后，在通道仍为 `active` 且上下文存在时发送一条「请回复任意短消息」提醒。20 小时是为第三方约 24 小时窗口经验预留余量的产品阈值，不是微信/iLink 官方 TTL 或承诺；可用 `P3_ILINK_KEEPALIVE_AFTER_HOURS` 调整（只接受 1–23 的整数小时，默认 20，超出范围回落到 20）。仅在 `P3_DELIVERY_ENABLED=true` 时发送；`needs_interaction`、`requires_rebind`、无上下文、未绑定或非活跃账号均跳过。每个入站窗口最多提醒一次，新入站时间更新后可再提醒；发送 ID 按用户与入站时间确定，失败重试沿用同一 ID。发送失败且渠道明确返回会话失效（`requires_rebind`）或需用户互动（`needs_interaction`）时，账号状态随之改写，下一小时不再重复尝试该账号；其它失败按同一 ID 重试。提醒失败不影响独立运行的入站轮询。
+
+P1-C 快速入站轮询默认关闭（`P3_ILINK_FAST_POLL_ENABLED=false`）。灰度时还须在 `P3_ILINK_FAST_POLL_USER_IDS` 中填入明确的员工 UUID 逗号列表；空列表不启用任何账号。分钟入站任务先为这些账号补建缺失的 pg-boss 任务、发现新绑定及恢复过期租约，再只轮询**未列入灰度**的账号。每个快速账号在 fenced 短事务提交 cursor、context、入站和业务队列时，同时持久化下一次轮询任务；网络请求始终在事务外。队列每次领取一份任务，跨 worker 同组最多 20 份并行，单 Bot 仍由 60 秒租约及绑定版本限定为一个有效请求。21 个以上账号按队列创建顺序等待可用槽位。快速空响应至少退避 1 秒、上限 30 秒；网络失败／限流用带抖动的指数退避、上限 60 秒；明确 `requires_rebind` 停止快速尝试，`needs_interaction` 保持接收入站的机会。保活只按上述小时任务运行。
+
+灰度先选少量员工 UUID，观察 CPU／RSS、数据库连接等待、每 Bot 请求频率、轮询空档、429 和重复入站；再考虑扩大到约 20 个 Bot。保持原有模型并发与调用预算。回退时将快速开关设为 false 并重启 worker，先停掉且排空当前快速请求，再由分钟任务接管；已提交 cursor 与去重记录保留，旧快速任务即使被领取也会按开关退出。不要让不识别 P1-B 租约的旧版本 worker 与当前轮询并跑。生产和真机延迟仍须单独测量；代码测试不代表已达端到端目标。
 
 开启短摘要时，通知暂停期间不再发送近失效提醒；刚接受短摘要的半小时内抑制紧邻的提醒。关闭短摘要开关时保持既有提醒规则。
 

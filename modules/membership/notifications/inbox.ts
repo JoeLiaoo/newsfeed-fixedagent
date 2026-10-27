@@ -2,6 +2,7 @@
 import {createHash,randomUUID} from "node:crypto";
 import {performance} from "node:perf_hooks";
 import {sql} from "@aihot/backend/db";
+import type {Db} from "@aihot/backend/db";
 import {enqueueOn} from "@aihot/backend/jobs/queue";
 import {shutdownSignal} from "@aihot/backend/jobs/queue";
 import {READING_QUEUE} from "../conversation/queue.ts";
@@ -83,7 +84,7 @@ async function confirmConnection(row:AccountRow,contextToken:string){
 }
 
 /** Binding writers take the same advisory lock before changing settings/account rows. */
-export async function claimIlinkPoll(userId:string):Promise<PollLease|null>{
+export async function claimIlinkPoll(userId:string,stopOnRebind=false):Promise<PollLease|null>{
   if(shutdownSignal.signal.aborted)return null;
   return sql.begin(async tx=>{
     await tx`SELECT pg_advisory_xact_lock(hashtext(${userId}))`;
@@ -98,7 +99,7 @@ export async function claimIlinkPoll(userId:string):Promise<PollLease|null>{
       JOIN member_weixin_bindings b ON b.user_id=a.user_id AND b.status='active'
         AND b.recipient_id=a.recipient_id AND b.channel_account_id=a.channel_account_id
       JOIN member_users u ON u.id=a.user_id AND u.status='active'
-      WHERE a.user_id=${userId} FOR UPDATE OF a`;
+      WHERE a.user_id=${userId} AND (${!stopOnRebind} OR a.channel_state<>'requires_rebind') FOR UPDATE OF a`;
     if(!row||row.lease_live)return null;
     const owner=randomUUID();
     const [claimed]=await tx<{poll_lease_generation:number}[]>`UPDATE member_ilink_accounts
@@ -110,7 +111,8 @@ export async function claimIlinkPoll(userId:string):Promise<PollLease|null>{
 }
 
 /** A stale response changes nothing, including the cursor and business queue. */
-export async function settleIlinkPoll(lease:PollLease,result?:PollResult,error?:unknown):Promise<{recovered:boolean;greeting:string|null;committed:boolean}>{
+export async function settleIlinkPoll(lease:PollLease,result?:PollResult,error?:unknown,
+  afterSettle?: (tx:Db)=>Promise<void>):Promise<{recovered:boolean;greeting:string|null;committed:boolean}>{
   const {row,owner,generation}=lease;
   return sql.begin(async tx=>{
     await tx`SELECT pg_advisory_xact_lock(hashtext(${row.user_id}))`;
@@ -156,48 +158,55 @@ export async function settleIlinkPoll(lease:PollLease,result?:PollResult,error?:
         AND poll_lease_generation=${generation} AND poll_lease_expires_at>clock_timestamp()
       RETURNING user_id`;
     if(!released.length)throw new Error("ilink_poll_lease_expired_before_commit");
+    // A continuous poll's successor commits with its cursor and lease release.
+    if(afterSettle)await afterSettle(tx);
     return {recovered:!!result?.hadInbound&&!!result.contextToken,greeting,committed:true};
   });
 }
 
+export async function pollOneMemberIlinkInbox(userId:string,afterSettle?: (tx:Db,result:PollResult|undefined,error:unknown)=>Promise<void>,stopOnRebind=false) {
+  if(!ilinkConfigured()||shutdownSignal.signal.aborted)return {checked:0,recovered:0,greeted:0,committed:false};
+  const lease=await claimIlinkPoll(userId,stopOnRebind);
+  if(!lease)return {checked:0,recovered:0,greeted:0,committed:false};
+  const {row}=lease;
+  const pollId=randomUUID();
+  const pollStarted=performance.now();
+  try{
+    const result=await pollIlinkInbox({
+      botId:row.channel_account_id,recipientId:row.recipient_id,token:decryptSecret(row.token_ciphertext),
+      base:row.api_url,cursor:row.cursor_ciphertext?decryptSecret(row.cursor_ciphertext):null,
+    },undefined,shutdownSignal.signal);
+    latencyEvent({correlationId:pollId,stage:"poll",route:"inbox",status:"returned",durationMs:result.pollDurationMs});
+    const settled=await settleIlinkPoll(lease,result,undefined,afterSettle?tx=>afterSettle(tx,result,undefined):undefined);
+    const greeted=settled.greeting&&await confirmConnection(row,settled.greeting)?1:0;
+    return {checked:1,recovered:Number(settled.recovered),greeted,committed:settled.committed,result};
+  }catch(error){
+    latencyEvent({correlationId:pollId,stage:"poll",route:"inbox",status:"failed",durationMs:performance.now()-pollStarted});
+    // A failed commit retains the cursor. An expired lease is recovered by the minute gap-fill.
+    const settled=await settleIlinkPoll(lease,undefined,error,afterSettle?tx=>afterSettle(tx,undefined,error):undefined).catch(()=>null);
+    return {checked:1,recovered:0,greeted:0,committed:!!settled?.committed,error};
+  }
+}
+
 export async function pollMemberIlinkInboxes() {
   if(!ilinkConfigured()||shutdownSignal.signal.aborted)return {disabled:true};
+  // The fast queue owns its canary Bots exclusively; this minute task remains their gap-fill.
+  const {fastPollEnabledFor}=await import("./inbox-queue.ts");
+  if(process.env.P3_ILINK_FAST_POLL_ENABLED==="true"){
+    const {fillFastPollGaps}=await import("./inbox-queue.ts");
+    await fillFastPollGaps();
+  }
   const accounts=await sql<{user_id:string}[]>`SELECT a.user_id FROM member_ilink_accounts a
     JOIN member_weixin_bindings b ON b.user_id=a.user_id AND b.status='active'
     JOIN member_users u ON u.id=a.user_id AND u.status='active'
-    ORDER BY a.last_polled_at NULLS FIRST,a.user_id LIMIT 20`;
+    ORDER BY a.last_polled_at NULLS FIRST,a.user_id`;
   let checked=0,recovered=0,greeted=0;
-  for(let start=0;start<accounts.length;start+=20){
-    await Promise.all(accounts.slice(start,start+20).map(async account=>{
-      const lease=await claimIlinkPoll(account.user_id);
-      if(!lease)return;
-      const {row}=lease;
-      checked++;
-      const pollId=randomUUID();
-      const pollStarted=performance.now();
-      try{
-        const result=await pollIlinkInbox({
-          botId:row.channel_account_id,recipientId:row.recipient_id,token:decryptSecret(row.token_ciphertext),
-          base:row.api_url,cursor:row.cursor_ciphertext?decryptSecret(row.cursor_ciphertext):null,
-        },undefined,shutdownSignal.signal);
-        latencyEvent({correlationId:pollId,stage:"poll",route:"inbox",status:"returned",durationMs:result.pollDurationMs});
-        const settled=await settleIlinkPoll(lease,result);
-        if(settled.recovered)recovered++;
-        if(settled.greeting&&await confirmConnection(row,settled.greeting))greeted++;
-      }catch(error){
-        latencyEvent({correlationId:pollId,stage:"poll",route:"inbox",status:"failed",durationMs:performance.now()-pollStarted});
-        // If commit failed, the lease expires; a retry replays the same cursor and deduplicates IDs.
-        await settleIlinkPoll(lease,undefined,error).catch(()=>{});
-      }
-    }));
-  }
-  // A failing reminder must not stop the inbound poll; the next minute tries again.
-  let nudged=0;
-  try{if(!shutdownSignal.signal.aborted)nudged=(await nudgeNearExpiryIlinkChannels()).nudged;}
-  catch{
-    // The reminder is retried with the next run; the inbound messages above are already recorded.
-  }
-  return {checked,recovered,greeted,nudged};
+  const legacy=accounts.filter(account=>!fastPollEnabledFor(account.user_id)).slice(0,20);
+  await Promise.all(legacy.map(async account=>{
+    const result=await pollOneMemberIlinkInbox(account.user_id);
+    checked+=result.checked;recovered+=result.recovered;greeted+=result.greeted;
+  }));
+  return {checked,recovered,greeted};
 }
 
 /** Send one idempotent reminder per inbound window, while the context is still usable. */
