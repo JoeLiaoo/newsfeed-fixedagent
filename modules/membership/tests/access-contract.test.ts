@@ -71,23 +71,28 @@ test("employee content boundary, member isolation, and immutable daily digest sn
     await sql`INSERT INTO articles (id, source_id, identity_key, url, title, discovered_at, timeline_at)
       VALUES (${articleId}, ${sourceId}, ${`identity-${articleId}`}, ${`https://example.test/${articleId}`}, ${`Report ${index}`}, ${publishedAt}, ${publishedAt})`;
     await sql`INSERT INTO publications (article_id, eligible, title, summary, tags, source_id, channel, url, discovered_at, timeline_at, sort_at, story_id)
-      VALUES (${articleId}, true, ${`Report ${index}`}, 'Shared summary', ${sql.array([accounts[0]!.interest])}::text[], ${sourceId}, 'news', ${`https://example.test/${articleId}`}, ${publishedAt}, ${publishedAt}, ${publishedAt}, ${story!.id})`;
+      VALUES (${articleId}, true, ${`Report ${index}`}, 'Shared summary', ${sql.array([accounts[0]!.interest, 'DeepSeek', 'entity:deepseek', 'entity:unknown-subject'])}::text[], ${sourceId}, 'news', ${`https://example.test/${articleId}`}, ${publishedAt}, ${publishedAt}, ${publishedAt}, ${story!.id})`;
   }
   const sourceReport = await (await app.inject({ method: "GET", url: "/api/v1/membership/sources", headers: { cookie: cookies[0]! } })).json() as { activeSources: number; coverage: Array<{ tag: string; count: number }>; sources: Array<{ id: string; enabled: boolean; discovery_scope: string; discovery_method: string; preview_count: number; items_7d: number }> };
   assert.equal(sourceReport.activeSources, sourceReport.sources.filter(source => source.enabled).length, "employee view counts the same shared pool it lists");
   assert.ok(sourceReport.activeSources >= 2);
   assert.ok(sourceReport.coverage.some(row => row.tag === accounts[0]!.interest && row.count >= 2));
+  assert.equal(sourceReport.coverage.find(row => row.tag === "DeepSeek")?.count, 2, "display and internal tags count each article once");
+  assert.ok(sourceReport.coverage.every(row => !row.tag.startsWith("entity:")), "member coverage never exposes internal entity keys");
   const reportedSource = sourceReport.sources.find((source) => source.id === sourceIds[0]);
   assert.equal(reportedSource?.discovery_scope, "sitemap");
   assert.equal(reportedSource?.discovery_method, "robots_txt");
   assert.equal(reportedSource?.preview_count, 10);
   assert.equal(reportedSource?.items_7d, 1);
 
-  const first = await (await app.inject({ method: "GET", url: "/api/v1/membership/digest", headers: { cookie: cookies[0]! } })).json() as { window: { cutoff: string }; items: unknown[] };
-  const second = await (await app.inject({ method: "GET", url: "/api/v1/membership/digest", headers: { cookie: cookies[0]! } })).json() as { window: { cutoff: string }; items: unknown[] };
+  const first = await (await app.inject({ method: "GET", url: "/api/v1/membership/digest", headers: { cookie: cookies[0]! } })).json() as { window: { cutoff: string }; items: Array<{ tags: string[] }> };
+  const second = await (await app.inject({ method: "GET", url: "/api/v1/membership/digest", headers: { cookie: cookies[0]! } })).json() as { window: { cutoff: string }; items: Array<{ tags: string[] }> };
   assert.equal(first.window.cutoff, second.window.cutoff);
   assert.deepEqual(first.items, second.items);
   assert.equal(first.items.length, 1, "articles from two sources for one story appear once in the event snapshot");
+  assert.deepEqual(first.items[0]?.tags, [accounts[0]!.interest, "DeepSeek"]);
+  assert.ok(first.items.every(item => item.tags.every(value => !value.startsWith("entity:"))));
+  assert.ok(!JSON.stringify(first).includes("entity:"), "the member digest payload contains no internal entity key");
   const history = await (await app.inject({ method: "GET", url: "/api/v1/membership/digest/history", headers: { cookie: cookies[0]! } })).json() as { digests: unknown[] };
   assert.equal(history.digests.length, 1);
 });
