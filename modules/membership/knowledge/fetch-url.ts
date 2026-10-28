@@ -60,6 +60,11 @@ export function parsePublicArticle(html: string, url: string): FetchedArticle {
   const content = $("#js_content").first().length ? $("#js_content").first() :
     $("article").first().length ? $("article").first() :
       $("main, [role='main']").first().length ? $("main, [role='main']").first() : $("body");
+  // WeChat inserts reader navigation inside #js_content, so generic nav/footer removal misses it.
+  content.find("*").filter((_, element) => {
+    const node = $(element);
+    return !node.children().length && /^(?:在小说阅读器读本章|去阅读|在小说阅读器中阅读)$/.test(node.text().replace(/\s+/g, "").trim());
+  }).remove();
   const figures: FigureCandidate[] = [];
   const seen = new Set<string>();
   let candidatesTruncated = false;

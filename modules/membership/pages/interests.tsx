@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router";
+import { pageMeta } from "@aihot/web/lib/seo";
 import { ArrowLeft, ChevronRight, Rss } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Button } from "@aihot/web/components/member-ui/button";
@@ -9,6 +10,8 @@ import { Input } from "@aihot/web/components/member-ui/input";
 import { Label } from "@aihot/web/components/member-ui/label";
 import { DIRECTIONS } from "../catalog.ts";
 import { toggleTagGroup } from "./interests-state.ts";
+
+export const meta = () => pageMeta({ title: "关注赛道", path: "/settings/interests", noindex: true });
 
 type Me = { tags: string[]; catalog: string[]; user: { role: string } };
 

@@ -67,6 +67,8 @@ P1-02 已增加服务端全 API/资讯出口鉴权，并通过临时 PostgreSQL 
 
 2026-10-26 按 [Issue #125](https://github.com/JoeLiaoo/newsfeed-fixedagent/issues/125) 将首批国内信源加入 `industry/sources.json`：海外独角兽（节目公开 RSS）、拾象科技（官网报告列表）、晚点 LatePost（官网晚点聊 RSS）、极客公园（官网 RSS）、机器之心（官网文章库 JSON 列表）。沿用现有 `rss`、`web_list`、`json_list` 采集路径；各源均实测返回可解析条目。属于信源维护，不改变 P1-04 勾选状态；生产员工信息流冒烟仍待部署后执行，见[工作日志](logs/2026-10-26-i125-domestic-sources.md)。
 
+2026-10-28 [E2E 反馈修复批次](logs/2026-10-28-E2E-FIX-BATCH.md)停用四个失败的旧信源并加入 BidClub；上线需重跑 seed，员工资讯覆盖仍待实测。P1-04 勾选状态不变。
+
 P1 登录、注册、关注、员工审核和信源页面已按统一组件规范复整，见 [P1/P2 前端组件整改](logs/2026-10-21-P1-P2-ui.md)。
 
 P1 出口：两位不同关注赛道的员工可看到各自日报；新增信源和用户权限按需求工作。业务相关性由用户试用反馈。
@@ -175,6 +177,8 @@ P3 出口：用户实际验证两个经注册审核的账号均可扫码绑定�
 2026-10-24 [PR #50](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/50) 已合并、尚无生产发布记录：候选 GP 的别名、角色和证据日期可供管理员审阅，重复播种保留已核准字段；本地回归已覆盖已审候选不被重置。真实主体身份与投资事实仍须管理员逐项核准，P3-01～P3-03 保持 `[ ]`，见[工作日志](logs/2026-10-24-P3-gp-dynamics.md)与[本轮核查](logs/2026-10-24-progress-check-release-readiness.md)。
 
 员工端「已投GP直投项目」清单已按已核实投资与有效 GP 状态开放读取，并使用已审核的赛道、日期和来源链接；没有记录时明确显示空列表。该页面已随 [PR #52](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/52) 合并，并包含于用户报告的生产版本 `d0713cc`。该员工读取页不代表 GP 主体核对、数据同步或通知验收完成，P3-01～P3-04 仍保持 `[ ]`，见[工作日志](logs/2026-10-24-gp-projects-employee-list.md)。
+
+2026-10-28 [E2E 反馈修复批次](logs/2026-10-28-E2E-FIX-BATCH.md)将演示来源投资从员工列表、筛选项和详情排除；生产发布与 GP 真实事实复核仍待完成，P3-01～P3-04 保持 `[ ]`。
 
 员工可在该清单切换到「与我关注匹配」，按登录账号关注标签与已审核投资赛道精确匹配，并继续分页浏览；这部分已随 [PR #54](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/54) 合并，尚无生产部署记录。战略配售不参与 GP 匹配。未设置关注时引导到关注设置，设置后没有匹配结果时明确显示空状态。此 web digest 不代表微信推送或 P3 验收完成，P3-01～P3-04 继续保持 `[ ]`，见[工作日志](logs/2026-10-24-P3-employee-gp-digest.md)。
 

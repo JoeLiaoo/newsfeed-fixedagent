@@ -18,6 +18,8 @@ const safeOrigin=(req:FastifyRequest)=>{
 };
 
 export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
+  // Keep demo evidence out of the employee query before pagination and filter options.
+  const placeholderSourcePattern = "^https?://([^/@]+\\.)?example\\.(org|com|net)(:[0-9]+)?([/?#]|$)";
   app.get("/api/v1/membership/gp-projects",async(req,reply)=>{
     reply.header("Cache-Control","private, no-store").header("Vary","Cookie");
     const user=await authenticate(req);
@@ -48,6 +50,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       LEFT JOIN LATERAL unnest(i.sector_tags) AS sector(tag) ON true
       WHERE i.status='verified' AND g.status='active' AND g.entity_role='gp'
+        AND NOT (COALESCE(i.approved_source_url,'') ~* ${placeholderSourcePattern})
         AND (${query.group??null}::text IS NULL OR ${query.group??null}::text=ANY(g.project_groups))
         AND (NOT ${matched} OR EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id} AND t.tag=ANY(i.sector_tags) AND t.tag<>'战略配售'))`;
     const rows=await sql<{id:string;gp_name:string;investee_name:string;sector_tags:string[];event_date:string|null;status:string;source_url:string|null;mother_fund_name:string|null;subfund_name:string|null;project_province:string|null;province_checked_at:Date|null}[]>`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.sector_tags,
@@ -55,6 +58,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       i.approved_event_date::text AS event_date,'verified'::text AS status,i.approved_source_url AS source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       WHERE i.status='verified' AND g.status='active' AND g.entity_role='gp'
+        AND NOT (COALESCE(i.approved_source_url,'') ~* ${placeholderSourcePattern})
         AND (${query.group??null}::text IS NULL OR ${query.group??null}::text=ANY(g.project_groups))
         AND (NOT ${matched} OR (
           EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id}
@@ -89,9 +93,11 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       i.approved_event_date::text AS event_date,'verified'::text AS status,i.approved_source_url AS source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       WHERE i.id=${id} AND i.status='verified' AND g.status='active' AND g.entity_role='gp'
+        AND NOT (COALESCE(i.approved_source_url,'') ~* ${placeholderSourcePattern})
         AND (${group??null}::text IS NULL OR ${group??null}::text=ANY(g.project_groups))`;
     if(!row) return reply.code(404).send({error:"not_found"});
     const source=employeeSource(row.source_url);
+    if(source.placeholder) return reply.code(404).send({error:"not_found"});
     return {investment:{...row,source_url:source.url,source_placeholder:source.placeholder}};
   });
 

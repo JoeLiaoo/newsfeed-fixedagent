@@ -1,4 +1,5 @@
 import { useCallback,useEffect,useState } from "react";
+import { pageMeta } from "@aihot/web/lib/seo";
 import { Link } from "react-router";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { Alert } from "@aihot/web/components/member-ui/alert";
@@ -7,6 +8,8 @@ import { Button } from "@aihot/web/components/member-ui/button";
 import { Card,CardContent,CardHeader,CardTitle } from "@aihot/web/components/member-ui/card";
 import { Checkbox } from "@aihot/web/components/member-ui/checkbox";
 import { pollDue,scanStatusText,VISIBLE_POLL_MS } from "./scan-state.ts";
+
+export const meta = () => pageMeta({ title: "微信通知", path: "/settings/notifications", noindex: true });
 
 type Settings={news_enabled:boolean;gp_enabled:boolean;paused_until:string|null;binding_version:number};
 type Binding={status:string;recipient_suffix:string;bound_at:string};

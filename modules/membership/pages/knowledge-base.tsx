@@ -59,6 +59,22 @@ type Answer = {
   createdAt?: string;
 };
 
+/** The model may list page slugs in its closing reference section; use verified citation titles. */
+function answerWithPageLinks(answer: Answer): string {
+  const heading = answer.answerMd.indexOf("本次参考的知识页列表");
+  if (heading < 0) return answer.answerMd;
+  const before = answer.answerMd.slice(0, heading);
+  let references = answer.answerMd.slice(heading);
+  const linked = new Set<string>();
+  for (const citation of answer.citations) {
+    if (!citation.pageSlug || !citation.title || linked.has(citation.pageSlug)) continue;
+    linked.add(citation.pageSlug);
+    const title = citation.title.replace(/[\\\[\]]/g, "\\$&");
+    references = references.replaceAll(citation.pageSlug, `[${title}](/knowledge/targets/${encodeURIComponent(citation.pageSlug)})`);
+  }
+  return before + references;
+}
+
 const PAGE_TYPE_LABEL: Record<string, string> = { view: "观点页", query: "预编译问答", concept: "判断框架", monitor: "监测指标" };
 const FRESHNESS_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "destructive"> = { fresh: "success", semi: "warning", stale: "destructive", undated: "secondary" };
 const STATE_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "destructive"> = { queued: "warning", running: "default", succeeded: "success", failed: "destructive", cancelled: "secondary" };
@@ -304,7 +320,7 @@ export default function KnowledgeBasePage() {
           </form>
           {answerMessage && <Alert role="status">{answerMessage}</Alert>}
           {answer && <div className="grid gap-3">
-            <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(answer.answerMd, siteUrl()).html }} />
+            <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(answerWithPageLinks(answer), siteUrl()).html }} />
             <div className="grid gap-1 border-t border-line pt-3"><h3 className="text-sm font-semibold text-ink">参考资料</h3><AnswerCitations citations={answer.citations} /></div>
             <p className="text-xs text-ink-4">覆盖：分析师 {answer.coverage.analysts} · 机构 {answer.coverage.firms} · 材料 {answer.coverage.reports} · {answer.coverage.first_report ?? "起始日期未知"} 至 {answer.coverage.last_report ?? "最近日期未知"}</p>
           </div>}
@@ -421,7 +437,7 @@ export default function KnowledgeBasePage() {
               </button>
               <p className="mt-1 text-xs text-ink-3">{item.createdAt ? new Date(item.createdAt).toLocaleString("zh-CN") : "时间未知"} · 分析师 {item.coverage.analysts} · 机构 {item.coverage.firms} · 材料 {item.coverage.reports}</p>
               {openAnswerId === item.id && <div className="mt-3 grid gap-3 border-t border-line pt-3">
-                <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.answerMd, siteUrl()).html }} />
+                <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(answerWithPageLinks(item), siteUrl()).html }} />
                 <div className="grid gap-1"><h3 className="text-sm font-semibold text-ink">参考资料</h3><AnswerCitations citations={item.citations} /></div>
               </div>}
             </li>)}</ul>}
