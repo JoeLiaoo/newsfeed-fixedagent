@@ -27,6 +27,12 @@ test("material metadata is extracted only from headings and explicit attribution
   });
 });
 
+test("WeChat reader controls inside article body are not ingested", () => {
+  const article = parsePublicArticle(`<html><body><div id="js_content"><p>${"正文证据。".repeat(30)}</p><div class="reader"><span>在小说阅读器读本章</span><a href="/reader">去阅读</a></div></div></body></html>`, "https://mp.weixin.qq.com/s/example");
+  assert.match(article.text, /正文证据/);
+  assert.doesNotMatch(article.text, /在小说阅读器读本章|去阅读/);
+});
+
 test("public article extraction keeps unknown dates unknown and rejects empty pages", () => {
   const html = `<html><head><meta name="date" content="2026-02-31"></head><body><article>${"正文。".repeat(30)}</article></body></html>`;
   assert.equal(parsePublicArticle(html, "https://example.com").date, null);

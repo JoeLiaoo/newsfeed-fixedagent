@@ -10,6 +10,7 @@ import { FileInput } from "@aihot/web/components/member-ui/file-input";
 import { Label } from "@aihot/web/components/member-ui/label";
 import { renderMarkdown } from "@aihot/web/lib/markdown";
 import { pageMeta, siteUrl } from "@aihot/web/lib/seo";
+import { answerWithPageLinks } from "./answer-links.ts";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { FRESHNESS_LABELS, TASK_ERRORS, TASK_STAGE_LABELS, TASK_STATE_LABELS, type FreshnessTier } from "../knowledge/catalog.ts";
 
@@ -304,7 +305,7 @@ export default function KnowledgeBasePage() {
           </form>
           {answerMessage && <Alert role="status">{answerMessage}</Alert>}
           {answer && <div className="grid gap-3">
-            <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(answer.answerMd, siteUrl()).html }} />
+            <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(answerWithPageLinks(answer), siteUrl()).html }} />
             <div className="grid gap-1 border-t border-line pt-3"><h3 className="text-sm font-semibold text-ink">参考资料</h3><AnswerCitations citations={answer.citations} /></div>
             <p className="text-xs text-ink-4">覆盖：分析师 {answer.coverage.analysts} · 机构 {answer.coverage.firms} · 材料 {answer.coverage.reports} · {answer.coverage.first_report ?? "起始日期未知"} 至 {answer.coverage.last_report ?? "最近日期未知"}</p>
           </div>}
@@ -421,7 +422,7 @@ export default function KnowledgeBasePage() {
               </button>
               <p className="mt-1 text-xs text-ink-3">{item.createdAt ? new Date(item.createdAt).toLocaleString("zh-CN") : "时间未知"} · 分析师 {item.coverage.analysts} · 机构 {item.coverage.firms} · 材料 {item.coverage.reports}</p>
               {openAnswerId === item.id && <div className="mt-3 grid gap-3 border-t border-line pt-3">
-                <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.answerMd, siteUrl()).html }} />
+                <div className="text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(answerWithPageLinks(item), siteUrl()).html }} />
                 <div className="grid gap-1"><h3 className="text-sm font-semibold text-ink">参考资料</h3><AnswerCitations citations={item.citations} /></div>
               </div>}
             </li>)}</ul>}

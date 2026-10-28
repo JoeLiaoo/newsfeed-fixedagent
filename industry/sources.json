@@ -42,48 +42,6 @@
       "syndicate_fulltext": false
     },
     {
-      "id": "rss-google-research",
-      "name": "Google Research",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://research.google/blog/rss/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T1",
-      "owner_entity_id": "google",
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方",
-        "研究"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-hugging-face",
-      "name": "Hugging Face Blog",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://huggingface.co/blog/feed.xml",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T1",
-      "owner_entity_id": "hugging-face",
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方",
-        "开源"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
       "id": "rss-microsoft-research",
       "name": "Microsoft Research",
       "kind": "rss",
@@ -151,26 +109,6 @@
       "kind": "rss",
       "config": {
         "feedUrl": "https://github.blog/ai-and-ml/feed/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T1",
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-mistral",
-      "name": "Mistral AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://mistral.ai/news/rss",
         "_aihot": {
           "initialBackfillLimit": 8
         }
@@ -321,27 +259,6 @@
       "interval_minutes": 120,
       "tags": [
         "个人"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-import-ai",
-      "name": "Import AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://importai.substack.com/feed",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 180,
-      "tags": [
-        "个人",
-        "周刊"
       ],
       "site_fulltext": false,
       "syndicate_fulltext": false
@@ -592,6 +509,41 @@
       "participation_mode": "editorial",
       "interval_minutes": 90,
       "tags": ["国内", "人工智能", "研究"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "json-bidclub",
+      "name": "BidClub",
+      "kind": "json_list",
+      "config": {
+        "url": "https://bidclub.ai/api/v1/episodes",
+        "itemsPath": "episodes",
+        "titlePaths": [
+          "title"
+        ],
+        "urlTemplate": "https://bidclub.ai/dl/{slug}/summary.md",
+        "publishedAtPath": "date",
+        "summaryPaths": [
+          "dek"
+        ],
+        "externalIdPath": "slug",
+        "allowUrlPrefixes": [
+          "https://bidclub.ai/dl/"
+        ],
+        "_aihot": {
+          "initialBackfillLimit": 8
+        }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": [
+        "播客",
+        "投研",
+        "人工智能"
+      ],
       "site_fulltext": false,
       "syndicate_fulltext": false
     }

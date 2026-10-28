@@ -1,10 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { pageMeta } from "@aihot/web/lib/seo";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@aihot/web/components/member-ui/card";
 import { Input } from "@aihot/web/components/member-ui/input";
 import { Label } from "@aihot/web/components/member-ui/label";
+
+export const meta = () => pageMeta({ title: "资讯信源", path: "/settings/sources", noindex: true });
 
 type Source = { id: string; name: string; kind: string; enabled: boolean; health: string; last_ok_at: string | null; discovery_scope: string | null; discovery_method: string | null; preview_count: number | null; items_7d: number };
 type Coverage = { tag: string; count: number };

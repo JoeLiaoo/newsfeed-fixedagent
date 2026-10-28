@@ -2,7 +2,7 @@ import { type ReactNode } from "react";
 import { useState } from "react";
 import { Link, redirect, useLoaderData, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/more";
-import { LogOut } from "lucide-react";
+import { LogOut, UserRound } from "lucide-react";
 import { POLICY, SITE } from "@aihot/site";
 import type { loader as rootLoader } from "../root";
 import { useChangelogDot } from "../components/shell/Sidebar";
@@ -117,6 +117,7 @@ export default function MorePage() {
           </div>
         </section>
         <Group title="平台设置">
+          <RowLink row={{ to: "/settings/profile", label: "个人资料", icon: <UserRound size={20} aria-hidden="true" /> }} />
           <li className="flex min-h-[56px] items-center gap-3 px-4 text-[16px] font-medium text-ink">
             <span className="text-ink-3">
               <IconMoon size={20} />

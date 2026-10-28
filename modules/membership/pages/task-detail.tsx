@@ -147,7 +147,7 @@ export default function TaskDetailPage() {
     <div className="grid min-w-0 gap-6">
       {isFailed && <Alert variant="destructive">
         <p className="font-medium">任务未完成</p>
-        <p className="mt-1">{EXPERT_TASK_ERROR_LABELS[task.errorCode ?? ""] ?? task.errorMessage ?? "任务未完成，请重试。"}</p>
+        <p className="mt-1">{task.errorMessage ?? EXPERT_TASK_ERROR_LABELS[task.errorCode ?? ""] ?? "任务未完成，请重试。"}</p>
       </Alert>}
 
       {succeeded && task.result?.panorama?.incomplete && <Alert>

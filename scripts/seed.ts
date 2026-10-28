@@ -26,6 +26,10 @@ interface SeedSource {
 }
 
 const { sources } = JSON.parse(readFileSync(path.join(REPO_ROOT, "industry/sources.json"), "utf8")) as { sources: SeedSource[] };
+// These retired sample feeds failed in production. Preserve their rows for audit, but stop collection
+// when seed is rerun on an existing installation. BidClub is inserted by the normal loop below.
+const retiredSources = ["rss-google-research", "rss-hugging-face", "rss-import-ai", "rss-mistral"];
+await sql`UPDATE sources SET enabled=false WHERE id IN ${sql(retiredSources)}`;
 let added = 0;
 for (const s of sources) {
   assertSupportedConfig(s.kind, s.config);

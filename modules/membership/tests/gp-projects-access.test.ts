@@ -50,27 +50,31 @@ test("GP project list requires an active member and only exposes approved active
     VALUES(${randomUUID()},${"gp-project-admin-" + suffix},'管理人员','test-hash','active','admin') RETURNING id`;
   const activeGp = randomUUID(), pausedGp = randomUUID(), candidateManager = randomUUID();
   await sql`INSERT INTO member_gp_watchlist(id,canonical_name,entity_id,entity_role,status,source_ref,reviewed_by)
-    VALUES(${activeGp},${"有效GP-" + suffix},'gp-entity','gp','active','https://example.org/gp',${admin!.id}),
-          (${pausedGp},${"暂停GP-" + suffix},'paused-entity','gp','paused','https://example.org/paused',${admin!.id}),
-          (${candidateManager},${"非GP主体-" + suffix},'manager-entity','manager','candidate','https://example.org/company',${admin!.id})`;
+    VALUES(${activeGp},${"有效GP-" + suffix},'gp-entity','gp','active','https://evidence.test/gp',${admin!.id}),
+          (${pausedGp},${"暂停GP-" + suffix},'paused-entity','gp','paused','https://evidence.test/paused',${admin!.id}),
+          (${candidateManager},${"非GP主体-" + suffix},'manager-entity','manager','candidate','https://evidence.test/company',${admin!.id})`;
   const approvedId = randomUUID(), observedId = randomUUID(), pausedInvestmentId = randomUUID(), nonGpInvestmentId = randomUUID();
   await sql`INSERT INTO member_gp_investments(id,gp_id,investee_key,investee_name,raw_evidence,status,sector_tags,approved_event_date,approved_source_url,approved_by,approved_at)
-    VALUES(${approvedId},${activeGp},'approved','已核实企业',${sql.json({privateEvidence:"must not be returned"})},'verified',ARRAY['光伏']::text[],'2026-10-20'::date,'https://example.org/evidence',${admin!.id},now()),
+    VALUES(${approvedId},${activeGp},'approved','已核实企业',${sql.json({privateEvidence:"must not be returned"})},'verified',ARRAY['光伏']::text[],'2026-10-20'::date,'https://evidence.test/evidence',${admin!.id},now()),
       (${observedId},${activeGp},'observed','待复核企业',${sql.json({})},'observed',ARRAY['光伏']::text[],NULL,NULL,NULL,NULL),
       (${randomUUID()},${activeGp},'baseline','历史基线企业',${sql.json({})},'baseline',ARRAY[]::text[],NULL,NULL,NULL,NULL),
       (${randomUUID()},${activeGp},'retracted','已撤回企业',${sql.json({})},'retracted',ARRAY['光伏']::text[],NULL,NULL,NULL,NULL),
-      (${pausedInvestmentId},${pausedGp},'paused','暂停 GP 企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-20'::date,'https://example.org/evidence',${admin!.id},now()),
-      (${randomUUID()},${activeGp},'unmatched','未匹配企业',${sql.json({})},'verified',ARRAY['风电']::text[],'2026-10-17'::date,'https://example.org/unmatched',${admin!.id},now()),
-      (${randomUUID()},${activeGp},'strategic','战略配售企业',${sql.json({})},'verified',ARRAY['战略配售']::text[],'2026-10-18'::date,'https://example.org/strategic',${admin!.id},now()),
-      (${randomUUID()},${activeGp},'custom','自定义标签企业',${sql.json({})},'verified',ARRAY['自定义储能']::text[],'2026-10-19'::date,'https://example.org/custom',${admin!.id},now()),
-      (${randomUUID()},${activeGp},'substring','标签子串企业',${sql.json({})},'verified',ARRAY['用户侧储能系统']::text[],'2026-10-18'::date,'https://example.org/substring',${admin!.id},now()),
-      (${randomUUID()},${activeGp},'unknown-date','未知日期企业',${sql.json({})},'verified',ARRAY['光伏']::text[],NULL,'https://example.org/unknown-date',${admin!.id},now()),
-      (${nonGpInvestmentId},${candidateManager},'non-gp','非GP主体企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-21'::date,'https://example.org/non-gp',${admin!.id},now())`;
+      (${pausedInvestmentId},${pausedGp},'paused','暂停 GP 企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-20'::date,'https://evidence.test/evidence',${admin!.id},now()),
+      (${randomUUID()},${activeGp},'unmatched','未匹配企业',${sql.json({})},'verified',ARRAY['风电']::text[],'2026-10-17'::date,'https://evidence.test/unmatched',${admin!.id},now()),
+      (${randomUUID()},${activeGp},'strategic','战略配售企业',${sql.json({})},'verified',ARRAY['战略配售']::text[],'2026-10-18'::date,'https://evidence.test/strategic',${admin!.id},now()),
+      (${randomUUID()},${activeGp},'custom','自定义标签企业',${sql.json({})},'verified',ARRAY['自定义储能']::text[],'2026-10-19'::date,'https://evidence.test/custom',${admin!.id},now()),
+      (${randomUUID()},${activeGp},'substring','标签子串企业',${sql.json({})},'verified',ARRAY['用户侧储能系统']::text[],'2026-10-18'::date,'https://evidence.test/substring',${admin!.id},now()),
+      (${randomUUID()},${activeGp},'unknown-date','未知日期企业',${sql.json({})},'verified',ARRAY['光伏']::text[],NULL,'https://evidence.test/unknown-date',${admin!.id},now()),
+      (${nonGpInvestmentId},${candidateManager},'non-gp','非GP主体企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-21'::date,'https://evidence.test/non-gp',${admin!.id},now())`;
   const secondApprovedId = randomUUID();
   await sql`INSERT INTO member_gp_investments(id,gp_id,investee_key,investee_name,raw_evidence,status,sector_tags,approved_event_date,approved_source_url,approved_by,approved_at)
-    VALUES(${secondApprovedId},${activeGp},'approved-older','较早核实企业',${sql.json({})},'verified',ARRAY[]::text[],'2026-09-20'::date,'https://example.org/older',${admin!.id},now())`;
+    VALUES(${secondApprovedId},${activeGp},'approved-older','较早核实企业',${sql.json({})},'verified',ARRAY[]::text[],'2026-09-20'::date,'https://evidence.test/older',${admin!.id},now())`;
   await sql`UPDATE member_gp_investments SET mother_fund_name='母基金甲',subfund_name='子基金甲',project_province='江苏省',province_source='xinhua_company_profile',province_checked_at=now() WHERE id=${approvedId}`;
   await sql`UPDATE member_gp_investments SET mother_fund_name='母基金乙',subfund_name='子基金乙',project_province='广东省' WHERE id=${secondApprovedId}`;
+  const placeholderId = randomUUID();
+  await sql`INSERT INTO member_gp_investments(id,gp_id,investee_key,investee_name,raw_evidence,status,sector_tags,approved_event_date,approved_source_url,approved_by,approved_at)
+    VALUES(${placeholderId},${activeGp},'demo-only','演示占位企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-22'::date,'https://example.org/demo',${admin!.id},now())`;
+  assert.equal((await app.inject({method:"GET",url:`/api/v1/membership/gp-projects/${placeholderId}`,headers:{cookie}})).statusCode,404);
 
   const page = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects?limit=1", headers: { cookie } });
   assert.equal(page.statusCode, 200);
@@ -82,8 +86,8 @@ test("GP project list requires an active member and only exposes approved active
   assert.equal(body.investments[0]?.event_date, "2026-10-20");
   assert.deepEqual(body.investments[0]?.sector_tags, ["光伏"]);
   assert.equal(body.investments[0]?.status, "verified");
-  assert.equal(body.investments[0]?.source_url, null, "demo evidence is not linked as a provenance source");
-  assert.equal(body.investments[0]?.source_placeholder, true);
+  assert.equal(body.investments[0]?.source_url, "https://evidence.test/evidence");
+  assert.equal(body.investments[0]?.source_placeholder, false);
   assert.equal("raw_evidence" in body.investments[0]!, false);
   assert.equal("approved_by" in body.investments[0]!, false);
   assert.equal("approved_at" in body.investments[0]!, false);
@@ -114,8 +118,8 @@ test("GP project list requires an active member and only exposes approved active
   const investment = (await detail.json() as { investment: Record<string, unknown> }).investment;
   assert.equal(investment.id, approvedId);
   assert.equal(investment.investee_name, "已核实企业");
-  assert.equal(investment.source_url, null);
-  assert.equal(investment.source_placeholder, true);
+  assert.equal(investment.source_url, "https://evidence.test/evidence");
+  assert.equal(investment.source_placeholder, false);
   assert.ok(!["raw_evidence", "approved_by", "approved_at", "gp_id", "project_groups", "project_group_basis"].some(field => field in investment));
 
   const allianceList = "/api/v1/membership/gp-projects?group=citic-alliance";
