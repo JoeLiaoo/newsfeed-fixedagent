@@ -7,7 +7,7 @@ export type IlinkCapabilities={reading:boolean;knowledge:boolean;experts:boolean
 
 export function capabilitiesHelp(capabilities:IlinkCapabilities):string{
   const directions:string[]=[];
-  if(capabilities.reading)directions.push('阅读日报可回复“深读 1”“其他”“全部”“下一页”或“主题：储能”');
+  if(capabilities.reading)directions.push('阅读日报可回复“1”“展开 1”“详情 1”“其他”“全部”“下一页”或“主题：储能”');
   if(capabilities.knowledge)directions.push('知识库可回复“知识库”“查知识库：问题”或“搜知识库：关键词”');
   if(capabilities.experts)directions.push('专家任务可回复“列专家”或“跑同业看板：企业或赛道”');
   if(capabilities.agent)directions.push('自由聊可直接发送问题');

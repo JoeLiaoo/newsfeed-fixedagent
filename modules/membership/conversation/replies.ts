@@ -5,7 +5,8 @@ import {listedCondition} from "@aihot/backend/publication/scope";
 import {enqueueOn} from "@aihot/backend/jobs/queue";
 import {decryptSecret,ilinkConfigured,ilinkErrorKind,sendIlinkText} from "../notifications/ilink.ts";
 import type {CompactItem} from "../notifications/presentation.ts";
-import {readingIntent} from "./intent.ts";
+import {readingIntent,type ReadingIntent} from "./intent.ts";
+import {classifyReadingIntent} from "./semantic.ts";
 import {READING_QUEUE} from "./queue.ts";
 import {agentEnabled,authorized} from "./authorization.ts";
 import {agentUnavailableHelp,capabilitiesHelp,currentIlinkCapabilities} from "./help.ts";
@@ -18,10 +19,9 @@ type Inbound={id:string;user_id:string;binding_version:number;body:string;status
 type SnapshotItem={source_key:string;title:string;tags:string[]};
 function siteHome(){const value=process.env.SITE_URL??"";try{return new URL(value).origin+"/";}catch{return "请登录网站首页查看。";}}
 type ReadingAnswer=string|{body:string;page:number;editionId:string};
-async function answer(row:Inbound,help:string):Promise<ReadingAnswer>{
+async function answer(row:Inbound,help:string,intent:ReadingIntent=readingIntent(row.body)):Promise<ReadingAnswer>{
   if(!row.body)return `当前支持文字消息。${help}`;
   if(row.body.length>1000)return `消息较长，请缩短到 1000 字以内。${help}`;
-  const intent=readingIntent(row.body);
   if(intent.kind==="help")return help;
   if(intent.kind==="unknown")return help;
   const [edition]=await sql<{outbox_id:string;local_date:string;preference_version:number;displayed_items:CompactItem[];page:number}[]>`
@@ -93,7 +93,7 @@ export async function processReadingInbound(id:string):Promise<void>{
       JOIN member_notification_settings s ON s.user_id=a.user_id
       WHERE a.user_id=${row.user_id} AND s.binding_version=${row.binding_version}`;
     if(!valid){claimStatus="cancelled";await tx`UPDATE member_ilink_inbound_messages SET status='cancelled' WHERE id=${id}`;return;}
-    const intent=readingIntent(row.body);
+    let intent=readingIntent(row.body);
     route="reading";
     const needsHelp=!row.body||row.body.length>1000||intent.kind==="help"||intent.kind==="unknown"||intent.kind==="ping";
     const capabilities=needsHelp?await currentIlinkCapabilities(tx,row.user_id,row.binding_version):null;
@@ -135,6 +135,23 @@ export async function processReadingInbound(id:string):Promise<void>{
         VALUES(${id},${id},${row.user_id},${row.binding_version},${typeof result==='string'?result:result.body},${typeof result==='string'?null:result.watchId??null},${expertGrant[0]?.grant_id??null}::uuid) ON CONFLICT DO NOTHING`;
       await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
       produced=true;return;
+    }
+    if(intent.kind==="unknown"&&process.env.P3_ILINK_READING_SEMANTIC_ENABLED==="true"
+      &&!isKnowledgeCommand(row.body)&&!isExpertCommand(row.body)){
+      const [active]=await tx`SELECT 1 FROM member_ilink_conversations c
+        JOIN member_news_compact_editions e ON e.outbox_id=c.outbox_id AND e.binding_version=c.binding_version
+        WHERE c.user_id=${row.user_id} AND c.binding_version=${row.binding_version}`;
+      if(active){
+        intent=await classifyReadingIntent(row.body,row.id,row.user_id);
+        const result=await answer(row,help,intent);
+        const body=(typeof result==="string"?result:result.body).slice(0,1500);
+        await tx`INSERT INTO member_ilink_reply_outbox(id,inbound_id,user_id,binding_version,body)
+          VALUES(${id},${id},${row.user_id},${row.binding_version},${body}) ON CONFLICT DO NOTHING`;
+        if(typeof result!=="string")await tx`UPDATE member_ilink_conversations SET page=${result.page},updated_at=now()
+          WHERE user_id=${row.user_id} AND binding_version=${row.binding_version} AND outbox_id=${result.editionId}`;
+        await tx`UPDATE member_ilink_inbound_messages SET status='processed' WHERE id=${id} AND status='pending'`;
+        produced=true;return;
+      }
     }
     if(intent.kind==="unknown"&&agentEnabled()){
       route="agent";

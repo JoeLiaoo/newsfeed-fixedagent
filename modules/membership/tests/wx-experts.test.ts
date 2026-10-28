@@ -35,7 +35,7 @@ test('WX-C2 creates once, isolates owners, confirms stored entity and recovers u
   assert.doesNotMatch((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${helpOff}`)[0]!.body,/专家任务/);
   const off=await inbound(users[0]!,'跑同业看板：机器人赛道');
   assert.equal((await sql`SELECT 1 FROM member_expert_tasks WHERE user_id=${users[0]}`).length,0);
-  assert.match((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${off}`)[0]!.body,/深读/);
+  assert.match((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${off}`)[0]!.body,/展开 1/);
   process.env.P3_ILINK_EXPERTS_ENABLED='true';
   const helpOn=await inbound(users[0]!,'帮助');
   assert.match((await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${helpOn}`)[0]!.body,/列专家/);

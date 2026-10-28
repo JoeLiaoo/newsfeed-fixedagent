@@ -4,7 +4,8 @@ import {capabilitiesHelp} from "../conversation/help.ts";
 
 test("iLink help lists only currently available capabilities",()=>{
   const reading=capabilitiesHelp({reading:true,knowledge:false,experts:false,agent:false});
-  assert.match(reading,/深读 1/);
+  assert.match(reading,/展开 1/);
+  assert.match(reading,/详情 1/);
   assert.doesNotMatch(reading,/知识库|专家任务|自由聊/);
   const withKnowledge=capabilitiesHelp({reading:true,knowledge:true,experts:true,agent:true});
   assert.match(withKnowledge,/知识库/);

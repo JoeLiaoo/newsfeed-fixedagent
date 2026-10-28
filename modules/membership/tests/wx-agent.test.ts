@@ -55,7 +55,7 @@ test("WX-B keeps two employees separate, deduplicates inbound and stops revoked 
   const disabled=await inbound(users[0]!,"开关关闭时的自由问题");
   assert.equal((await sql`SELECT 1 FROM member_agent_runs WHERE id=${disabled}`).length,0);
   const [oldReply]=await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${disabled}`;
-  assert.match(oldReply?.body??"",/深读 1/);
+  assert.match(oldReply?.body??"",/展开 1/);
   process.env.P3_ILINK_AGENT_ENABLED="true";
   const first=await inbound(users[0]!,"用户甲的秘密问题");
   const second=await inbound(users[1]!,"用户乙的不同问题");

@@ -33,17 +33,33 @@ test("one compact message represents a hundred long sources and keeps a stable o
   assert.deepEqual(displayed.map(item=>item.key),["article:99","article:98","article:97"]);
   assert(displayed.every(item=>/^[0-9a-f]{64}$/.test(item.sourceHash)));
   const text=renderCompactNewsDigest("2026-10-27",100,displayed,true);
-  assert(text.length>=350&&text.length<=600);
-  assert.match(text,/深读 2/);
+  assert(text.length<=600);
+  assert.match(text,/回复数字看详情/);
   assert.equal((text.match(/\d\. 第/g)??[]).length,3);
   assert.deepEqual(readingIntent("第 2 条"),{kind:"detail",number:2});
   assert.deepEqual(readingIntent("深度1"),{kind:"detail",number:1});
   assert.deepEqual(readingIntent("深度 3"),{kind:"detail",number:3});
+  for(const command of ["1","展开1","展开 1","详情1","看第1条","第1条","第一条","深读1"])
+    assert.deepEqual(readingIntent(command),{kind:"detail",number:1});
+  assert.deepEqual(readingIntent("第五条"),{kind:"detail",number:5});
+  for(const [command,kind] of [["其它","other"],["剩下的","other"],["完整","all"],["目录","all"],["下页","next"],["怎么用","help"]] as const)
+    assert.equal(readingIntent(command).kind,kind);
+  assert.equal(readingIntent("我有1个问题").kind,"unknown");
   assert.equal(readingIntent("深度6").kind,"unknown");
   assert.equal(readingIntent("你好").kind,"unknown");
   assert.equal(readingIntent("嗨").kind,"unknown");
   assert.deepEqual(readingIntent("在"),{kind:"ping"});
   assert.deepEqual(readingIntent("主题：储能"),{kind:"topic",topic:"储能"});
+});
+
+test("compact news preserves complete long titles before spending space on summaries",()=>{
+  const titles=["新能源企业完成最新一轮融资并公布储能项目建设计划".repeat(2),"半导体设备产业链公布新的产能与订单进展".repeat(2),"机器人公司发布年度研发与商业化进展".repeat(2)];
+  const items=titles.map((title,index)=>({key:String(index),title,summary:"摘要".repeat(300),source:"来源",url:"https://example.test",tags:[],timeline:"2026-10-28T00:00:00Z",sourceHash:"hash"}));
+  const output=renderCompactNewsDigest("2026-10-28",3,items,true);
+  assert(output.length<=700);
+  for(const title of titles)assert(output.includes(title));
+  assert(!output.includes("深读"));
+  assert(!output.includes("摘要"),"a long unpunctuated summary is omitted instead of cut mid-line");
 });
 
 test("long source text keeps contiguous per-part offsets without header-only parts",()=>{

@@ -7,7 +7,7 @@ import {stopBossNow} from "@aihot/backend/jobs/queue";
 import {beijingAt,beijingDate} from "@aihot/contracts/time";
 import {buildApp} from "../../../apps/api/src/app.ts";
 import {SERVER_MODULES} from "../../../site/modules/server.ts";
-import {tag} from "../../../tests/setup.ts";
+import {stub,tag} from "../../../tests/setup.ts";
 import {dispatchOutbox,generateDueNotifications,revalidatePayload,type OutboxRow} from "../notifications/outbox.ts";
 import {processReadingInbound} from "../conversation/replies.ts";
 import {pollMemberIlinkInboxes} from "../notifications/inbox.ts";
@@ -19,7 +19,8 @@ test("WX-A compact edition stays short through revalidation and replies use the 
   t.after(async()=>{await app.close();await stopBossNow();await closeDb();});
   const previous=Object.fromEntries(["P3_NOTIFICATIONS_ENABLED","P3_NEWS_COMPACT_ENABLED","P3_ILINK_READING_REPLIES_ENABLED",
     "P3_DELIVERY_ENABLED","P3_HERMES_BRIDGE_URL","P3_HERMES_BRIDGE_TOKEN",
-    "P3_ILINK_BINDING_ENABLED","P3_ILINK_CREDENTIAL_KEY"].map(key=>[key,process.env[key]]));
+    "P3_ILINK_BINDING_ENABLED","P3_ILINK_CREDENTIAL_KEY","P3_ILINK_READING_SEMANTIC_ENABLED",
+    "LLM_BASE_URL","LLM_API_KEY","LLM_MODEL"].map(key=>[key,process.env[key]]));
   t.after(()=>{for(const [key,value] of Object.entries(previous))if(value===undefined)delete process.env[key];else process.env[key]=value;});
   process.env.P3_NOTIFICATIONS_ENABLED="true";
   process.env.P3_NEWS_COMPACT_ENABLED="true";
@@ -100,6 +101,25 @@ test("WX-A compact edition stays short through revalidation and replies use the 
   const depthReplies=await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE inbound_id=${depthId}`;
   assert.equal(depthReplies.length,1);
   assert.match(depthReplies[0]!.body,new RegExp(edition!.displayed_items[0]!.title));
+  const model=await stub((_hit,req)=>{
+    const body=JSON.parse(req.body) as {messages:Array<{role:string;content:string}>};
+    const input=body.messages.find(message=>message.role==="user")!.content;
+    if(input.includes("低把握"))return {choices:[{message:{content:JSON.stringify({kind:"detail",number:1,confidence:0.4})}}]};
+    if(input.includes("坏结果"))return {choices:[{message:{content:"not json"}}]};
+    return {choices:[{message:{content:JSON.stringify({kind:"detail",number:2,confidence:0.95})}}]};
+  });
+  t.after(()=>model.close());
+  Object.assign(process.env,{P3_ILINK_READING_SEMANTIC_ENABLED:"true",LLM_BASE_URL:`${model.url}/v1`,LLM_API_KEY:"fixture",LLM_MODEL:"fixture-model"});
+  for(const [index,body] of ["我想看看第二条的内容","低把握的那条","坏结果的那条"].entries()){
+    const semanticId=randomUUID();
+    await sql`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,body)
+      VALUES(${semanticId},${userId},1,${"bot-"+suffix},${`semantic-${index}`},${body})`;
+    await processReadingInbound(semanticId);
+    const [reply]=await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE inbound_id=${semanticId}`;
+    if(index===0)assert.match(reply!.body,new RegExp(edition!.displayed_items[1]!.title));
+    else assert.match(reply!.body,/可用操作/);
+  }
+  assert.equal(model.hits(),3);
   await sql`UPDATE member_notification_settings SET binding_version=2 WHERE user_id=${userId}`;
   const staleId=randomUUID();
   await sql`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,body)
@@ -123,6 +143,11 @@ test("WX-A compact edition stays short through revalidation and replies use the 
   const [secondReply]=await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE inbound_id=${secondInbound}`;
   assert.match(secondReply!.body,/暂无可展开/);
   assert(!secondReply!.body.includes(edition!.displayed_items[1]!.title));
+  const noEditionId=randomUUID();
+  await sql`INSERT INTO member_ilink_inbound_messages(id,user_id,binding_version,bot_id,upstream_id,body)
+    VALUES(${noEditionId},${second!.id},1,${"bot-second-"+suffix},'semantic-without-edition','我想看看第二条的内容')`;
+  await processReadingInbound(noEditionId);
+  assert.equal(model.hits(),3,"without an accepted compact edition no semantic call is made");
   process.env.P3_ILINK_BINDING_ENABLED="true";
   process.env.P3_ILINK_CREDENTIAL_KEY="a".repeat(64);
   await sql`UPDATE member_ilink_accounts SET token_ciphertext=${encryptSecret("fixture-token")}`;

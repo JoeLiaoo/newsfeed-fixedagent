@@ -50,7 +50,7 @@ test("WX-C1 uses the shared answer chain, isolates employees and stops stale rep
   process.env.P3_ILINK_KB_ENABLED='false';
   const helpOff=await inbound(users[0]!,'帮助');
   const [helpOffReply]=await sql<{body:string}[]>`SELECT body FROM member_ilink_reply_outbox WHERE id=${helpOff}`;
-  assert.match(helpOffReply!.body,/深读 1/);
+  assert.match(helpOffReply!.body,/展开 1/);
   assert.doesNotMatch(helpOffReply!.body,/知识库/);
   const off=await inbound(users[0]!,'查知识库：某公司怎么看');
   assert.equal((await sql`SELECT 1 FROM member_ilink_kb_runs WHERE id=${off}`).length,0);
