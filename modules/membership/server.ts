@@ -15,6 +15,7 @@ import { rewriteHostAlias } from "@aihot/backend/lib/url";
 import { SourceCheckTimeout, memberSourceAddress, sourceCheckFailure, sourceCheckTimeoutMs, sourceCheckMayStart, throwIfCheckAborted } from "./sources.ts";
 import * as cheerio from "cheerio";
 import { PRESET_TAGS } from "./catalog.ts";
+import { ENTITY_TAG_LABELS, memberDisplayTags } from "./tag-labels.ts";
 
 const scrypt = promisify(scryptCallback);
 const COOKIE = "citic_member_session";
@@ -212,7 +213,7 @@ export function registerMembership(app: FastifyInstance) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today) return reply.code(400).send({ error: "invalid_digest_date" });
     const result = await getDailyDigest(user.id, date);
     if (!result) return reply.code(404).send({ error: "digest_not_generated" });
-    return { date: result.local_date, preferenceVersion: result.preference_version, window: { start: result.window_start, cutoff: result.cutoff_at }, generatedAt: result.generated_at, tags: result.tags, items: result.items };
+    return { date: result.local_date, preferenceVersion: result.preference_version, window: { start: result.window_start, cutoff: result.cutoff_at }, generatedAt: result.generated_at, tags: memberDisplayTags(result.tags), items: result.items.map(item => ({ ...item, tags: memberDisplayTags(item.tags) })) };
   });
 
   app.get("/api/v1/membership/digest/history", async (req, reply) => {
@@ -244,10 +245,14 @@ export function registerMembership(app: FastifyInstance) {
     `;
     const now = new Date();
     const coverage = await sql<{ tag: string; count: number }[]>`
-      SELECT tag, count(DISTINCT p.article_id)::int AS count FROM publications p
-      CROSS JOIN LATERAL unnest(p.tags) AS tag
+      SELECT COALESCE(labels.names ->> raw.tag, raw.tag) AS tag,
+        count(DISTINCT p.article_id)::int AS count
+      FROM publications p
+      CROSS JOIN LATERAL unnest(p.tags) AS raw(tag)
+      CROSS JOIN (SELECT ${sql.json(ENTITY_TAG_LABELS)}::jsonb AS names) labels
       WHERE ${listedCondition(now)} AND p.timeline_at > ${now}::timestamptz - interval '7 days'
-      GROUP BY tag ORDER BY count DESC, tag
+        AND (raw.tag NOT LIKE 'entity:%' OR labels.names ? raw.tag)
+      GROUP BY 1 ORDER BY count DESC, tag
     `;
     return { sources, coverage, activeSources: sources.filter(source => source.enabled).length };
   });
