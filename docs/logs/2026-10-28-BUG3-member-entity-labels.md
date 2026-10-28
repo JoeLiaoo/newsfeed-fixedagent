@@ -1,7 +1,7 @@
 # 2026-10-28 · BUG3 员工端实体标签显示
 
 - 对应任务：P1-04／P1-05 员工端 E2E BUG3 维护；原任务勾选不变，P4-04 员工真实试用仍待完成。
-- 状态：本分支修复，待 PR 评审、发布与员工复验。
+- 状态：[PR #173](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/173) 已开启，待评审、发布与员工复验。
 
 ## 本次改动
 
@@ -16,9 +16,9 @@
 - `node --import ./tests/standalone.ts --test modules/membership/tests/tag-labels.standalone.test.ts`：1/1 通过。
 - `npm run typecheck`：通过。
 - `node scripts/check-doc-links.ts`、`git diff --check`：通过。
-- 未运行 `modules/membership/tests/access-contract.test.ts` 的数据库集成回归：本机无 `DATABASE_URL`、PostgreSQL 或 Docker，需在 PR CI 的 PostgreSQL 17 服务中运行。未在生产成员账号复验。
+- 本机无 `DATABASE_URL`、PostgreSQL 或 Docker，未在本地运行 `modules/membership/tests/access-contract.test.ts` 的数据库集成回归；PR #173 的 PostgreSQL 17 `postgres-integration`、`quality`、`links` 三项检查均通过。未在生产成员账号复验。
 
 ## 风险与下一步
 
 - 修改仅影响员工 API 标签展示；已存日报仍保留原始标签用于快照和匹配。未知 `entity:*` 不显示，因此如果行业词典尚无对应名称，该覆盖标签暂不出现。
-- PR 评审与 CI → 发布后由员工复验我的日报和资讯信源页；P4-04 不因代码修复而勾选。
+- PR 评审 → 发布后由员工复验我的日报和资讯信源页；P4-04 不因代码修复而勾选。
