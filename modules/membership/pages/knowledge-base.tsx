@@ -10,6 +10,7 @@ import { FileInput } from "@aihot/web/components/member-ui/file-input";
 import { Label } from "@aihot/web/components/member-ui/label";
 import { renderMarkdown } from "@aihot/web/lib/markdown";
 import { pageMeta, siteUrl } from "@aihot/web/lib/seo";
+import { answerWithPageLinks } from "./answer-links.ts";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { FRESHNESS_LABELS, TASK_ERRORS, TASK_STAGE_LABELS, TASK_STATE_LABELS, type FreshnessTier } from "../knowledge/catalog.ts";
 
@@ -58,22 +59,6 @@ type Answer = {
   freshness: Array<{ pageSlug: string; tier: string | null; lastReport: string | null }>;
   createdAt?: string;
 };
-
-/** The model may list page slugs in its closing reference section; use verified citation titles. */
-function answerWithPageLinks(answer: Answer): string {
-  const heading = answer.answerMd.indexOf("本次参考的知识页列表");
-  if (heading < 0) return answer.answerMd;
-  const before = answer.answerMd.slice(0, heading);
-  let references = answer.answerMd.slice(heading);
-  const linked = new Set<string>();
-  for (const citation of answer.citations) {
-    if (!citation.pageSlug || !citation.title || linked.has(citation.pageSlug)) continue;
-    linked.add(citation.pageSlug);
-    const title = citation.title.replace(/[\\\[\]]/g, "\\$&");
-    references = references.replaceAll(citation.pageSlug, `[${title}](/knowledge/targets/${encodeURIComponent(citation.pageSlug)})`);
-  }
-  return before + references;
-}
 
 const PAGE_TYPE_LABEL: Record<string, string> = { view: "观点页", query: "预编译问答", concept: "判断框架", monitor: "监测指标" };
 const FRESHNESS_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "destructive"> = { fresh: "success", semi: "warning", stale: "destructive", undated: "secondary" };
