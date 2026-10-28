@@ -11,7 +11,7 @@ const clip=(value:string,max:number)=>{
 };
 const completeSummary=(summary:string,limit:number):string=>{
   if(summary.length<=limit)return summary;
-  const boundary=[...summary.slice(0,limit).matchAll(/[。！？；.!?;，]/g)].at(-1);
+  const boundary=[...summary.slice(0,limit).matchAll(/[。！？；.!?;]/g)].at(-1);
   return boundary&&boundary.index!>=12?summary.slice(0,boundary.index!+1):"";
 };
 export const compactSourceHash=(item:Pick<CompactItem,"title"|"summary"|"source"|"url">)=>

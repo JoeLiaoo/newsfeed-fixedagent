@@ -62,6 +62,16 @@ test("compact news preserves complete long titles before spending space on summa
   assert(!output.includes("摘要"),"a long unpunctuated summary is omitted instead of cut mid-line");
 });
 
+test("compact news does not treat a comma as a complete summary sentence",()=>{
+  const items=Array.from({length:3},(_,index)=>({key:String(index),title:`资讯 ${index+1}`,
+    summary:"公司完成新一轮融资，"+"后续计划".repeat(100),source:"来源",url:"https://example.test",tags:[],
+    timeline:"2026-10-28T00:00:00Z",sourceHash:"hash"}));
+  const output=renderCompactNewsDigest("2026-10-28",3,items,true);
+  assert(output.length<=700);
+  assert(!output.includes("公司完成新一轮融资，"));
+  assert.equal((output.match(/\d\. 资讯/g)??[]).length,3);
+});
+
 test("long source text keeps contiguous per-part offsets without header-only parts",()=>{
   const longText="A".repeat(2300)+"😀"+"B".repeat(500);
   const shortText="short item";
