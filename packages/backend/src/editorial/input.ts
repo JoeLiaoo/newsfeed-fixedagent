@@ -84,6 +84,7 @@ export function buildMaterial(a: AnalyzeInputArticle): string {
   lines.push("<source>");
   lines.push(`名称：${a.source.name}`);
   lines.push(`类型：${KIND_LABEL[a.source.kind] ?? a.source.kind}；分级：${a.source.tier}；一手来源：${a.source.firstParty ? "是" : "否"}`);
+  if (a.source.tags?.length) lines.push(`来源标签：${a.source.tags.join("、")}`);
   lines.push("</source>");
   lines.push("<material>");
   if (a.publishedAt) lines.push(`发布时间：${describePublicationTime(a.publishedAt, a.publicationTime)}`);

@@ -9,6 +9,7 @@
 import { addDays } from "@aihot/contracts/time";
 import { CATEGORIES } from "@aihot/industry/taxonomy";
 import { sql } from "../db.ts";
+import { feedCategorySql } from "../publication/items.ts";
 import { currentSignals } from "../events/hot.ts";
 import { pickRepresentative, representativePriority, REPRESENTATIVE_COLUMNS, type RepresentativeIdentity } from "../publication/representative.ts";
 import { factSources } from "../publication/coverage.ts";
@@ -28,7 +29,7 @@ export const FLASH_ENTRIES = 10;
 const PER_SOURCE = 2;
 /** A follow-up of a covered event takes a full entry when this many sources carry its new facts. */
 const FOLLOW_UP_SOURCES = 4;
-/** The pack's `commentary` categories (how-tos, opinions): a follow-up of theirs is a flash, whoever wrote it. */
+/** The pack's `commentary` categories (podcasts, opinions): a follow-up of theirs is a flash, whoever wrote it. */
 const COMMENTARY = new Set<string>(CATEGORIES.filter((c) => "commentary" in c).map((c) => c.key));
 /** Earlier issues a daily remembers. */
 const MEMORY_DAYS = 7;
@@ -90,7 +91,7 @@ type ReportRow = RepresentativeIdentity & {
   fact_id: number | null; fact_public_id: string | null; story_id: number | null; story_public_id: string | null;
 };
 
-const REPORT_FIELDS = sql`p.article_id AS id, p.title, p.summary, p.url, p.category, p.tags, p.score, (s.tier = 'T1') AS first_party, p.body_mode, p.timeline_at,
+const REPORT_FIELDS = sql`p.article_id AS id, p.title, p.summary, p.url, ${feedCategorySql} AS category, p.tags, p.score, (s.tier = 'T1') AS first_party, p.body_mode, p.timeline_at,
   ${REPRESENTATIVE_COLUMNS}, s.id AS source_id, s.name AS source_name, s.kind AS source_kind,
   f.id AS fact_id, f.public_id AS fact_public_id, st.id AS story_id, st.public_id::text AS story_public_id`;
 
