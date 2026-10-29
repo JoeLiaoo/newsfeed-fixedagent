@@ -2,6 +2,8 @@
 // manual overrides and grouping, then record selected-set changes in the sync ledger.
 // Rebuilding only re-reads stored results; it never calls a model.
 import { toPublicApiCategory } from "@aihot/contracts/taxonomy";
+import { resolvePublishedCategory } from "../editorial/vocabulary.ts";
+import { feedCategorySql } from "./items.ts";
 import { SITE } from "@aihot/site";
 import { one, sql, type Tx } from "../db.ts";
 import { sha256, stableJson } from "../lib/ids.ts";
@@ -196,7 +198,7 @@ async function syncLedger(tx: Tx, articleId: string, now: Date): Promise<"upsert
   const [p] = await tx<Array<{ selected: boolean; visibility: string; seat: boolean; title: string; original_title: string | null; summary: string | null;
     url: string; published_at: Date | null; discovered_at: Date; category: string | null; score: string | number | null; reason: string | null;
     source_name: string }>>`
-    SELECT p.selected, p.visibility, p.seat, p.title, p.original_title, p.summary, p.url, p.published_at, p.discovered_at, p.category,
+    SELECT p.selected, p.visibility, p.seat, p.title, p.original_title, p.summary, p.url, p.published_at, p.discovered_at, ${feedCategorySql} AS category,
            p.score, p.reason, s.name AS source_name
     FROM publications p JOIN sources s ON s.id = p.source_id WHERE p.article_id = ${articleId}`;
   if (!p) return null;
@@ -244,7 +246,7 @@ export async function publishArticleTx(tx: Tx, articleId: string, options: Publi
     article.grouping_status = "complete";
   }
   const [source] = await tx<SourceFacts[]>`
-    SELECT id, name, kind, tier, participation_mode, first_party, site_fulltext, syndicate_fulltext FROM sources WHERE id = ${article.source_id}`;
+    SELECT id, name, kind, tier, participation_mode, first_party, site_fulltext, syndicate_fulltext, tags FROM sources WHERE id = ${article.source_id}`;
   if (!source) return null;
   const [analysis] = await tx<AnalysisRow[]>`
     SELECT id, relevance, category, tags, subjects, title_zh, summary_zh, reason_zh, score, selected
@@ -273,8 +275,12 @@ export async function publishArticleTx(tx: Tx, articleId: string, options: Publi
   const original = originalPostCopy(article.x_post, article.url, article.x_article);
   const title = pickString(f.title, original?.title ?? zhTitle ?? (isChineseTitle || article.x_post ? collapseWhitespace(article.title) : null));
   const summary = pickString(f.summary, original ? original.summary : analysis?.summary_zh ?? null);
-  const category = pickString(f.category, analysis?.category ?? null);
-  const tags = Array.isArray(f.tags) ? (f.tags as string[]) : [...new Set([...(analysis?.tags ?? []), ...(analysis?.subjects ?? []).map((s) => `entity:${s}`)])];
+  const pickedCategory = pickString(f.category, analysis?.category ?? null);
+  const pickedTags = Array.isArray(f.tags) ? (f.tags as string[]) : [...new Set([...(analysis?.tags ?? []), ...(analysis?.subjects ?? []).map((s) => `entity:${s}`)])];
+  // Podcast feeds stay in tip. A leftover tutorial classification (tip on any other source) is published as opinion.
+  const publishedClass = resolvePublishedCategory(pickedCategory, pickedTags, source.tags);
+  const category = publishedClass.category;
+  const tags = publishedClass.tags;
   const score = f.score === null || typeof f.score === "number" ? f.score : analysis?.score ?? null;
   const relevance = typeof f.relevance === "string" ? (f.relevance as string) : analysis?.relevance ?? null;
   const judgedSelected = typeof f.selected === "boolean" ? (f.selected as boolean) : analysis?.selected ?? null;

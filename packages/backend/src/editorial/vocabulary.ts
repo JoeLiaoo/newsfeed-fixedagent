@@ -1,6 +1,6 @@
 // Tag normalization and company identity over the industry pack's vocabulary (industry/taxonomy.ts),
 // which the topics (industry/topics.json) are built on.
-import { CATEGORIES, CATEGORY_TAGS, ENTITIES, ENTITY_TAGS, RELEASE, TAG_SYNONYMS, TOPIC_TAGS } from "@aihot/industry/taxonomy";
+import { CATEGORIES, CATEGORY_TAGS, ENTITIES, ENTITY_TAGS, PODCAST_SOURCE_TAG, RELEASE, TAG_SYNONYMS, TOPIC_TAGS } from "@aihot/industry/taxonomy";
 
 export { CATEGORY_TAGS, ENTITIES, ENTITY_TAGS, ITEM_TYPES, TOPIC_TAGS } from "@aihot/industry/taxonomy";
 
@@ -27,6 +27,23 @@ export function normalizeTags(v: unknown, additionalTags: readonly string[] = []
 
 /** The category boundaries the structure step reads, one line per category. */
 export const CATEGORY_GUIDE = CATEGORIES.map((c) => `- ${c.key}（${c.label}）：${c.guide}`).join("\n");
+
+const CATEGORY_TAG_SET = new Set<string>(CATEGORY_TAGS);
+
+/**
+ * Public category for one item. A source tagged 播客 is always tip, whatever the model or an override said.
+ * tip on any other source is the old tutorial bucket and is published as opinion, so the 播客 chip stays podcast-only.
+ * Topic tags such as 教程/实践 are left in place. Podcast items drop other category tags and keep 播客.
+ * `feedCategorySql` in publication/items.ts must apply the same two branches to rows already stored.
+ */
+export function resolvePublishedCategory(category: string | null, tags: readonly string[], sourceTags: readonly string[] | undefined): { category: string | null; tags: string[] } {
+  if (sourceTags?.includes(PODCAST_SOURCE_TAG)) {
+    const rest = tags.filter((tag) => !CATEGORY_TAG_SET.has(tag));
+    return { category: "tip", tags: [PODCAST_SOURCE_TAG, ...rest] };
+  }
+  if (category === "tip") return { category: "opinion", tags: [...tags] };
+  return { category, tags: [...tags] };
+}
 
 /** The industry's headline launch (RELEASE): narrower than its category, which also holds prices and benchmarks. */
 export const isRelease = (category: string | null, tags: readonly string[]) => RELEASE !== null && category === RELEASE.category && tags.includes(RELEASE.tag);

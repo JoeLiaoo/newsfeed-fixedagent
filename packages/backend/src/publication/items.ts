@@ -1,6 +1,7 @@
 // Public read layer, item level. Every exit (site API, v1, RSS, MCP, sitemap) reads
 // items through these columns and views; which rows are public is decided by scope.ts.
 import { CATEGORY_KEYS, toPublicApiCategory, type CategoryKey, type ChannelKey, type PublicApiCategoryKey } from "@aihot/contracts/taxonomy";
+import { PODCAST_SOURCE_TAG } from "@aihot/industry/taxonomy";
 import type { FeedItemSummary, ItemSummary, MediaView, XPostView } from "@aihot/contracts/site";
 import { POLICY } from "@aihot/site";
 import { sql, type Db } from "../db.ts";
@@ -47,9 +48,25 @@ export interface ItemRow {
   quoted_zh: string | null;
 }
 
+/**
+ * Category readers see. Keep the branches aligned with resolvePublishedCategory:
+ * a 播客 source is tip; tip on any other source is the old tutorial bucket and reads as opinion.
+ * The subquery does not need the outer query to join sources.
+ */
+export const feedCategorySql = sql`(
+  CASE
+    WHEN EXISTS (
+      SELECT 1 FROM sources feed_cat_source
+      WHERE feed_cat_source.id = p.source_id AND ${PODCAST_SOURCE_TAG} = ANY (feed_cat_source.tags)
+    ) THEN 'tip'
+    WHEN p.category = 'tip' THEN 'opinion'
+    ELSE p.category
+  END
+)`;
+
 /** Columns every item listing selects. Internal judgement details never leave this layer. */
 export const ITEM_COLUMNS = sql`
-  p.article_id AS id, p.title, p.original_title, p.summary, p.reason, p.category, p.tags, p.score,
+  p.article_id AS id, p.title, p.original_title, p.summary, p.reason, ${feedCategorySql} AS category, p.tags, p.score,
   p.selected, p.seat, p.channel, p.url, p.published_at, p.discovered_at, p.timeline_at, p.visibility,
   p.body_mode, p.indexable, p.fact_id, s.name AS source_name, s.participation_mode AS source_mode,
   a.x_post, a.author, a.language,
@@ -62,7 +79,7 @@ export type ApiItemRow = Pick<ItemRow, "id" | "title" | "original_title" | "summ
 /** `selected` is the machine meaning: the report holds its fact's selected seat (scope.ts seatedCondition). */
 export const API_ITEM_COLUMNS = sql`
   p.article_id AS id, p.title, p.original_title, p.summary, s.name AS source_name, p.url,
-  p.published_at, p.discovered_at, p.category, p.score, (p.selected AND p.seat) AS selected, p.reason`;
+  p.published_at, p.discovered_at, ${feedCategorySql} AS category, p.score, (p.selected AND p.seat) AS selected, p.reason`;
 export const API_ITEM_FROM = sql`FROM publications p JOIN sources s ON s.id = p.source_id`;
 
 /** A translation of an older revision is left out: the original changed after it (the worker translates it again). */
@@ -80,16 +97,16 @@ export function channelCondition(channel: ChannelKey | null | undefined) {
   return sql`AND p.channel = ${channel}`;
 }
 
-/** The website's filter: one of its own categories. */
+/** The website's filter: one of its own categories, after podcast sources are pinned to tip. */
 export function categoryCondition(category: CategoryKey | null | undefined) {
   if (!category) return sql``;
-  return sql`AND p.category = ${category}`;
+  return sql`AND ${feedCategorySql} = ${category}`;
 }
 
 /** The public API's, RSS's and MCP's filter: every category the site publishes as this one (PUBLIC_CATEGORIES). */
 export function publicCategoryCondition(category: PublicApiCategoryKey | null | undefined) {
   if (!category) return sql``;
-  return sql`AND p.category IN ${sql(CATEGORY_KEYS.filter((k) => toPublicApiCategory(k) === category))}`;
+  return sql`AND ${feedCategorySql} IN ${sql(CATEGORY_KEYS.filter((k) => toPublicApiCategory(k) === category))}`;
 }
 
 export function tagCondition(tag: string | null | undefined) {

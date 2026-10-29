@@ -30,7 +30,7 @@ import {
   needsShortTweetTranslation, parseTranslateOutput, PREFILTER_SYSTEM, prefilterUser, translateInputOf, UNDERSTAND_SYSTEM, understandUser,
   type IdentityGuard,
 } from "./writing.ts";
-import { CATEGORY_GUIDE, CATEGORY_TAGS, ENTITIES, ENTITY_TAGS, ITEM_TYPES, normalizeTags, TOPIC_TAGS } from "./vocabulary.ts";
+import { CATEGORY_GUIDE, CATEGORY_TAGS, ENTITIES, ENTITY_TAGS, ITEM_TYPES, normalizeTags, resolvePublishedCategory, TOPIC_TAGS } from "./vocabulary.ts";
 import { promptText, promptVersion } from "./prompts.ts";
 import { originalPostCopy } from "../content/posts.ts";
 import { wordingProblems } from "./wording.ts";
@@ -194,8 +194,9 @@ export function normalizeStructure(data: z.infer<typeof StructureSchema>, a: Ana
       return quote ? [{ text: c.text ?? quote, quote }] : [];
     }).slice(0, 4),
   };
+  const published = resolvePublishedCategory(data.category, normalizeTags(data.tags, additionalTags), a.source.tags);
   return {
-    category: data.category, tags: normalizeTags(data.tags, additionalTags),
+    category: published.category, tags: published.tags,
     subjects: [...new Set(data.subjects.map((s) => s.trim().toLowerCase()).filter((s) => s in ENTITIES))],
     scope, fact,
   };

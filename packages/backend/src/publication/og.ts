@@ -5,13 +5,14 @@ import { beijingDate } from '@aihot/contracts/time';
 import { ITEM_COPY, withSubject } from '@aihot/site';
 import type { OgCard } from '../media/og.ts';
 import { sql } from '../db.ts';
+import { feedCategorySql } from './items.ts';
 import { hasItemPage, publicSourceName } from './rules.ts';
 
 export async function loadItemShare(id: string) {
   const [row] = await sql<{
     id: string; title: string; summary: string | null; category: CategoryKey | null; selected: boolean;
     score: number | null; timeline_at: Date; source_name: string; source_mode: string; visibility: string;
-  }[]>`SELECT p.article_id AS id, p.title, p.summary, p.category, p.selected, p.score, p.timeline_at,
+  }[]>`SELECT p.article_id AS id, p.title, p.summary, ${feedCategorySql} AS category, p.selected, p.score, p.timeline_at,
       s.name AS source_name, s.participation_mode AS source_mode, p.visibility
     FROM publications p JOIN sources s ON s.id = p.source_id WHERE p.article_id = ${id}`;
   if (!row || !hasItemPage({ visibility: row.visibility, sourceMode: row.source_mode })) return null;

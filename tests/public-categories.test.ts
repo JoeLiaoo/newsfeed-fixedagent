@@ -17,33 +17,50 @@ import { buildApp } from "../apps/api/src/app.ts";
 
 const T = tag();
 const SOURCE = `categories-${T}`;
+const PODCAST = `categories-podcast-${T}`;
 const now = new Date();
 const at = new Date(now.getTime() - 3600_000);
 const title = (category: string) => `${T} ${category}`;
+// A row stored as tip on a source that is not tagged 播客 is the old tutorial bucket and reads as opinion.
+const tutorial = `${T} old tutorial`;
 const app = await buildApp();
 const client = new Client({ name: 'category-check', version: '1.0.0' });
 
 before(async () => {
   await sql`INSERT INTO sources (id, name, kind, tier) VALUES (${SOURCE}, 'Category fixture', 'rss', 'T1')`;
+  await sql`INSERT INTO sources (id, name, kind, tier, tags) VALUES (${PODCAST}, 'Podcast fixture', 'json_list', 'T2', ${["播客"]})`;
   for (const category of CATEGORY_KEYS) {
     const id = `${T}-${category}`;
+    const sourceId = category === "tip" ? PODCAST : SOURCE;
     await sql`INSERT INTO articles (id, source_id, identity_key, url, title, discovered_at, timeline_at, published_at)
-      VALUES (${id}, ${SOURCE}, ${id}, ${`https://example.org/${id}`}, ${title(category)}, ${at}, ${at}, ${at})`;
+      VALUES (${id}, ${sourceId}, ${id}, ${`https://example.org/${id}`}, ${title(category)}, ${at}, ${at}, ${at})`;
     await sql`INSERT INTO publications (article_id, title, source_id, channel, url, discovered_at, timeline_at, published_at, sort_at,
         eligible, selected, visible_after, visibility, tags, category, search_text)
-      VALUES (${id}, ${title(category)}, ${SOURCE}, 'news', ${`https://example.org/${id}`}, ${at}, ${at}, ${at}, ${at},
+      VALUES (${id}, ${title(category)}, ${sourceId}, 'news', ${`https://example.org/${id}`}, ${at}, ${at}, ${at}, ${at},
         true, true, ${at}, 'public', ${[T]}, ${category}, ${title(category)})`;
   }
+  const oldTip = `${T}-old-tip`;
+  await sql`INSERT INTO articles (id, source_id, identity_key, url, title, discovered_at, timeline_at, published_at)
+    VALUES (${oldTip}, ${SOURCE}, ${oldTip}, ${`https://example.org/${oldTip}`}, ${tutorial}, ${at}, ${at}, ${at})`;
+  await sql`INSERT INTO publications (article_id, title, source_id, channel, url, discovered_at, timeline_at, published_at, sort_at,
+      eligible, selected, visible_after, visibility, tags, category, search_text)
+    VALUES (${oldTip}, ${tutorial}, ${SOURCE}, 'news', ${`https://example.org/${oldTip}`}, ${at}, ${at}, ${at}, ${at},
+      true, true, ${at}, 'public', ${[T, "教程/实践"]}, 'tip', ${tutorial})`;
   const address = await app.listen({ host: '127.0.0.1', port: 0 });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${address}/api/mcp`)));
 });
 after(async () => { await client.close(); await app.close(); await closeDb(); });
 
 const ours = (titles: string[]) => titles.filter((t) => t.startsWith(`${T} `)).sort();
+const publicTitles = (key: string) => {
+  const titles = CATEGORY_KEYS.filter((k) => toPublicApiCategory(k) === key).map(title);
+  if (key === "opinion") titles.push(tutorial);
+  return titles.sort();
+};
 
 test("a public category takes in the categories the site publishes as it, and only those", async () => {
   for (const key of PUBLIC_API_CATEGORY_KEYS) {
-    const want = CATEGORY_KEYS.filter((k) => toPublicApiCategory(k) === key).map(title).sort();
+    const want = publicTitles(key);
     const v1 = await v1Items({ mode: "selected", window: "24h", by: "timeline", category: key, q: null, limit: 100, cursor: null }, now);
     assert.deepEqual(ours(v1.items.map((i) => i.title)), want, `v1 and MCP, ${key}`);
     const rss = await itemFeed("selected", key, { now });
@@ -54,7 +71,10 @@ test("a public category takes in the categories the site publishes as it, and on
 test("the website filters by each of its own categories", async () => {
   for (const key of CATEGORY_KEYS) {
     const timeline = await loadTimeline({ channel: "all", category: key, tag: T, limit: 40, now });
-    assert.deepEqual(ours(timeline.cards.map((c) => c.item.title)), [title(key)], key);
+    const want = key === "opinion" ? [title("opinion"), tutorial].sort() : [title(key)];
+    assert.deepEqual(ours(timeline.cards.map((c) => c.item.title)), want, key);
+    if (key === "opinion") assert.equal(timeline.cards.find((c) => c.item.title === tutorial)?.item.category, "opinion");
+    if (key === "tip") assert.equal(timeline.cards.find((c) => c.item.title === title("tip"))?.item.category, "tip");
   }
 });
 
@@ -70,7 +90,7 @@ test("HTTP, Agent, MCP and discovery agree on the public categories and returned
     assert.deepEqual(schema.enum, [...PUBLIC_API_CATEGORY_KEYS], name);
   }
   for (const key of PUBLIC_API_CATEGORY_KEYS) {
-    const want = CATEGORY_KEYS.filter((k) => toPublicApiCategory(k) === key).map(title).sort();
+    const want = publicTitles(key);
     for (const mode of ['all', 'selected']) {
       const response = await app.inject(`/api/v1/items?mode=${mode}&category=${key}`);
       assert.equal(response.statusCode, 200);
@@ -82,6 +102,7 @@ test("HTTP, Agent, MCP and discovery agree on the public categories and returned
       assert.equal(response.statusCode, 200, path);
       for (const item of want) assert.ok(response.body.includes(item), path);
       for (const other of CATEGORY_KEYS.filter((k) => toPublicApiCategory(k) !== key)) assert.ok(!response.body.includes(title(other)), path);
+      if (key !== "opinion") assert.ok(!response.body.includes(tutorial), path);
     }
     for (const name of [MCP_TOOL_NAMES.latest, MCP_TOOL_NAMES.search]) {
       const result = await client.callTool({ name, arguments: { category: key, ...(name === MCP_TOOL_NAMES.search ? { q: T } : {}) } });
