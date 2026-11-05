@@ -15,6 +15,7 @@ import { rewriteHostAlias } from "@aihot/backend/lib/url";
 import { SourceCheckTimeout, memberSourceAddress, sourceCheckFailure, sourceCheckTimeoutMs, sourceCheckMayStart, throwIfCheckAborted } from "./sources.ts";
 import * as cheerio from "cheerio";
 import { PRESET_TAGS } from "./catalog.ts";
+import { autoApproveEnabled } from "./registration.ts";
 import { ENTITY_TAG_LABELS, memberDisplayTags } from "./tag-labels.ts";
 
 const scrypt = promisify(scryptCallback);
@@ -116,13 +117,28 @@ export function registerMembership(app: FastifyInstance) {
       return reply.code(400).send({ error: "invalid_registration", message: "用户名需 3–40 位；真实姓名需 2–80 字；密码需至少 12 位。" });
     }
     const id = randomId();
+    const hash = await passwordHash(password);
+    // With the approval step switched off the account may sign in right away; nobody reviewed it, so
+    // approved_by stays empty.
+    const autoApprove = autoApproveEnabled();
     try {
-      await sql`INSERT INTO member_users (id, username, real_name, password_hash) VALUES (${id}, ${username}, ${realName.trim()}, ${await passwordHash(password)})`;
+      if (autoApprove) {
+        await sql`INSERT INTO member_users (id, username, real_name, password_hash, status, approved_at, approved_by) VALUES (${id}, ${username}, ${realName.trim()}, ${hash}, 'active', now(), null)`;
+      } else {
+        await sql`INSERT INTO member_users (id, username, real_name, password_hash) VALUES (${id}, ${username}, ${realName.trim()}, ${hash})`;
+      }
     } catch (error) {
       if ((error as { code?: string }).code === "23505") return reply.code(409).send({ error: "username_taken" });
       throw error;
     }
-    return reply.code(201).send({ status: "pending_approval" });
+    return reply.code(201).send(autoApprove ? { status: "active" } : { status: "pending_approval" });
+  });
+
+  // The registration and sign-in pages show whether the approval step applies. The flag itself is no
+  // secret: it only says which wording the pages use.
+  app.get("/api/v1/membership/registration-policy", async (req, reply) => {
+    noStore(reply);
+    return { autoApprove: autoApproveEnabled() };
   });
 
   app.post("/api/v1/membership/login", async (req, reply) => {
@@ -387,7 +403,7 @@ async function discoverSiteFeeds(home: URL, signal?: AbortSignal): Promise<{ rss
 export function registerMembershipAccessBoundary(app: FastifyInstance) {
   const privateContentPath = (req: FastifyRequest) => {
     const pathname = (req.raw.url ?? "/").split("?", 1)[0]!;
-    if (pathname.startsWith("/api/")) return pathname !== "/api/health" && !["/api/v1/membership/register", "/api/v1/membership/login", "/api/v1/membership/logout", "/api/v1/membership/bridge/claim"].includes(pathname);
+    if (pathname.startsWith("/api/")) return pathname !== "/api/health" && !["/api/v1/membership/register", "/api/v1/membership/registration-policy", "/api/v1/membership/login", "/api/v1/membership/logout", "/api/v1/membership/bridge/claim"].includes(pathname);
     return pathname === "/feed.xml" || pathname.startsWith("/feed/") || pathname.startsWith("/og/") || pathname.startsWith("/items/")
       || ["/sitemap.xml", "/llms.txt", "/openapi-v1.json"].includes(pathname);
   };
