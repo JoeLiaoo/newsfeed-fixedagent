@@ -35,6 +35,7 @@
   - `node --test-global-setup=tests/databases.ts --import ./tests/databases.ts --test modules/membership/tests/membership-auto-approve.test.ts`（本机 PostgreSQL 临时库）：1 项通过，覆盖关闭时注册→待审核→管理员通过后可登录、打开时注册即 `active` 且不进待审核列表、策略接口匿名可读。
   - 本机同时起 api 与 web 实测：开关关闭时注册页显示「提交后由管理员审核账号。」与「提交审核」，`POST /register` 返回 `{"status":"pending_approval"}`；开关打开时注册页显示「注册后即可登录。」与「注册」，经 web 代理注册返回 `{"status":"active"}`，随即登录返回 200。
   - `node scripts/check-doc-links.ts`：通过。
+  - PR #179 的 CI（links、quality、postgres-integration）在 PR 首轮 head `e5795ac` 上全部通过；本次提交仅补记该结果。
 - 未执行或需用户试用的检查：
   - 未部署到任何环境，未改动生产配置；生产仍是原行为（注册后待审核）。
   - 未在真实内网主机上验证开关生效路径（`/opt/citic-newsfeed/shared/.env` 变更与容器重建），需发布时按运维步骤人工确认。
