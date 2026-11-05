@@ -2,6 +2,7 @@
 
 ## 从这里开始
 
+- [员工注册自动通过开关](logs/2026-11-05-membership-auto-approve.md)：默认关闭的 `MEMBERSHIP_AUTO_APPROVE`；内网实例打开后注册账号直接可登录，注册页不再提示等待审核；待 PR 评审、发布与真实员工试用。
 - [产业动态「播客」筛选](logs/2026-10-29-feed-tip-podcast.md)：`tip` 的显示名改为「播客」，只收带来源标签「播客」的节目；教程改显示为观点。待 PR 评审与发布后在 `/all?category=tip` 复核。
 - [WX-A 短推标题与回复体验维护](logs/2026-10-28-P3-04-wx-compact-ux.md)：标题优先、自然回复同义词与默认关闭的语义分类；PR #175 已合并，待发布和手机复测。
 - [BUG3 员工端实体标签显示修复](logs/2026-10-28-BUG3-member-entity-labels.md)：日报和信源覆盖的 `entity:*` 显示为公司名称；已随 PR #173 合并，待发布与员工复验。

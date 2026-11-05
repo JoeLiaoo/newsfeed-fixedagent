@@ -60,6 +60,7 @@ Pi/Codex 发布时必须在归档或构建前完成以上步骤；`changelog:che
 - 保留 Docker 命名卷、旧镜像和旧配置，直到新版本验证完成且回退窗口关闭。
 - `.env` 与凭据只放服务器受限路径；确保 Docker build context 和镜像中不包含 `.env`、`.config/` 或个人数据。
 - `P3_GP_SYNC_ENABLED`、`P3_NOTIFICATIONS_ENABLED`、`P3_DELIVERY_ENABLED` 初始及试运行期间保持 `false`。
+- `MEMBERSHIP_AUTO_APPROVE` 默认不设置：员工注册后等待管理员审核。内网实例需要免审核时，在服务器的 `.env` 写入 `MEMBERSHIP_AUTO_APPROVE=true` 并重建 api 容器（网页容器不加载 `.env`，注册策略由 api 提供）；删除该行并重建 api 即回到待审核，既有待审核账号不受影响。实现与验证见[工作日志](logs/2026-11-05-membership-auto-approve.md)。
 
 ### 首次隔离部署记录（2026-10-22，后续状态见“最新主线发布”）
 

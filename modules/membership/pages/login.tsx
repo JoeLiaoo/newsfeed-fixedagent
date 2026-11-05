@@ -1,20 +1,31 @@
 import { useState, type FormEvent } from "react";
-import { Link, redirect, useNavigate } from "react-router";
+import { Link, redirect, useLoaderData, useNavigate } from "react-router";
 import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Button } from "@aihot/web/components/member-ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@aihot/web/components/member-ui/card";
 import { Input } from "@aihot/web/components/member-ui/input";
 import { Label } from "@aihot/web/components/member-ui/label";
 
+/** Whether the platform still reviews a new account before it may sign in. The api owns the switch. */
+async function autoApprove(): Promise<boolean> {
+  try {
+    const response = await fetch(`${process.env.API_BASE_URL || "http://127.0.0.1:3001"}/api/v1/membership/registration-policy`, { headers: { accept: "application/json" }, cache: "no-store" });
+    if (!response.ok) return false;
+    const policy = await response.json() as { autoApprove?: boolean };
+    return policy.autoApprove === true;
+  } catch { return false; }
+}
+
 export async function loader({ request }: { request: Request }) {
   try {
     const response = await fetch(`${process.env.API_BASE_URL || "http://127.0.0.1:3001"}/api/v1/membership/me`, { headers: { cookie: request.headers.get("cookie") ?? "" } });
     if (response.ok) throw redirect("/");
   } catch (error) { if (error instanceof Response) throw error; }
-  return null;
+  return { autoApprove: await autoApprove() };
 }
 
 export default function LoginPage() {
+  const { autoApprove: skipsApproval } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -24,7 +35,7 @@ export default function LoginPage() {
       const form = new FormData(event.currentTarget);
       const response = await fetch("/api/v1/membership/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: form.get("username"), password: form.get("password") }) });
       const result = await response.json();
-      if (!response.ok) { setMessage(result.error === "pending_approval" ? "账号等待管理员审核。" : "登录失败，请检查用户名、密码或账号状态。"); return; }
+      if (!response.ok) { setMessage(result.error === "pending_approval" ? (skipsApproval ? "账号尚未开通，请联系管理员。" : "账号等待管理员审核。") : "登录失败，请检查用户名、密码或账号状态。"); return; }
       const next = new URLSearchParams(window.location.search).get("next");
       navigate(next?.startsWith("/") && !next.startsWith("//") ? next : "/", { replace: true });
     } catch { setMessage("登录请求失败，请检查网络后重试。"); }
