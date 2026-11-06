@@ -150,7 +150,6 @@ function GpRow({gp,busy,syncMessage,onSave,onSync}:{gp:GP;busy:boolean;syncMessa
     <label className="grid gap-1 text-sm">依据<Input name="sourceRef" defaultValue={gp.source_ref} required/></label>
     <fieldset className="flex flex-wrap gap-3"><legend className="mb-1 text-sm">员工项目分类（核实后才展示）</legend>
       <label className="inline-flex min-h-11 items-center gap-2 text-sm"><Checkbox name="projectGroups" value="citic-alliance" defaultChecked={gp.project_groups.includes("citic-alliance")}/>中信股权联盟</label>
-      <label className="inline-flex min-h-11 items-center gap-2 text-sm"><Checkbox name="projectGroups" value="market-leaders" defaultChecked={gp.project_groups.includes("market-leaders")}/>市场头部机构</label>
     </fieldset>
     <label className="grid gap-1 text-sm">分类依据（分类时必填，至少 8 字）<Input name="projectGroupBasis" defaultValue={gp.project_group_basis||""} maxLength={1000}/></label>
     <div className="flex flex-wrap items-center gap-2"><Button size="sm" disabled={busy} type="submit">保存主体</Button><Button size="sm" variant="outline" disabled={busy||gp.status!=="active"} type="button" onClick={onSync}>请求同步</Button>{syncMessage&&<span role="status" className="text-xs text-ink-3">{syncMessage}</span>}</div>

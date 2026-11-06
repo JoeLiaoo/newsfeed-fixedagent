@@ -16,6 +16,7 @@ import { SourceCheckTimeout, memberSourceAddress, sourceCheckFailure, sourceChec
 import * as cheerio from "cheerio";
 import { PRESET_TAGS } from "./catalog.ts";
 import { autoApproveEnabled } from "./registration.ts";
+import { memberSessionCookie } from "./session-cookie.ts";
 import { ENTITY_TAG_LABELS, memberDisplayTags } from "./tag-labels.ts";
 
 const scrypt = promisify(scryptCallback);
@@ -93,8 +94,7 @@ function body(req: FastifyRequest): Record<string, unknown> {
 }
 
 function installCookie(reply: any, token: string) {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  reply.header("Set-Cookie", `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`);
+  reply.header("Set-Cookie", memberSessionCookie(token, maxAge));
 }
 
 async function issueSession(userId: string, reply: any) {
@@ -159,7 +159,7 @@ export function registerMembership(app: FastifyInstance) {
     if (!validOrigin(req)) return reply.code(403).send({ error: "invalid_origin" });
     const token = cookieToken(req);
     if (token) await sql`DELETE FROM member_sessions WHERE token_hash = ${sha256(token)}`;
-    reply.header("Set-Cookie", `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+    reply.header("Set-Cookie", memberSessionCookie("", 0));
     return { ok: true };
   });
 
