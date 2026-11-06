@@ -26,7 +26,11 @@
     "changelog:apply": "node scripts/apply-employee-changelog.ts",
     "changelog:check": "node scripts/apply-employee-changelog.ts --check",
     "member:bootstrap-admin": "node --env-file-if-exists=.env scripts/bootstrap-admin.ts",
-    "member:seed-gp": "node --env-file-if-exists=.env scripts/seed-gp-candidates.ts"
+    "member:seed-gp": "node --env-file-if-exists=.env scripts/seed-gp-candidates.ts",
+    "gp:import": "node --env-file-if-exists=.env scripts/import-gp-investments.ts",
+    "gp:import-alliance": "node --env-file-if-exists=.env scripts/import-citic-alliance-from-xiniu-md.ts",
+    "kb:export": "node --env-file-if-exists=.env scripts/export-knowledge-base.ts",
+    "kb:import": "node --env-file-if-exists=.env scripts/import-knowledge-base.ts"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.3.0",

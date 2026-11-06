@@ -1,7 +1,7 @@
 // Site navigation in one place: the desktop sidebar's engine and module groups, and the phone's four tabs.
 import type { ReactNode } from "react";
 import { NAV, subjectAfter, withSubject } from "@aihot/site";
-import { BriefcaseBusiness, Building2, FolderKanban, FolderTree, Landmark, Library, Newspaper } from "lucide-react";
+import { BriefcaseBusiness, FolderKanban, FolderTree, Landmark, Library, Newspaper } from "lucide-react";
 import { webModules } from "../../site-modules";
 import { IconBolt, IconBookmark, IconDoc, IconFlame, IconGrid, IconList, IconUser } from "../icons";
 
@@ -48,7 +48,6 @@ const GROUPS: NavGroup[] = [
     items: [
       { to: "/projects/invested-gp", label: "已投GP直投项目", icon: FolderTree },
       { to: "/projects/citic-alliance", label: "中信股权联盟直投项目", icon: Landmark },
-      { to: "/projects/market-leaders", label: "市场头部机构直投项目", icon: Building2 },
     ],
   },
   { id: "knowledge", title: "知识库", icon: Library },

@@ -5,6 +5,7 @@ import { Button } from "@aihot/web/components/member-ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@aihot/web/components/member-ui/card";
 import { Input } from "@aihot/web/components/member-ui/input";
 import { Label } from "@aihot/web/components/member-ui/label";
+import { registerDescription, registerResultMessage, registerSubmitLabel } from "../registration.ts";
 
 /** Whether the platform still reviews a new account before it may sign in. The api owns the switch. */
 export async function loader() {
@@ -34,12 +35,12 @@ export default function RegisterPage() {
     finally { setBusy(false); }
   }
   return <main className="mx-auto w-full max-w-md px-5 py-12"><Card>
-    <CardHeader><CardTitle>员工注册</CardTitle><CardDescription>{autoApprove ? "注册后即可登录。" : "提交后由管理员审核账号。"}</CardDescription></CardHeader>
-    <CardContent>{registered ? <div className="grid gap-4"><Alert role="status">{registered === "active" ? "注册成功，请使用用户名和密码登录。" : "注册已提交，管理员审核通过后即可登录。"}</Alert><Button asChild variant="outline"><Link to="/login">返回登录</Link></Button></div> : <form onSubmit={submit} className="grid gap-4">
+    <CardHeader><CardTitle>员工注册</CardTitle><CardDescription>{registerDescription(autoApprove)}</CardDescription></CardHeader>
+    <CardContent>{registered ? <div className="grid gap-4"><Alert role="status">{registerResultMessage(registered === "active" ? "active" : "pending")}</Alert><Button asChild variant="outline"><Link to="/login">返回登录</Link></Button></div> : <form onSubmit={submit} className="grid gap-4">
       <div className="grid gap-2"><Label htmlFor="username">用户名</Label><Input id="username" name="username" minLength={3} maxLength={40} required autoComplete="username" aria-describedby="username-hint" /><p id="username-hint" className="text-sm text-ink-3">3–40 位，仅支持英文字母、数字、英文句点（.）、下划线（_）和连字符（-）。</p></div>
       <div className="grid gap-2"><Label htmlFor="realName">真实姓名</Label><Input id="realName" name="realName" minLength={2} maxLength={80} required autoComplete="name" /></div>
       <div className="grid gap-2"><Label htmlFor="password">密码（至少 12 位）</Label><Input id="password" name="password" type="password" minLength={12} maxLength={200} required autoComplete="new-password" aria-describedby="password-hint" /><p id="password-hint" className="text-sm text-ink-3">请不要使用个人常用密码，建议为本平台设置独立密码（至少 12 位）。</p></div>
-      <Button type="submit" disabled={busy}>{busy ? "正在提交…" : autoApprove ? "注册" : "提交审核"}</Button>{message && <Alert>{message}</Alert>}
+      <Button type="submit" disabled={busy}>{busy ? "正在提交…" : registerSubmitLabel(autoApprove)}</Button>{message && <Alert>{message}</Alert>}
     </form>}</CardContent>
   </Card></main>;
 }

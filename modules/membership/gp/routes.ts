@@ -18,8 +18,7 @@ const safeOrigin=(req:FastifyRequest)=>{
 };
 
 export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
-  // Keep demo evidence out of the employee query before pagination and filter options.
-  const placeholderSourcePattern = "^https?://([^/@]+\\.)?example\\.(org|com|net)(:[0-9]+)?([/?#]|$)";
+  // 演示域名仍由 employeeSource 标成占位、不给可点击链接；导入的联盟项目没有证据地址，需要留在清单里。
   app.get("/api/v1/membership/gp-projects",async(req,reply)=>{
     reply.header("Cache-Control","private, no-store").header("Vary","Cookie");
     const user=await authenticate(req);
@@ -34,7 +33,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
     const limit=Math.min(100,Math.max(1,requestedLimit));
     const offset=Math.min(100_000,Math.max(0,requestedOffset));
     const motherFund=typeof query.motherFund==="string"?query.motherFund:null;
-    const subfund=typeof query.subfund==="string"?query.subfund:null;
+    const subfund=query.group==="citic-alliance"?null:typeof query.subfund==="string"?query.subfund:null;
     const sector=typeof query.sector==="string"?query.sector:null;
     const province=typeof query.province==="string"?query.province:null;
     const interests=matched?await sql<{tag:string}[]>`SELECT tag FROM member_interest_tags WHERE user_id=${user.id} ORDER BY tag`:[];
@@ -50,7 +49,6 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       LEFT JOIN LATERAL unnest(i.sector_tags) AS sector(tag) ON true
       WHERE i.status='verified' AND g.status='active' AND g.entity_role='gp'
-        AND NOT (COALESCE(i.approved_source_url,'') ~* ${placeholderSourcePattern})
         AND (${query.group??null}::text IS NULL OR ${query.group??null}::text=ANY(g.project_groups))
         AND (NOT ${matched} OR EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id} AND t.tag=ANY(i.sector_tags) AND t.tag<>'战略配售'))`;
     const rows=await sql<{id:string;gp_name:string;investee_name:string;sector_tags:string[];event_date:string|null;status:string;source_url:string|null;mother_fund_name:string|null;subfund_name:string|null;project_province:string|null;province_checked_at:Date|null}[]>`SELECT i.id,g.canonical_name AS gp_name,i.investee_name,i.sector_tags,
@@ -58,7 +56,6 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       i.approved_event_date::text AS event_date,'verified'::text AS status,i.approved_source_url AS source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       WHERE i.status='verified' AND g.status='active' AND g.entity_role='gp'
-        AND NOT (COALESCE(i.approved_source_url,'') ~* ${placeholderSourcePattern})
         AND (${query.group??null}::text IS NULL OR ${query.group??null}::text=ANY(g.project_groups))
         AND (NOT ${matched} OR (
           EXISTS(SELECT 1 FROM member_interest_tags t WHERE t.user_id=${user.id}
@@ -77,7 +74,7 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
         source_url: source.url, source_placeholder: source.placeholder };
     }),pagination:{limit,offset,nextOffset:hasMore?offset+limit:null},
       filter_options:{mother_funds:[...filterOptions!.mother_funds,...(filterOptions!.unknown_mother?["未知"]:[])].sort(),
-        subfunds:[...filterOptions!.subfunds,...(filterOptions!.unknown_subfund?["未知"]:[])].sort(),sectors:filterOptions!.sectors.sort(),
+        subfunds:query.group==="citic-alliance"?[]:[...filterOptions!.subfunds,...(filterOptions!.unknown_subfund?["未知"]:[])].sort(),sectors:filterOptions!.sectors.sort(),
         provinces:[...filterOptions!.provinces,...(filterOptions!.unknown_province?["未知"]:[])].sort()},
       ...(matched?{interest_tags:interestTags}: {})};
   });
@@ -93,11 +90,9 @@ export function registerGpRoutes(app:FastifyInstance,authenticate:Auth) {
       i.approved_event_date::text AS event_date,'verified'::text AS status,i.approved_source_url AS source_url
       FROM member_gp_investments i JOIN member_gp_watchlist g ON g.id=i.gp_id
       WHERE i.id=${id} AND i.status='verified' AND g.status='active' AND g.entity_role='gp'
-        AND NOT (COALESCE(i.approved_source_url,'') ~* ${placeholderSourcePattern})
         AND (${group??null}::text IS NULL OR ${group??null}::text=ANY(g.project_groups))`;
     if(!row) return reply.code(404).send({error:"not_found"});
     const source=employeeSource(row.source_url);
-    if(source.placeholder) return reply.code(404).send({error:"not_found"});
     return {investment:{...row,source_url:source.url,source_placeholder:source.placeholder}};
   });
 
@@ -261,11 +256,11 @@ function optionalName(value:unknown):string|null|undefined{
   return trimmed.length>120?undefined:trimmed||null;
 }
 
-function validProjectGroup(value:unknown):value is undefined|"citic-alliance"|"market-leaders" {
-  return value===undefined||value==="citic-alliance"||value==="market-leaders";
+function validProjectGroup(value:unknown):value is undefined|"citic-alliance" {
+  return value===undefined||value==="citic-alliance";
 }
 function validProjectGroups(value:unknown):string[]|null {
-  if(!Array.isArray(value)||value.length>2||!value.every(item=>item==="citic-alliance"||item==="market-leaders")||new Set(value).size!==value.length) return null;
+  if(!Array.isArray(value)||value.length>1||!value.every(item=>item==="citic-alliance")||new Set(value).size!==value.length) return null;
   return value as string[];
 }
 

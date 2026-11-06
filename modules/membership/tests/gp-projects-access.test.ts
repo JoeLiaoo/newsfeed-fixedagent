@@ -74,20 +74,24 @@ test("GP project list requires an active member and only exposes approved active
   const placeholderId = randomUUID();
   await sql`INSERT INTO member_gp_investments(id,gp_id,investee_key,investee_name,raw_evidence,status,sector_tags,approved_event_date,approved_source_url,approved_by,approved_at)
     VALUES(${placeholderId},${activeGp},'demo-only','演示占位企业',${sql.json({})},'verified',ARRAY['光伏']::text[],'2026-10-22'::date,'https://example.org/demo',${admin!.id},now())`;
-  assert.equal((await app.inject({method:"GET",url:`/api/v1/membership/gp-projects/${placeholderId}`,headers:{cookie}})).statusCode,404);
+  const placeholderDetail = await app.inject({method:"GET",url:`/api/v1/membership/gp-projects/${placeholderId}`,headers:{cookie}});
+  assert.equal(placeholderDetail.statusCode, 200);
+  const placeholderInvestment = (await placeholderDetail.json() as { investment: Record<string, unknown> }).investment;
+  assert.equal(placeholderInvestment.source_placeholder, true);
+  assert.equal(placeholderInvestment.source_url, null);
 
   const page = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects?limit=1", headers: { cookie } });
   assert.equal(page.statusCode, 200);
   const body = await page.json() as { investments: Array<Record<string, unknown>>; pagination: { nextOffset: number | null } };
   assert.equal(body.investments.length, 1);
-  assert.equal(body.investments[0]?.id, approvedId);
+  assert.equal(body.investments[0]?.id, placeholderId);
   assert.equal(body.investments[0]?.gp_name, `有效GP-${suffix}`);
-  assert.equal(body.investments[0]?.investee_name, "已核实企业");
-  assert.equal(body.investments[0]?.event_date, "2026-10-20");
+  assert.equal(body.investments[0]?.investee_name, "演示占位企业");
+  assert.equal(body.investments[0]?.event_date, "2026-10-22");
   assert.deepEqual(body.investments[0]?.sector_tags, ["光伏"]);
   assert.equal(body.investments[0]?.status, "verified");
-  assert.equal(body.investments[0]?.source_url, "https://evidence.test/evidence");
-  assert.equal(body.investments[0]?.source_placeholder, false);
+  assert.equal(body.investments[0]?.source_url, null);
+  assert.equal(body.investments[0]?.source_placeholder, true);
   assert.equal("raw_evidence" in body.investments[0]!, false);
   assert.equal("approved_by" in body.investments[0]!, false);
   assert.equal("approved_at" in body.investments[0]!, false);
@@ -123,21 +127,22 @@ test("GP project list requires an active member and only exposes approved active
   assert.ok(!["raw_evidence", "approved_by", "approved_at", "gp_id", "project_groups", "project_group_basis"].some(field => field in investment));
 
   const allianceList = "/api/v1/membership/gp-projects?group=citic-alliance";
-  const leadersList = "/api/v1/membership/gp-projects?group=market-leaders";
   const names = async (url: string) => ((await (await app.inject({ method: "GET", url, headers: { cookie } })).json()) as {investments:Array<{id:string}>}).investments.map(row => row.id);
   assert.deepEqual(await names(allianceList), [], "unclassified GPs never appear in a collection");
-  assert.deepEqual(await names(leadersList), []);
+  assert.equal((await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects?group=market-leaders", headers: { cookie } })).statusCode, 400);
   assert.equal((await app.inject({ method: "GET", url: `${detailPath}?group=citic-alliance`, headers: { cookie } })).statusCode, 404);
   await sql`UPDATE member_gp_watchlist SET project_groups=ARRAY['citic-alliance']::text[],project_group_basis='人工核实的分类依据' WHERE id=${activeGp}`;
   assert.ok((await names(allianceList)).includes(approvedId));
-  assert.deepEqual(await names(leadersList), []);
   assert.equal((await app.inject({ method: "GET", url: `${detailPath}?group=citic-alliance`, headers: { cookie } })).statusCode, 200);
-  assert.equal((await app.inject({ method: "GET", url: `${detailPath}?group=market-leaders`, headers: { cookie } })).statusCode, 404);
-  await sql`UPDATE member_gp_watchlist SET project_groups=ARRAY['market-leaders']::text[],project_group_basis='人工核实的分类依据' WHERE id=${pausedGp}`;
-  assert.deepEqual(await names(leadersList), [], "paused GP investments stay hidden despite their category");
-  await sql`UPDATE member_gp_watchlist SET project_groups=ARRAY['citic-alliance','market-leaders']::text[] WHERE id=${activeGp}`;
-  assert.ok((await names(leadersList)).includes(approvedId));
-  assert.ok(!(await names(leadersList)).includes(observedId));
+  assert.equal((await app.inject({ method: "GET", url: `${detailPath}?group=market-leaders`, headers: { cookie } })).statusCode, 400);
+  await sql`UPDATE member_gp_investments SET mother_fund_name='中信金石',subfund_name='不应参与筛选' WHERE id=${approvedId}`;
+  assert.ok((await names(`${allianceList}&motherFund=${encodeURIComponent("中信金石")}`)).includes(approvedId));
+  assert.ok((await names(`${allianceList}&motherFund=${encodeURIComponent("中信金石")}&subfund=${encodeURIComponent("别的子基金")}`)).includes(approvedId), "alliance list ignores subfund");
+  assert.equal((await names(`${allianceList}&motherFund=${encodeURIComponent("中信建投资本")}`)).includes(approvedId), false);
+  const allianceOptions = await app.inject({ method: "GET", url: allianceList, headers: { cookie } });
+  const allianceBody = await allianceOptions.json() as { filter_options: { subfunds: string[]; mother_funds: string[] } };
+  assert.deepEqual(allianceBody.filter_options.subfunds, []);
+  assert.ok(allianceBody.filter_options.mother_funds.includes("中信金石"));
 
   await sql`UPDATE member_users SET status='pending' WHERE id=${member!.id}`;
   const inactive = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects", headers: { cookie } });
@@ -149,16 +154,19 @@ test("GP project list requires an active member and only exposes approved active
   const matched = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects?matched=1&limit=1", headers: { cookie } });
   const matchedBody = await matched.json() as { investments: Array<Record<string, unknown>>; interest_tags: string[]; pagination: { nextOffset: number | null } };
   assert.deepEqual([...matchedBody.interest_tags].sort(), ["光伏", "战略配售", "自定义储能", "储能"].sort());
-  assert.ok((await names(`${leadersList}&matched=1`)).includes(approvedId));
   assert.equal(matchedBody.investments.length, 1);
-  assert.equal(matchedBody.investments[0]?.id, approvedId);
+  assert.equal(matchedBody.investments[0]?.id, placeholderId);
   assert.equal(matchedBody.pagination.nextOffset, 1);
   const matchedNext = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects?matched=1&limit=1&offset=1", headers: { cookie } });
   const nextBody = await matchedNext.json() as { investments: Array<Record<string, unknown>>; pagination: { nextOffset: number | null } };
   assert.equal(nextBody.investments.length, 1);
-  assert.equal(nextBody.investments[0]?.investee_name, "自定义标签企业");
+  assert.equal(nextBody.investments[0]?.investee_name, "已核实企业");
   assert.equal(nextBody.pagination.nextOffset, 2);
-  const unknownDate = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects?matched=1&limit=1&offset=2", headers: { cookie } });
+  const custom = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects?matched=1&limit=1&offset=2", headers: { cookie } });
+  const customBody = await custom.json() as { investments: Array<Record<string, unknown>>; pagination: { nextOffset: number | null } };
+  assert.equal(customBody.investments[0]?.investee_name, "自定义标签企业");
+  assert.equal(customBody.pagination.nextOffset, 3);
+  const unknownDate = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects?matched=1&limit=1&offset=3", headers: { cookie } });
   const unknownDateBody = await unknownDate.json() as { investments: Array<Record<string, unknown>>; pagination: { nextOffset: number | null } };
   assert.equal(unknownDateBody.investments[0]?.investee_name, "未知日期企业");
   assert.equal(unknownDateBody.investments[0]?.event_date, null);
@@ -167,5 +175,5 @@ test("GP project list requires an active member and only exposes approved active
 
   const full = await app.inject({ method: "GET", url: "/api/v1/membership/gp-projects", headers: { cookie } });
   const all = (await full.json() as { investments: Array<{ investee_name: string }> }).investments;
-  assert.deepEqual(all.map(row => row.investee_name).sort(), ["已核实企业", "自定义标签企业", "战略配售企业", "标签子串企业", "未匹配企业", "较早核实企业", "未知日期企业"].sort());
+  assert.deepEqual(all.map(row => row.investee_name).sort(), ["演示占位企业", "已核实企业", "自定义标签企业", "战略配售企业", "标签子串企业", "未匹配企业", "较早核实企业", "未知日期企业"].sort());
 });

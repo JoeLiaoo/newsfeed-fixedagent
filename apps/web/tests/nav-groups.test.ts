@@ -15,10 +15,10 @@ const group = (id: string, items: Array<{ to: string; end?: boolean }>): NavGrou
   items: items.map((item) => ({ ...item, label: item.to, icon })),
 });
 const news = group("news", [{ to: "/", end: true }, { to: "/all" }, { to: "/hot" }]);
-const projects = group("projects", [{ to: "/projects/invested-gp" }, { to: "/projects/citic-alliance" }, { to: "/projects/market-leaders" }]);
+const projects = group("projects", [{ to: "/projects/invested-gp" }, { to: "/projects/citic-alliance" }]);
 
-test("both project detail routes retain their collection entry in navigation", () => {
-  for (const slug of ["citic-alliance", "market-leaders"]) {
+test("the alliance detail route retains its collection entry in navigation", () => {
+  for (const slug of ["citic-alliance"]) {
     const path = `/projects/${slug}/project-1`;
     assert.equal(groupOpen({}, projects, path), true);
     assert.equal(sidebarIsActive({ to: `/projects/${slug}` }, path), true);

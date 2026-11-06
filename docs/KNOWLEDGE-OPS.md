@@ -315,6 +315,25 @@ PDF 字节 → 受限渲染器（独立进程，一次一页）→ 页位图
 - **开关与回退**：与网页配图共用 `MEMBER_KNOWLEDGE_FIGURES_ENABLED`（默认关闭）。关闭时 PDF 只按文字层构建，并说明「本次未做页面识图」，行为与未启用本阶段时一致。
 - **没有新迁移**：页图复用 `0194`（材料版本图片清单）、`0195`（图片快照表）与 `0196`（任务图片检查点）；页的位置记在快照表的 `locator` 里。
 
+## 15. 按名称迁移知识库
+
+把一个库导出成目录，再在另一套环境按名称导入。默认名称是 “AI for Science”。没有同名库就新建；已有同名库则把材料并进去。导出含库说明、材料版本、知识页、修订、引用和配图文件，不含问答、任务、审计和贡献。
+
+```bash
+npm run kb:export -- --name "AI for Science" --out dumps/ai-for-science
+npm run kb:import -- --dump dumps/ai-for-science --name "AI for Science" --dry-run
+npm run kb:import -- --dump dumps/ai-for-science --name "AI for Science"
+```
+
+只有 markdown 笔记、还没有编成知识页时，可以把材料包放在 `uploads/ai4s-materials.zip`（不提交压缩包）：
+
+```bash
+npm run kb:import -- --materials uploads/ai4s-materials.zip --name "AI for Science" --dry-run
+npm run kb:import -- --materials uploads/ai4s-materials.zip --name "AI for Science"
+```
+
+材料包只写入原文，并标成已提取文本，不排队编译，也不会调用模型。知识页只随上面的导出目录一起过去。导入需要一名已启用管理员（`npm run member:bootstrap-admin`）。重复运行按内容校验值跳过已有材料。库数量上限仍是 20，含默认库。本次只准备脚本，不在中信主机上执行导入。
+
 ## WX-C1 微信知识库问答（待发布）
 
 网页与微信共用 `knowledge/service.ts` 的 active 库列表、已发布页检索和完整问答；网页会话与已验证 iLink 员工分别生成受信 actor，服务每次重新检查员工 active 与库 active。微信使用 `P3_ILINK_KB_ENABLED=false` 默认关闭，另需 `P3_ILINK_AGENT_ENABLED=true`、`P3_ILINK_READING_REPLIES_ENABLED=true`、`P3_DELIVERY_ENABLED=true`、`MODEL_CALLS_ENABLED=true` 及该员工的 `member_agent_grants` 当前 grant。网站知识库不受微信开关影响。撤权删除 grant 行；解绑、重绑、库归档、引用页修订或材料撤回会阻止已排队回复发送。

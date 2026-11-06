@@ -58,9 +58,11 @@ test("GP admin APIs require admins and paginate filtered observations in stable 
   assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:patchHeaders,payload:{...patchBody,projectGroups:["other"],projectGroupBasis:"分类依据已经核实"}})).statusCode,400);
   assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:patchHeaders,payload:{...patchBody,projectGroups:["citic-alliance"],projectGroupBasis:""}})).statusCode,400);
   assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:patchHeaders,payload:{...patchBody,projectGroups:["citic-alliance"]}})).statusCode,400);
-  assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:patchHeaders,payload:{...patchBody,projectGroups:["citic-alliance","market-leaders"],projectGroupBasis:"分类依据已经核实"}})).statusCode,200);
+  assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:patchHeaders,payload:{...patchBody,projectGroups:["citic-alliance","market-leaders"],projectGroupBasis:"分类依据已经核实"}})).statusCode,400);
+  assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:patchHeaders,payload:{...patchBody,projectGroups:["market-leaders"],projectGroupBasis:"分类依据已经核实"}})).statusCode,400);
+  assert.equal((await app.inject({method:"PATCH",url:groupPath,headers:patchHeaders,payload:{...patchBody,projectGroups:["citic-alliance"],projectGroupBasis:"分类依据已经核实"}})).statusCode,200);
   const [grouped]=await sql<{project_groups:string[];project_group_basis:string}[]>`SELECT project_groups,project_group_basis FROM member_gp_watchlist WHERE id=${gp}`;
-  assert.deepEqual(grouped,{project_groups:["citic-alliance","market-leaders"],project_group_basis:"分类依据已经核实"});
+  assert.deepEqual(grouped,{project_groups:["citic-alliance"],project_group_basis:"分类依据已经核实"});
 
   const first=await app.inject({method:"GET",url:"/api/v1/membership/admin/gp-observations?status=observed&limit=1",headers:{cookie:adminCookie}});
   assert.equal(first.statusCode,200);

@@ -14,7 +14,25 @@ P3 基础管线经 [PR #4](https://github.com/JoeLiaoo/newsfeed-fixedagent/pull/
 
 员工清单 `GET /api/v1/membership/gp-projects` 和单项详情 `GET /api/v1/membership/gp-projects/:id` 使用同一会话鉴权与可见范围：仅有效 GP 的 `verified` 投资；无会话返回 401，未知、未核实或 GP 已暂停的项目详情返回 404。详情仅返回项目名称、GP 名称、审核赛道、日期、状态与可展示来源；内部原始证据和审核人字段不下发。演示域名来源仍标作占位。发布后可用已审核项目及隐藏状态项目各核对一次，不能凭列表存在推断真实投资事实已验收。
 
-员工「中信股权联盟」及「市场头部机构」清单与详情分别使用同一接口的 `group=citic-alliance`、`group=market-leaders` 参数。`member_gp_watchlist.project_groups` 默认为空，原候选导入与站点 seed 均不自动认定分类。管理员在 `/settings/admin-gps` 核实 GP 身份后，可选择一个或两个分类并填写至少 8 字的分类依据；无依据的分类被拒绝。员工仅看到分类内有效 GP 的已核实投资，未核实、暂停、未分类及跨分类详情均不可见。分类只表示机构所属清单，不为投资事实背书；仍须分别核对每条投资的日期和证据。分类依据保留在后台，不进入员工 API。
+员工「中信股权联盟」清单与详情使用同一接口的 `group=citic-alliance`。`group=market-leaders` 已不再接受。`member_gp_watchlist.project_groups` 默认为空，原候选导入与站点 seed 均不自动认定分类。管理员在 `/settings/admin-gps` 核实 GP 身份后，可选择“中信股权联盟”并填写至少 8 字的分类依据；无依据的分类被拒绝。员工仅看到分类内有效 GP 的已核实投资。联盟页的投资机构来自 `mother_fund_name`，只使用“中信金石”和“中信建投资本”；该页忽略子基金参数。分类只表示机构所属清单，不为投资事实背书。分类依据保留在后台，不进入员工 API。
+
+把已有 GP 和已核实投资灌进空库：
+
+```bash
+npm run gp:import -- --file dump.json --dry-run
+npm run gp:import -- --file dump.json
+```
+
+JSON 和 CSV 字段写在 `modules/membership/gp/dump.ts`。没有 https 来源时记成导入占位。样例 `modules/membership/tests/fixtures/gp-investments.sample.json` 只给测试用，不要导入中信环境。
+
+把烯牛抄录的联盟项目灌进 `citic-alliance`。压缩包放在 `uploads/nf-alliance-pages.zip`，不提交进仓库：
+
+```bash
+npm run gp:import-alliance -- --dry-run
+npm run gp:import-alliance -- --file uploads/nf-alliance-pages.zip
+```
+
+两条命令都需要数据库里已有一名启用的管理员（`npm run member:bootstrap-admin`）。重复运行按稳定键更新，不会把审核时间改成当前时间。导入的是抄录表，不是已核对的投资事实。
 
 已投 GP 直投项目列表的 Issue #128 扩展了同一列表 API：母基金、子基金、赛道、省份条件在数据库分页前按 AND 组合。历史记录的母/子基金关系与省份默认未知，不会由 GP 名称、地区片段或既有原始响应猜填。管理员在观察记录审核表维护基金关系时须填写依据及 HTTPS 来源；核验省份按钮使用 `XINHUA_MCP_API_KEY` 调用既有新华财经公司画像，并要求返回的企业 ID 和名称与被投主体一致。缺少主体 ID、供应商不可用或不能唯一解析省级地址时保留“未知”。这条后台查询不新增运行开关；未配置凭据时核验返回失败、员工仍看到未知。该列表筛选不表示 GP 数据或投资事实业务验收完成。
 

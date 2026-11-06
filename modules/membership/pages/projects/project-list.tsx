@@ -5,9 +5,13 @@ import { Alert } from "@aihot/web/components/member-ui/alert";
 import { Badge } from "@aihot/web/components/member-ui/badge";
 import { Button } from "@aihot/web/components/member-ui/button";
 import { Card } from "@aihot/web/components/member-ui/card";
+import { allianceInstitutionOptions } from "../../gp/alliance.ts";
 import { createGpProjectsLoader, initialGpProjectsState } from "./invested-gp-state.ts";
+import { projectCardFundLine, projectQueryFilters, type ProjectCollection } from "./project-collection.ts";
 
-export type ProjectCollection = {title:string;path:string;group?:"citic-alliance"|"market-leaders"};
+export type { ProjectCollection } from "./project-collection.ts";
+
+type Filters = { motherFund: string; subfund: string; sector: string; province: string };
 
 function displayDate(value: string | null) {
   if (!value) return "日期未知";
@@ -17,48 +21,42 @@ function displayDate(value: string | null) {
 
 export function ProjectList({collection}:{collection:ProjectCollection}) {
   const [searchParams,setSearchParams] = useSearchParams();
-  const matched = searchParams.get("matched") === "1";
-  const filters={motherFund:searchParams.get("motherFund")||"",subfund:searchParams.get("subfund")||"",sector:searchParams.get("sector")||"",province:searchParams.get("province")||""};
+  const filters = projectQueryFilters(collection, searchParams);
   const filterKey=JSON.stringify(filters);
-  const [{items,interestTags,filterOptions,nextOffset,loading,loadingMore,message,retry},setPage] = useState(initialGpProjectsState);
+  const [{items,filterOptions,nextOffset,loading,loadingMore,message,retry},setPage] = useState(initialGpProjectsState);
   const [loader] = useState(() => createGpProjectsLoader(setPage, () => { location.href = "/login"; },collection.group));
   useEffect(() => {
-    void loader.load(matched, 0, false, filters);
+    void loader.load(0, false, filters);
     return () => loader.cancel();
-  }, [loader, matched, filterKey]);
-  function changeFilter(name:keyof typeof filters,value:string){
+  }, [loader, filterKey]);
+  function changeFilter(name:keyof Filters,value:string){
     const next=new URLSearchParams(searchParams);
+    next.delete("matched");
+    if (collection.institutions) next.delete("subfund");
     if(value)next.set(name,value);else next.delete(name);
     next.delete("offset");setSearchParams(next);
   }
+  const motherOptions = collection.institutions ? allianceInstitutionOptions(filterOptions.mother_funds) : filterOptions.mother_funds;
+  const motherLabel = collection.institutions?.label ?? "母基金";
+  const motherAll = collection.institutions?.allLabel ?? "全部母基金";
 
   return <main className="mx-auto w-full max-w-5xl px-5 py-8">
     <header className="mb-6">
       <h1 className="text-2xl font-semibold tracking-tight text-ink">{collection.title}</h1>
-      <nav aria-label="GP 项目筛选" className="mt-4 flex flex-wrap gap-2">
-        <Button asChild variant={matched ? "outline" : "default"}><Link to={collection.path} aria-current={!matched?"page":undefined}>全部已核实</Link></Button>
-        <Button asChild variant={matched ? "default" : "outline"}><Link to={`${collection.path}?matched=1`} aria-current={matched?"page":undefined}>与我关注匹配</Link></Button>
-      </nav>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="已投项目筛选条件">
-        <label className="grid gap-1 text-sm">母基金<select value={filters.motherFund} onChange={event=>changeFilter("motherFund",event.target.value)} className="min-h-11 rounded-control border border-line bg-surface px-3 text-base text-ink sm:text-sm"><option value="">全部母基金</option>{filterOptions.mother_funds.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
-        <label className="grid gap-1 text-sm">子基金<select value={filters.subfund} onChange={event=>changeFilter("subfund",event.target.value)} className="min-h-11 rounded-control border border-line bg-surface px-3 text-base text-ink sm:text-sm"><option value="">全部子基金</option>{filterOptions.subfunds.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+      <div className={collection.institutions ? "mt-4 grid gap-3 sm:grid-cols-3" : "mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"} aria-label="已投项目筛选条件">
+        <label className="grid gap-1 text-sm">{motherLabel}<select value={filters.motherFund} onChange={event=>changeFilter("motherFund",event.target.value)} className="min-h-11 rounded-control border border-line bg-surface px-3 text-base text-ink sm:text-sm"><option value="">{motherAll}</option>{motherOptions.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+        {collection.institutions ? null : <label className="grid gap-1 text-sm">子基金<select value={filters.subfund} onChange={event=>changeFilter("subfund",event.target.value)} className="min-h-11 rounded-control border border-line bg-surface px-3 text-base text-ink sm:text-sm"><option value="">全部子基金</option>{filterOptions.subfunds.map(value=><option key={value} value={value}>{value}</option>)}</select></label>}
         <label className="grid gap-1 text-sm">赛道<select value={filters.sector} onChange={event=>changeFilter("sector",event.target.value)} className="min-h-11 rounded-control border border-line bg-surface px-3 text-base text-ink sm:text-sm"><option value="">全部赛道</option>{filterOptions.sectors.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
         <label className="grid gap-1 text-sm">项目区域（省）<select value={filters.province} onChange={event=>changeFilter("province",event.target.value)} className="min-h-11 rounded-control border border-line bg-surface px-3 text-base text-ink sm:text-sm"><option value="">全部省份</option>{filterOptions.provinces.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
       </div>
     </header>
 
     {message && <Alert className="mb-5 flex flex-wrap items-center justify-between gap-3" role="alert">
-      <span>{message}</span><Button variant="outline" onClick={() => void loader.load(matched, retry.offset, retry.append, filters)}>重试</Button>
+      <span>{message}</span><Button variant="outline" onClick={() => void loader.load(retry.offset, retry.append, filters)}>重试</Button>
     </Alert>}
 
     {loading
       ? <p className="text-sm text-ink-3" role="status">正在加载项目…</p>
-        : matched && !interestTags.length && !message
-          ? <Card className="px-6 py-10">
-            <p className="font-medium text-ink">还没有选择关注赛道</p>
-            <p className="mt-2 text-sm text-ink-3">选择关注赛道后，这里会显示与之匹配的已核实投资。</p>
-            <Button asChild variant="outline" className="mt-4"><Link to="/settings/interests">设置关注赛道</Link></Button>
-          </Card>
         : items.length
         ? <>
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -67,7 +65,7 @@ export function ProjectList({collection}:{collection:ProjectCollection}) {
                 <div className="min-w-0">
                   <p className="break-words text-base font-semibold text-ink"><Link className="rounded-control text-accent underline-offset-4 after:absolute after:inset-0 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" to={`${collection.path}/${encodeURIComponent(item.id)}`}>{item.investee_name}</Link></p>
                   <p className="mt-1 break-words text-sm text-ink-3">{item.gp_name}</p>
-                  <p className="mt-1 break-words text-xs text-ink-3">母基金：{item.mother_fund_name||"未知"} · 子基金：{item.subfund_name||"未知"} · 项目区域（省）：{item.project_province}</p>
+                  <p className="mt-1 break-words text-xs text-ink-3">{projectCardFundLine(collection, item)}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {item.sector_tags.length
@@ -88,15 +86,15 @@ export function ProjectList({collection}:{collection:ProjectCollection}) {
             </li>)}
           </ul>
           {nextOffset !== null && <div className="mt-6 flex justify-center">
-            <Button variant="outline" disabled={loadingMore} onClick={() => void loader.load(matched, nextOffset, true, filters)}>
+            <Button variant="outline" disabled={loadingMore} onClick={() => void loader.load(nextOffset, true, filters)}>
               {loadingMore ? "正在加载…" : "加载更多"}
             </Button>
           </div>}
         </>
         : message ? null : <Card className="px-6 py-12 text-center">
-          <p className="font-medium text-ink">{matched ? "暂无匹配的已核实投资" : Object.values(filters).some(Boolean) ? "没有符合筛选条件的项目" : "暂无已核实的直投项目"}</p>
-          <p className="mt-2 text-sm text-ink-3">{matched ? "后续审核通过且赛道标签与关注重合的投资会显示在这里。" : Object.values(filters).some(Boolean) ? "可调整或清除筛选条件后重试。" : "经审核并处于有效状态的项目会显示在这里。"}</p>
-          {Object.values(filters).some(Boolean)&&<Button variant="outline" className="mt-4" onClick={()=>setSearchParams(matched?{matched:"1"}:{})}>清除筛选</Button>}
+          <p className="font-medium text-ink">{Object.values(filters).some(Boolean) ? "没有符合筛选条件的项目" : "暂无已核实的直投项目"}</p>
+          <p className="mt-2 text-sm text-ink-3">{Object.values(filters).some(Boolean) ? "可调整或清除筛选条件后重试。" : "经审核并处于有效状态的项目会显示在这里。"}</p>
+          {Object.values(filters).some(Boolean)&&<Button variant="outline" className="mt-4" onClick={()=>setSearchParams({})}>清除筛选</Button>}
         </Card>}
   </main>;
 }
